@@ -1,5 +1,41 @@
 # M5 transposition table: implementation and validation
 
+## PR #10 cancellation review follow-up
+
+Traversal move enumeration, traversal polling and TT intern/probe polling now
+call the same private cancellation helper, and the invocation explicitly catches
+`detail::SearchCancelled`. The reviewed head already aliased its local name to
+that shared type; this update removes the alias and duplicated throwing sites
+so the common exception boundary is visible directly.
+
+`m5_search` now deterministically requests cancellation **inside** exact TT
+candidate verification, after at least 32 history nodes have been visited in a
+257-occurrence context. Both before-first-commit and after-depth-1 cases assert
+`cancelled`, canonical fallback or unchanged committed MultiPV, balanced LIFO
+restoration, unchanged caller root/history, usable evaluator, retained completed
+cache entries, and no controller error-clear. A subsequent uncancelled search
+matches the exhaustive result, also checking guard/prefix cleanup and cache reuse.
+Temporarily replacing the shared traversal exception alias with an unrelated
+type made this regression fail with the expected normal-cancellation assertion;
+the mutation was removed before validation and publication.
+
+The deterministic fixture uses an idle-configured, per-table private verification
+observer. It requests the real cancellation source inside the history loop;
+the next production cancellation poll throws the exception. It does not throw
+from an evaluator or progress callback, use sleeps, depend on thread scheduling,
+or alter the public API. Its one pointer is included in `sizeof(Impl)` and the
+existing strict capacity accounting. Earlier benchmark/CI numbers below describe
+the original implementation commit, before this observer was added; fresh review
+validation and CI evidence are recorded on PR #10.
+
+Fresh local full-suite runs after this change: native Debug **8/8, 53.73 s**,
+Release **8/8, 4.20 s**, Profile **8/8, 3.58 s**. Commands were
+`cmake --build --preset native-{debug,release,profile}` followed by
+`ctest --preset native-{debug,release,profile} --output-on-failure` (each preset
+separately). The existing ASan/UBSan build was rebuilt for `m5_search` and passed
+with `ASAN_OPTIONS=detect_leaks=0`. These elapsed times include concurrent local
+validation activity and are correctness evidence, not benchmark comparisons.
+
 ## Base, scope and public contract
 
 `m5/transposition-table` starts at approved main

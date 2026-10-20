@@ -55,7 +55,6 @@ bool SearchScore::operator==(const SearchScore &b) const noexcept {
 }
 
 namespace {
-using Cancelled = detail::SearchCancelled;
 struct OrderedMove {
   std::string text;
   std::unique_ptr<Move> move;
@@ -64,8 +63,7 @@ std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
                                        const CancellationToken *token = nullptr) {
   std::vector<OrderedMove> result;
   for (auto &m : c.legal_moves(p)) {
-    if (token && token->requested())
-      throw Cancelled{};
+    if (token) detail::tt_poll(*token);
     result.push_back({c.encode_move(p, *m), std::move(m)});
   }
   std::sort(result.begin(), result.end(),
@@ -203,8 +201,7 @@ struct Traversal {
   std::vector<std::string> path{};
   detail::TTSession *cache = nullptr;
   void poll() const {
-    if (cancellation.requested())
-      throw Cancelled{};
+    detail::tt_poll(cancellation);
   }
   std::vector<OrderedMove> moves(bool hints) {
     poll();
@@ -621,7 +618,8 @@ IterativeSearchResult iterative_search(
                                     : IterativeSearchStatus::depth_limit_reached;
       }
     }
-  } catch (const Cancelled &) {
+  // Traversal and TT intern/probe polls must share this cancellation boundary.
+  } catch (const detail::SearchCancelled &) {
     r.status = IterativeSearchStatus::cancelled;
     if (!r.completed)
       r.unevaluated_fallback = std::move(fallback);

@@ -65,6 +65,7 @@ struct TranspositionTable::Impl {
   std::size_t buckets = 0, slots = 0, nodes = 0, allocated = 0, used = 0;
   std::uint32_t free_head = 0;
   std::uint64_t tick = 0, mask = UINT64_MAX;
+  void (*verification_observer)(std::uint64_t) noexcept = nullptr;
   explicit Impl(std::size_t bucket_count) : buckets(bucket_count) {
     slots = buckets * ways; nodes = slots * 8;
     // Every component has at most alignof(Entry); explicit alignment below.
@@ -151,6 +152,11 @@ void TranspositionTable::resize(std::size_t bytes) {
   capacity_.store(impl_ ? impl_->allocated : 0); entries_.store(0);
 }
 namespace detail {
+void TTAccess::observe_verification(TranspositionTable &t,
+                                   void (*observer)(std::uint64_t) noexcept) {
+  Exclusive idle(t.active_);
+  if (t.impl_) t.impl_->verification_observer = observer;
+}
 std::uint64_t signature_hash(const RepetitionSignature &s) {
   std::uint64_t h = 1469598103934665603ULL;
   for (auto p : s.pieces) h = (h ^ std::uint64_t(p)) * 1099511628211ULL;
@@ -258,7 +264,9 @@ TTProbe TTAccess::probe(TranspositionTable &t, const ChessEvalPosition &snapshot
       // probabilistic equality test is needed on a candidate hit.
       for (auto &[key, count] : counts) { tt_poll(token); count.verified = 0; }
       for (auto id = e.tail; id != 0 && id != invalid; id = p.history[id].previous) {
-        tt_poll(token); ++stats.verified_history_nodes;
+        ++stats.verified_history_nodes;
+        if (p.verification_observer) p.verification_observer(stats.verified_history_nodes);
+        tt_poll(token);
         auto found = counts.find(p.history[id].signature);
         if (found == counts.end()) { match = false; break; }
         ++found->second.verified;

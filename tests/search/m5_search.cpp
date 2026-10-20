@@ -242,6 +242,60 @@ struct Owner {
     return r;
   }
 };
+CancellationSource *verification_cancellation = nullptr;
+std::uint64_t verification_cancel_at = 0;
+void cancel_inside_verification(std::uint64_t visited) noexcept {
+  if (visited >= verification_cancel_at) verification_cancellation->request();
+}
+void cancellation_inside_tt_verification() {
+  Tree t, subtree;small(subtree);
+  constexpr int stem = 256;
+  for (int i=0;i<stem;++i)t.nodes.push_back({i%2?Side::black:Side::white,{i+1}});
+  for (auto node:subtree.nodes) {
+    for (auto &child:node.children)child+=stem;
+    t.nodes.push_back(std::move(node));
+  }
+  auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p,true);
+  for (int i=0;i<stem;++i) {
+    h=h.after_move(t,*p,"a1a2");auto m=t.decode_move(*p,"a1a2");auto u=t.make_move(*p,*m);
+  }
+  const auto balance=t.balance;auto e=evaluator();Owner owner;
+  owner.table.resize(1024*1024);
+  auto reference=iterative_search(t,*p,h,*e,{2,false,3,false});
+  auto depth_one=iterative_search(t,*p,h,*e,{1,false,3,false});
+  equal_result(owner.run(t,*p,h,*e,{2,true,3,false}),reference);
+  const auto retained=owner.table.entry_count();check(retained>0,"prime completed TT entries");
+  for (bool after_commit:{false,true}) {
+    CancellationSource source;verification_cancellation=&source;
+    verification_cancel_at=after_commit?UINT64_MAX:32;
+    TTAccess::observe_verification(owner.table,cancel_inside_verification);
+    int events=0;
+    auto r=owner.run(t,*p,h,*e,{2,true,3,false},source.token(),[&](CompletedDepth d) {
+      ++events;check(d.depth==1,"only first depth committed before TT cancellation");
+      verification_cancel_at=d.statistics.transposition.verified_history_nodes+32;
+    });
+    TTAccess::observe_verification(owner.table,nullptr);
+    check(r.status==IterativeSearchStatus::cancelled && !owner.cleared && e->usable(),
+          "TT history cancellation is normal cancellation, never owner-clearing search error");
+    check(r.statistics.transposition.verified_history_nodes>=32 && source.token().requested(),
+          "request originated inside long-history candidate verification");
+    if (after_commit) {
+      check(events==1 && r.completed && r.completed->depth==1 && !r.unevaluated_fallback,
+            "TT cancellation retains only committed depth");
+      equal_line(r.completed->best,depth_one.completed->best);
+      check(r.completed->multipv.size()==depth_one.completed->multipv.size(),"committed ranking size retained");
+      for(size_t i=0;i<r.completed->multipv.size();++i)
+        equal_line(r.completed->multipv[i],depth_one.completed->multipv[i]);
+    } else check(events==0 && !r.completed && r.unevaluated_fallback==ChessDecision{DecisionKind::play,"a1a2"},
+                 "TT cancellation before commit retains canonical unevaluated fallback");
+    check(t.balance==balance && t.id(*p)==stem && h.matches_root(t,*p) && h.occurrences().size()==257,
+          "TT cancellation restores every make/undo and caller history");
+    check(owner.table.entry_count()>=retained,"normal TT cancellation retains completed cached entries");
+    equal_result(owner.run(t,*p,h,*e,{2,true,3,false}),reference);
+  }
+  verification_cancellation=nullptr;
+  std::cout<<"long-history TT verification cancellation retains fallback/committed depth, cache and LIFO state passed\n";
+}
 void cancellation_and_errors() {
   Tree t;small(t);auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p,true);auto e=evaluator();Owner owner,unrelated;
   auto reference=iterative_search(t,*p,h,*e,{2,false,3,false});
@@ -313,6 +367,6 @@ void ordered_trap_and_certification() {
 }
 int main(int argc,char**argv) try {
   if(argc>1)digest=argv[1];
-  generated();context_and_bounds();mate_races();real_rules();memory_and_lifetime();cancellation_and_errors();ordered_trap_and_certification();
+  generated();context_and_bounds();mate_races();real_rules();memory_and_lifetime();cancellation_inside_tt_verification();cancellation_and_errors();ordered_trap_and_certification();
   std::cout<<"M5 transposition table passed\n";
 } catch(const std::exception&e){std::cerr<<"M5 failure: "<<e.what()<<'\n';return 1;}

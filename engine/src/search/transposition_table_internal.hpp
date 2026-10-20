@@ -35,6 +35,9 @@ struct TTProbe {
 // Private access also supports deliberate collision/bound fixtures, without
 // exposing injectable hashing or raw entry mutation in the public API.
 struct TTAccess {
+  // Private deterministic fixture seam, per table and configured only while idle.
+  // The observer runs inside exact history verification before its next poll.
+  static void observe_verification(TranspositionTable &, void (*)(std::uint64_t) noexcept);
   static bool acquire(TranspositionTable &);
   static void release(TranspositionTable &) noexcept;
   static void force_collisions(TranspositionTable &, bool);
