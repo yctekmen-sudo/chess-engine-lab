@@ -148,3 +148,30 @@ CTest includes `m2_evaluation`, `abi_c`, and `abi_cpp` in addition to M0/M1.
 The M2 host enforces 1 MiB JSON, 64 nesting levels and 4 KiB diagnostic buffers.
 `build/native-release/m2_benchmark /absolute/path/to/libmaterial_evaluator.so`
 measures conversion and host/ABI evaluation; see `docs/m2-validation.md`.
+
+## M3 basic search and profiling
+
+Link `ChessEngineLab::Search` and include `chess_lab/search.hpp`. For example,
+with an existing usable `Evaluator& evaluator`:
+
+```cpp
+auto core = chess_lab::create_chess_core();
+auto root = core->initial_position();
+auto history = chess_lab::GameHistory::starting_at(*core, *root, true);
+auto result = chess_lab::search(*core, *root, history, evaluator, {3, true});
+// Check result.status before reading optional decision/score. Never substitute
+// a move for an EVALUATOR_FAILED or SEARCH_ERROR result.
+```
+
+For imported FEN use the default `complete=false`; record known actual moves
+with immutable `after_move`, or construct a history with `replay`. The final
+root must match the history including clocks. Callers serialize evaluator
+replacement with search. Native/WASM share the same synchronous API and tests.
+
+Use `native-profile` in the configure/build/test preset commands for optimized
+symbols and frame pointers. `m3_benchmark` takes a native evaluator path,
+depth, measured iterations, warm-up count, optional FEN and optional actual
+move replay. It runs both pruning modes. See [M3 validation](m3-validation.md)
+for exact invocations, counter definitions, Release measurements and sampling
+profiler commands. External profilers and privileged hardware counters are
+optional; normal builds do not log or timestamp nodes.

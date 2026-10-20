@@ -136,7 +136,9 @@ ctest --preset native-profile --output-on-failure
 ```
 
 All six tests passed locally in Debug (53.63 s), Release (3.51 s), and
-Profile (5.30 s), including M0/M1/M2, both ABI layouts and M3. These suite
+Profile (5.30 s), including M0/M1/M2, both ABI layouts and M3.
+After the final fixture/provenance additions, Debug M3 passed again (27.36 s),
+Release passed all six again (1.17 s), and Profile M3 passed again (0.57 s). These suite
 wall times include concurrent build activity and are not benchmarks. Final CI
 evidence is recorded below.
 
@@ -152,6 +154,11 @@ cmake --build build/sanitize-m3 --parallel 2
 ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build/sanitize-m3 --output-on-failure
 ```
 
+All six ASan/UBSan suites passed (152.83 s), including M3 (94.08 s), with
+no reported runtime sanitizer errors. A missing-field initializer warning in
+the tree fixture was corrected explicitly; no production change was needed. After rebuilding the final fixture, M3
+passed ASan/UBSan again (117.14 s), without compiler warnings or reported
+runtime sanitizer errors.
 Leak detection is disabled for this managed execution environment; no leak
 sanitizer validation is claimed.
 
@@ -209,6 +216,7 @@ For external Linux sampling, install perf where supported and run a longer
 workload (or attach `perf record -p PID -g --call-graph dwarf`):
 
 ```sh
+mkdir -p work
 perf record -o work/m3-perf.data -g --call-graph dwarf -- \
   build/native-profile/m3_benchmark "$PWD/build/native-profile/libmaterial_evaluator.so" 3 100 3
 perf report -i work/m3-perf.data --inline
@@ -228,7 +236,83 @@ overhead; compare normal Release independently, never as interchangeable timings
 No always-on hot-path instrumentation was added and no M1/M2 optimization is
 included in this milestone.
 
-Measured Release results, separate profile smoke results, and CI links follow.
+### Observed Release measurements
+
+Serial runs, with no concurrent builds/tests, no profiler, no CPU affinity and
+no instrumented allocator. The VM exposes three CPUs with a two-CPU cgroup
+quota (`cpu.max = 200000 100000`); shared scheduling remains a limitation.
+Each mode has one warm-up search, then three measured searches at depth 3.
+Counts below are **per search**, identical across the three measured runs.
+These are observational timings, not confidence intervals or universal speedups.
+
+Release evaluator fingerprint:
+`3eb703deada5c36e85443bee37435625eceadf2b9fa2182a553b6ab36803ceb0`.
+Effective configuration:
+`{"bishop_value":3.25,"knight_value":3,"pawn_value":1,"queen_value":9,"rook_value":5}`.
+Both workloads have a single recorded occurrence with an unknown prefix and no
+replay moves. Default workload FEN and command are given above. Pawn workload:
+
+```sh
+build/native-release/m3_benchmark "$PWD/build/native-release/libmaterial_evaluator.so" 3 3 1 \
+  '4k3/8/8/8/8/8/P7/4K3 b - - 0 1'
+```
+
+| Release workload | Alpha-beta | Nodes | Evaluations | Cutoffs | Run times (ms) | Decision / root score |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| Initial | off | 9323 | 8902 | 0 | 517.118069, 512.239855, 491.999384 | PLAY a2a3 / Finite(0) |
+| Initial | on | 546 | 485 | 38 | 29.669299, 29.269636, 29.887340 | PLAY a2a3 / Finite(0) |
+| Black-to-move pawn | off | 279 | 238 | 0 | 1.084324, 1.080950, 1.202750 | PLAY e8d7 / Finite(1) |
+| Black-to-move pawn | on | 57 | 40 | 10 | 0.160095, 0.160570, 0.185551 | PLAY e8d7 / Finite(1) |
+
+Final rolling checksum after both modes and their warm-ups:
+initial `4369480127475266195`; pawn `4673612655167615891`.
+Separate untimed result inspection confirmed both modes return PVs
+`a2a3 a7a5 a1a2` / Finite(0) for initial and
+`e8d7 a2a3 d7c6` / Finite(1) for the pawn fixture.
+The checksum consumes score, decision and PV; equal-score move ties are common
+with the material-only evaluator, so this workload strongly favors pruning on
+equality. No claim is made about other evaluators or positions. Intended-claim
+probes perform extra make/undo/snapshot work even when no draw is available;
+that cost is included but not counted as visited search nodes.
+
+### Separate profile-build smoke workload
+
+The identical initial-position workload ran successfully in native-profile,
+with the same nodes/evaluations/cutoffs/decision and final checksum. Profile
+evaluator fingerprint:
+`5fc336739aa4069fecd996020484ee6d3c2c2eda527ce1b4c08b77277b757acd`.
+This differs from Release because identity includes build/artifact information.
+No external profiler was attached. Times (ms): off
+540.547029, 559.816513, 594.249238; on 32.865600, 29.750050, 32.102243.
+These are profile-build smoke timings, **not** the canonical Release baseline.
+`readelf -S build/native-profile/m3_benchmark` confirmed `.debug_info` and
+`.debug_line`; generated Ninja compile flags confirmed frame pointers on core,
+evaluation, search and benchmark. `perf` is not installed in this environment;
+no sampling stacks, allocations, PMU measurements or profiler overhead were
+measured. The commands above are repeatable instructions for a supported host.
+
+## Observed GitHub Actions
+
+Implementation/test commit: `065d30886cb238a7ce0535754899af68693f48c8`.
+PR: https://github.com/yctekmen-sudo/chess-engine-lab/pull/4
+
+- [Native PR run 39461230316](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39461230316):
+  completed successfully in all three matrix configurations (Debug, Release,
+  Profile): 6/6 each, 22.20 s / 1.17 s / 1.16 s respectively. Ubuntu 24.04,
+  GCC/G++ 13.3.0. M3 durations: 12.10 s / 0.49 s / 0.39 s.
+- [WASM PR run 39461230712](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39461230712):
+  configure/build and all 6/6 tests passed (92.54 s): M0 0.06 s, M1 48.78 s,
+  M2 0.64 s, C layout 0.03 s, C++ layout 0.04 s, M3 42.87 s. Logs confirm
+  the generated-tree and genuine-chess references, FIDE rules, PV, history,
+  late failure/quarantine and restoration checks. Emscripten 4.0.10,
+  SDK Node 22.16.0, Ubuntu 24.04. The M3 encompassing WASM SHA-256 was
+  `b4c84130483fb5cf2e0b568d686e7ae79cfa970e4edff637d6cf940c22db7e4c`.
+  The existing M2 artifact digest remained
+  `6e843873b5aa63dc49ac0300c2ee6b06de342b25a30d8674e1816f437f7298e6`.
+  This establishes Node/WASM correctness, not browser/device portability.
+
+The report/readme/development follow-up changes documentation only; production
+source and tests are those of the commit above.
 
 ## Limitations and review boundary
 
