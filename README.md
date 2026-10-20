@@ -2,14 +2,14 @@
 
 C++20 chess engine and experimentation platform, following the approved
 [architecture](docs/architecture-v1.0.md) and
-[milestone kickoff](docs/codex-kickoff-m0-m1.md).
+[M4 kickoff](docs/codex-kickoff-m4.md).
 
-Current implementation: **M3 basic search**, on top of the M1 chess core and
-M2 evaluator host/C ABI. Search provides fixed-depth minimax, optional
-alpha-beta, structured scores, FIDE draw claims and deterministic principal
-variations. See [M3 validation](docs/m3-validation.md) for commands, measured
-benchmarks, test evidence and limitations. M3 awaits architecture/code review;
-M4 has not begun.
+Current implementation: **M4 iterative search**, on top of the M1 chess core,
+M2 evaluator host/C ABI and preserved M3 fixed-depth API. Search adds cooperative
+cancellation, completed-depth progress, exact ranked MultiPV and optional
+previous-PV ordering. See [M4 validation](docs/m4-validation.md) for the API,
+commands, tests, measured costs and platform limits, and [M3 validation](docs/m3-validation.md)
+for the fixed-depth baseline. M4 awaits architecture/code review.
 
 ## Build and test
 

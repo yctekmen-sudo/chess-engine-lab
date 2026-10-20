@@ -1,4 +1,4 @@
-# Development workflow (M1)
+# Development workflow
 
 ## Native prerequisites and commands
 
@@ -87,9 +87,10 @@ three WASM commands above. A preset alone is not portability evidence.
 ## CI and verified scope
 
 `.github/workflows/native.yml` prepares Ubuntu 24.04 build tools and runs the
-native Debug configure/build/CTest sequence on pushes and pull requests. CI has
-been prepared, not observed running on GitHub. Local results are recorded in
-[M0 validation](m0-validation.md).
+native Debug, Release and Profile configure/build/CTest sequences on pushes and
+pull requests. Observed current native and WASM results are linked in
+[M4 validation](m4-validation.md); earlier milestone reports retain their
+historical environments and results.
 
 Linux native behavior has been exercised locally, and GitHub-hosted Linux
 CI passes the shared golden tests under Node/WebAssembly. Windows, macOS, mobile
@@ -103,7 +104,7 @@ The separate `.github/workflows/wasm.yml` workflow runs on Ubuntu 24.04 for
 pushes and pull requests, alongside the unchanged native workflow. It installs
 emsdk from immutable commit `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb` and
 SDK version `4.0.10` (explicitly selecting its Node 22.16.0 for CTest), then configures/builds the
-existing `wasm-debug` preset and runs both M0 and M1 tests with verbose CTest.
+existing `wasm-debug` preset and runs all seven M0–M4 suites with verbose CTest.
 Successful logs include all golden perft counts and the M1 correctness result.
 The job summary reports installation, configure, build and test outcomes;
 any failed command fails the job. No tests are skipped or relaxed.
@@ -175,3 +176,43 @@ move replay. It runs both pruning modes. See [M3 validation](m3-validation.md)
 for exact invocations, counter definitions, Release measurements and sampling
 profiler commands. External profilers and privileged hardware counters are
 optional; normal builds do not log or timestamp nodes.
+
+
+## M4 iterative search
+
+The separate `iterative_search` API preserves fixed-depth `search` above:
+
+```cpp
+chess_lab::CancellationSource stop;
+chess_lab::IterativeSearchOptions options;
+options.max_depth = 3;
+options.multipv_count = 3;
+auto result = chess_lab::iterative_search(
+    *core, *root, history, evaluator, options, stop.token(),
+    [](chess_lab::CompletedDepth snapshot) {
+      // Detached value, on this search thread. Forward through the controller.
+      // All progress remains provisional until final status.
+    });
+// Inspect result.status. Read result.completed only when present.
+// result.unevaluated_fallback is explicitly unscored, and exists only for
+// cancellation before depth one. Failures have no final action or ranking.
+```
+
+A controller can request `stop.request()` from another native thread. Use a
+fresh source for each invocation; token copies retain shared state safely.
+Callbacks may request cancellation but must not reenter using active resources.
+The controller owns evaluator serialization, workers, deadlines, session IDs
+and stale progress suppression. A later search/evaluator failure invalidates
+every earlier provisional update. Terminal roots return their outcome at depth
+zero without callbacks or fallback. There is no search-owned clock.
+
+Linking the search target under WASM exports a 2 MiB stack budget for the
+64-ply uniform-depth cap; Debug also enables stack-overflow diagnostics. The
+Node suite includes the full cheap generated depth-64 test, not a real-board
+benchmark. Cooperative cancellation paths compile without C++ threads, but
+browser message/shared-memory transport remains future controller work.
+
+`m4_benchmark` compares ordering off/on with all-depth exact-line checksums and
+per-depth/cumulative work, then runs an M3 depth-N reference. See
+[M4 validation](m4-validation.md) for arguments, observed ordering overhead,
+pinned CI evidence and the initial WASM stack-budget failure/correction.

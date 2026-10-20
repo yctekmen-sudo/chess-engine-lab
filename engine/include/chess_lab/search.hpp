@@ -1,9 +1,11 @@
 #pragma once
 #include <array>
+#include <atomic>
 #include <chess_lab/chess_core.hpp>
 #include <chess_lab/evaluation.hpp>
 #include <chrono>
 #include <compare>
+#include <functional>
 #include <optional>
 
 namespace chess_lab {
@@ -116,4 +118,83 @@ struct SearchResult {
 };
 SearchResult search(const ChessCore &, const Position &, const GameHistory &,
                     Evaluator &, SearchOptions = {});
+
+// One source per invocation. Copies share a one-way signal; there is no reset.
+// Tokens keep the state alive even after the source has been destroyed. An
+// absent token never cancels. Native requests are thread-safe; WASM transport
+// (e.g. shared memory) is the controller's responsibility.
+class CancellationToken {
+public:
+  CancellationToken() = default;
+  bool requested() const noexcept {
+    return state_ && state_->load(std::memory_order_relaxed);
+  }
+private:
+  std::shared_ptr<std::atomic<bool>> state_;
+  explicit CancellationToken(std::shared_ptr<std::atomic<bool>> s)
+      : state_(std::move(s)) {}
+  friend class CancellationSource;
+};
+class CancellationSource {
+public:
+  CancellationSource() : state_(std::make_shared<std::atomic<bool>>(false)) {}
+  CancellationToken token() const { return CancellationToken(state_); }
+  void request() const noexcept { state_->store(true, std::memory_order_relaxed); }
+private:
+  std::shared_ptr<std::atomic<bool>> state_;
+};
+struct IterativeSearchOptions {
+  std::optional<int> max_depth;
+  bool alpha_beta_enabled = true;
+  // Bounded to [1,256]; returned size also cannot exceed legal decisions.
+  std::size_t multipv_count = 1;
+  bool previous_pv_ordering_enabled = true;
+};
+enum class IterativeSearchStatus {
+  depth_reached, cancelled, depth_limit_reached, terminal,
+  evaluator_failed, search_error
+};
+struct SearchVariation {
+  ChessDecision decision;
+  SearchScore score;
+  std::vector<std::string> principal_variation;
+  PVEnd pv_end;
+  std::string pv_intended_move;
+};
+struct SearchProvenance {
+  EvaluationIdentity evaluator_identity;
+  IterativeSearchOptions options;
+  // Exact snapshot and occurrence evidence, not a collision-prone cache key.
+  ChessEvalPosition root{};
+  std::vector<RepetitionSignature> history;
+  bool history_incomplete = true;
+};
+struct CompletedDepth {
+  int depth;
+  SearchVariation best;
+  std::vector<SearchVariation> multipv;
+  SearchStatistics statistics; // cumulative through this commit
+  SearchProvenance provenance;
+};
+struct IterativeSearchResult {
+  IterativeSearchStatus status = IterativeSearchStatus::search_error;
+  std::optional<CompletedDepth> completed;
+  // Present ONLY on cancellation before depth one; explicitly unevaluated.
+  std::optional<ChessDecision> unevaluated_fallback;
+  // Present ONLY for a terminal root, at depth zero, without PV/ranking.
+  std::optional<ChessDecision> terminal_decision;
+  std::optional<SearchScore> terminal_score;
+  SearchStatistics statistics; // includes any abandoned iteration
+  SearchProvenance provenance;
+  std::string diagnostic;
+};
+// Synchronous, single-threaded traversal. Callback runs on the calling thread
+// after commit, receives a detached value, may cancel, and must not reenter on
+// the same active resources. ALL progress is provisional: a later failure
+// invalidates it. Root/history are immutable; the owner serializes evaluator
+// use/replacement and handles session IDs, workers, clocks and stale results.
+using SearchProgress = std::function<void(CompletedDepth)>;
+IterativeSearchResult iterative_search(
+    const ChessCore &, const Position &, const GameHistory &, Evaluator &,
+    IterativeSearchOptions = {}, CancellationToken = {}, SearchProgress = {});
 } // namespace chess_lab
