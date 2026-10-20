@@ -112,10 +112,11 @@ void tie_trap() {
              {Side::white,{13,14}}};
   for (int i = 7; i < 15; ++i) t.nodes.push_back({Side::black,{i}});
   values.assign(15,0); values[1]=-3; values[2]=7;
-  values[3]=8; values[4]=-2; values[5]=6; values[6]=9;
+  values[3]=8; values[4]=-2; values[5]=9; values[6]=6;
   tree_values=true;
   auto p=t.initial_position(); auto h=GameHistory::starting_at(t,*p);
-  for (bool order : {false,true}) {
+  for (double hidden : {0.0,4.0}) for (bool order : {false,true}) {
+    values[12]=hidden; // a tied bound can hide a worse exact value for Black
     auto e=evaluator();
     auto r=iterative_search(t,*p,h,*e,{3,true,8,order},{},[&](CompletedDepth d) {
       auto expected=tree_ranking(t,d.depth);
