@@ -1,0 +1,66 @@
+name: WebAssembly chess correctness
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  wasm:
+    name: Emscripten 4.0.10 / Node correctness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Install pinned Emscripten SDK
+        id: sdk
+        run: |
+          git init "$RUNNER_TEMP/emsdk"
+          git -C "$RUNNER_TEMP/emsdk" remote add origin https://github.com/emscripten-core/emsdk.git
+          git -C "$RUNNER_TEMP/emsdk" fetch --depth 1 origin 62a853cd3b3134398ce85cde8bb5cbb2ef0194cb
+          git -C "$RUNNER_TEMP/emsdk" checkout --detach FETCH_HEAD
+          "$RUNNER_TEMP/emsdk/emsdk" install 4.0.10
+          "$RUNNER_TEMP/emsdk/emsdk" activate 4.0.10
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcc --version
+          node --version
+      - name: Configure WebAssembly Debug
+        id: configure
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          cmake --preset wasm-debug
+      - name: Build WebAssembly core and tests
+        id: build
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          cmake --build --preset wasm-debug
+      - name: Run M0 and M1 golden tests under Node
+        id: correctness
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          ctest --preset wasm-debug --verbose
+      - name: Report WebAssembly validation
+        if: always()
+        env:
+          SDK_RESULT: ${{ steps.sdk.outcome }}
+          CONFIGURE_RESULT: ${{ steps.configure.outcome }}
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          TEST_RESULT: ${{ steps.correctness.outcome }}
+        run: |
+          {
+            echo "## WebAssembly validation (Emscripten 4.0.10)"
+            echo "- SDK installation: $SDK_RESULT"
+            echo "- Configure: $CONFIGURE_RESULT"
+            echo "- Build: $BUILD_RESULT"
+            echo "- Node M0/M1 tests: $TEST_RESULT"
+            if [[ "$TEST_RESULT" == success ]]; then
+              echo "All M0 smoke and M1 golden perft/chess correctness tests passed."
+            else
+              echo "WebAssembly validation has NOT passed. Inspect the failing step logs."
+            fi
+            echo "Verbose CTest logs include every golden perft count and the M1 correctness result."
+          } >> "$GITHUB_STEP_SUMMARY"

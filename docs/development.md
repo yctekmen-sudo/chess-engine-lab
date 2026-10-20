@@ -94,3 +94,18 @@ Only Linux native behavior has been exercised locally. Windows, macOS, mobile,
 browser/Worker integration, and WASM execution are unvalidated. M1 adds the rules adapter and shared perft/special-move/round-trip tests.
 The pinned dependency must pass WASM tests before claiming chess portability.
 See [M1 contracts](m1-contracts.md) and [M1 results](m1-validation.md).
+
+## GitHub-hosted WebAssembly CI
+
+The separate `.github/workflows/wasm.yml` workflow runs on Ubuntu 24.04 for
+pushes and pull requests, alongside the unchanged native workflow. It installs
+emsdk from immutable commit `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb` and
+SDK version `4.0.10` (including its pinned Node), then configures/builds the
+existing `wasm-debug` preset and runs both M0 and M1 tests with verbose CTest.
+Successful logs include all golden perft counts and the M1 correctness result.
+The job summary reports installation, configure, build and test outcomes;
+any failed command fails the job. No tests are skipped or relaxed.
+
+This runner can download the SDK independently of the local cloud environment's
+HTTP policy. CI results, rather than the presence of this workflow, determine
+whether the WASM acceptance gate has passed.
