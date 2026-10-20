@@ -117,3 +117,34 @@ Emscripten builds enable `-fexceptions` at compilation and linking, propagated
 through the core target to consumers, because ChessCore's source contract throws
 C++ exceptions for invalid input and undo misuse. The same error-path tests run
 on native and WASM; the WASM job does not disable them.
+
+## M2 evaluators
+
+The native build produces `libmaterial_evaluator.so` (platform equivalent on
+other native targets) separately from the host. `EvaluatorModule::native(path)`
+loads the mandatory C entry point. `create(json)` returns a move-owned instance
+whose shared module ownership prevents premature unloading. Configuration is
+immutable. `EvaluationSelection::replace` prepares a full replacement before
+publishing it and increments `generation()` for dependent cache owners.
+Selection changes must be serialized with uses of the old evaluator. Each
+instance serializes its own evaluation calls and remains quarantined after an
+error until replacement. No search or fallback policy is implemented here.
+
+Native evaluator artifact files must remain immutable from hashing/loading until
+the module is unloaded, including while any instance retains it. Do not overwrite
+or rebuild a loaded library in place: its recorded SHA-256 identifies the bytes
+that were hashed, and mutation can invalidate that identity or mapped code.
+Build replacements at a separate, versioned path, then stop uses and destroy all
+instances before unloading the old module. The in-process loader does not enforce
+filesystem immutability or protect against concurrent artifact modification.
+
+WebAssembly selects `EvaluatorModule::bundled("material-v1", wasm_sha256)`.
+The digest must be the encompassing WASM artifact's actual SHA-256, supplied by
+packaging. `tests/evaluation/run_wasm.cjs` demonstrates this with Node's crypto
+module. Native dynamic loading is rejected under WASM. ABI types and algorithm
+are identical in both provider paths. Raw values remain in arbitrary units.
+
+CTest includes `m2_evaluation`, `abi_c`, and `abi_cpp` in addition to M0/M1.
+The M2 host enforces 1 MiB JSON, 64 nesting levels and 4 KiB diagnostic buffers.
+`build/native-release/m2_benchmark /absolute/path/to/libmaterial_evaluator.so`
+measures conversion and host/ABI evaluation; see `docs/m2-validation.md`.
