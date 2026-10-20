@@ -1,6 +1,6 @@
 # Chess Engine Lab — M4 Iterative Search Specification v1.0
 
-**Status:** DRAFT FOR ARCHITECT REVIEW — Decisions 50–66 approved in discussion; document awaits review/merge before Codex implementation.  
+**Status:** APPROVED — Decisions 50–66; merged in documentation PR #7. Codex may implement M4 on a separate feature branch under the kickoff's review gate.  
 **Milestone:** M4 — iterative deepening, cooperative cancellation, progress, exact MultiPV, previous-PV ordering.  
 **Authority:** Extends docs/architecture-v1.0.md and docs/m3-search-spec-v1.0.md, using the concrete shipped engine/include/chess_lab/search.hpp and engine/src/search/search.cpp on main. M3 semantics remain authoritative where unchanged. No M2 evaluator C ABI or ChessCore contract change.  
 **Boundaries:** This milestone adds search-library functionality and test/benchmark harnesses, not the full UCI, desktop, mobile, or browser controller. Controller interactions below are API contracts or minimal test adapters, not a commitment to deliver the later application controller.
