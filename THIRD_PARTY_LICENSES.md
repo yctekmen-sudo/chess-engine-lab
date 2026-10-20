@@ -1,13 +1,15 @@
 # Third-party license inventory
 
-M0 has no bundled third-party code or runtime dependencies. No license is
-assigned to this project's original code by this scaffold.
+No license is assigned to this project's original code.
 
-| Component | Revision | License | Status / required action |
+| Component | Revision | License | Bundled files / notices |
 | --- | --- | --- | --- |
-| Disservin/chess-library | Not selected | MIT | Planned for M1 only; pin tested commit and preserve MIT notice before inclusion. |
+| [Disservin/chess-library](https://github.com/Disservin/chess-library) | 53e6a841dcda7059a2af363d85f785ef1817304a | MIT | third_party/chess-library/chess.hpp and LICENSE, both unmodified; retain copyright and permission notice with distributions. |
 
-Build tools (compiler, CMake, Ninja, Emscripten and its SDK, Node.js) are external
-development prerequisites with their own licenses; none is vendored here.
-Record any distributed runtime/toolchain artifacts and their license obligations
-when packaging is introduced. Follow `third_party/README.md` for new dependencies.
+Pin provenance and checksums: [dependency record](third_party/chess-library/README.md).
+The header is used privately by the replaceable adapter. No dependency is
+downloaded during configure, build or runtime.
+
+Compiler, CMake, Ninja, Emscripten/SDK and Node.js are external development tools
+with their own licenses; none is vendored here. Record distributed runtime or
+toolchain artifacts and their obligations when packaging is introduced.
