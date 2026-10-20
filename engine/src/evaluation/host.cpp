@@ -4,6 +4,7 @@
 #include <array>
 #include <chess_lab/evaluation.hpp>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <mutex>
@@ -120,7 +121,8 @@ std::string evaluator_artifact_sha256(const std::string &path) {
   std::ifstream stream(path, std::ios::binary);
   require(bool(stream), "cannot read evaluator artifact");
   picosha2::hash256_one_by_one hash;
-  std::array<char, 65536> data{};
+  // Keep bulk I/O off the stack: wasm32's default stack is only 64 KiB.
+  std::vector<char> data(65536);
   while (stream) {
     stream.read(data.data(), data.size());
     hash.process(data.begin(), data.begin() + stream.gcount());
@@ -151,15 +153,18 @@ EvaluatorModule EvaluatorModule::native(const std::string &path) {
   throw EvaluationError("native evaluator loading unavailable in WebAssembly");
 #else
   auto s = std::make_shared<State>();
-  s->artifact = evaluator_artifact_sha256(path);
+  // Use the identical resolved file for hashing and loading, even if the
+  // caller supplies a basename that dlopen would otherwise search elsewhere.
+  const auto artifact_path = std::filesystem::canonical(path).string();
+  s->artifact = evaluator_artifact_sha256(artifact_path);
   s->provider = "native";
 #ifdef _WIN32
-  s->library = LoadLibraryA(path.c_str());
+  s->library = LoadLibraryA(artifact_path.c_str());
   require(s->library, "cannot load evaluator library");
   auto entry = reinterpret_cast<ChessEvalGetApiFn>(
       GetProcAddress(s->library, "chess_evaluator_get_api"));
 #else
-  s->library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  s->library = dlopen(artifact_path.c_str(), RTLD_NOW | RTLD_LOCAL);
   require(s->library, "cannot load evaluator library");
   auto entry = reinterpret_cast<ChessEvalGetApiFn>(
       dlsym(s->library, "chess_evaluator_get_api"));

@@ -66,7 +66,10 @@ inline std::string number(double d) {
   if (d == 0)
     return "0";
   char b[128];
-  auto r = std::to_chars(b, b + 128, d);
+  // Request shortest significant digits first. General-format to_chars may
+  // prefer an exact fixed integer (e.g. ...0128) over the JCS shortest
+  // significant representation (...0100). Apply ECMAScript notation below.
+  auto r = std::to_chars(b, b + 128, d, std::chars_format::scientific);
   require(r.ec == std::errc{}, "number conversion");
   std::string s(b, r.ptr);
   bool neg = s[0] == '-';

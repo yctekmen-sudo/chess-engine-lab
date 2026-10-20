@@ -67,7 +67,10 @@ ctest --preset native-release --output-on-failure
 ```
 
 Initial Debug execution passed 5/5 tests (M0, M1, M2, C layout, C++ layout),
-16.08 seconds. Final local/CI results will be recorded after validation completes.
+16.08 seconds. Release also passed 5/5 (0.44 seconds). Address/undefined-behavior
+instrumented builds passed 5/5 (39.36 seconds), with leak detection disabled
+because the managed environment uses ptrace. No leak-sanitizer claim is made.
+Final CI results will be recorded after validation completes.
 
 The pinned GitHub Actions WASM job uses Ubuntu 24.04, Emscripten 4.0.10,
 emsdk commit `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb`, SDK Node 22.16.0:
@@ -111,3 +114,17 @@ validation is unclaimed. Native plugins execute in-process: invalid *non-null*
 pointers or arbitrary native memory corruption cannot be made safe by this ABI.
 Callers serialize selection changes with evaluator use; instances serialize
 individual evaluation calls internally. Destroy instances after uses stop.
+
+
+## Initial WASM failure and correction
+
+[Initial run 39379396453](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39379396453)
+at `59a98d1` compiled successfully. M0/M1 and both ABI layout tests passed;
+M2 failed with a memory access trap inside artifact hashing. The hashing
+function placed a 64 KiB I/O array on Emscripten's default 64 KiB stack,
+leaving no room for call frames. The correction allocates that I/O buffer on
+the heap. It preserves the approved ABI, hash algorithm, stack settings and
+all tests. This initial run is not a passing WASM validation result.
+
+The final canonicalizer also has exact RFC 8785 Appendix B binary64 vectors,
+including significant-digit rounding for large fixed-format integers.

@@ -1,6 +1,7 @@
 #include "json.hpp"
 #include "material.hpp"
 #include <array>
+#include <bit>
 #include <chess_lab/chess_core.hpp>
 #include <chess_lab/evaluation.hpp>
 #include <cstring>
@@ -24,6 +25,50 @@ void rejects(const std::function<void()> &fn) {
   throw std::runtime_error("expected rejection");
 }
 std::string sha(64, 'a');
+struct SourceFixture : PositionSnapshot {
+  std::array<PieceCode, 64> board{};
+  Side turn = Side::white;
+  uint32_t version = 1, full = 1;
+  std::optional<uint8_t> ep;
+  SourceFixture() {
+    board[4] = PieceCode::white_king;
+    board[60] = PieceCode::black_king;
+  }
+  std::span<const PieceCode, 64> squares() const noexcept override {
+    return board;
+  }
+  Side side_to_move() const noexcept override { return turn; }
+  bool can_castle_kingside(Side) const noexcept override { return false; }
+  bool can_castle_queenside(Side) const noexcept override { return false; }
+  std::optional<uint8_t> en_passant_square() const noexcept override {
+    return ep;
+  }
+  uint32_t halfmove_clock() const noexcept override { return UINT32_MAX; }
+  uint32_t fullmove_number() const noexcept override { return full; }
+  uint32_t schema_version() const noexcept override { return version; }
+};
+void source_validation() {
+  SourceFixture s;
+  test(evaluation_snapshot(s).halfmove_clock == UINT32_MAX,
+       "lossless source counter");
+  s.version = 2;
+  rejects([&] { evaluation_snapshot(s); });
+  s.version = 1;
+  s.turn = static_cast<Side>(2);
+  rejects([&] { evaluation_snapshot(s); });
+  s.turn = Side::white;
+  s.board[0] = static_cast<PieceCode>(13);
+  rejects([&] { evaluation_snapshot(s); });
+  s.board[0] = PieceCode::empty;
+  s.full = 0;
+  rejects([&] { evaluation_snapshot(s); });
+  s.full = 1;
+  s.ep = 64;
+  rejects([&] { evaluation_snapshot(s); });
+  s.ep.reset();
+  s.board[60] = PieceCode::empty;
+  rejects([&] { evaluation_snapshot(s); });
+}
 ChessEvalApi original{};
 std::string mode, custom_json;
 int live = 0, calls = 0;
@@ -405,6 +450,36 @@ void hostile() {
                "quarantine checks passed\n";
 }
 void json_tests() {
+  // RFC 8785 Appendix B: exact binary64 inputs, independent decimal oracle.
+  const std::pair<uint64_t, const char *> numeric_vectors[] = {
+      {0x0000000000000001ULL, "5e-324"},
+      {0x8000000000000001ULL, "-5e-324"},
+      {0x7fefffffffffffffULL, "1.7976931348623157e+308"},
+      {0x4340000000000000ULL, "9007199254740992"},
+      {0x4430000000000000ULL, "295147905179352830000"},
+      {0x44b52d02c7e14af5ULL, "9.999999999999997e+22"},
+      {0x44b52d02c7e14af6ULL, "1e+23"},
+      {0x44b52d02c7e14af7ULL, "1.0000000000000001e+23"},
+      {0x444b1ae4d6e2ef4eULL, "999999999999999700000"},
+      {0x444b1ae4d6e2ef4fULL, "999999999999999900000"},
+      {0x444b1ae4d6e2ef50ULL, "1e+21"},
+      {0x3eb0c6f7a0b5ed8cULL, "9.999999999999997e-7"},
+      {0x3eb0c6f7a0b5ed8dULL, "0.000001"},
+      {0x41b3de4355555553ULL, "333333333.3333332"},
+      {0x41b3de4355555554ULL, "333333333.33333325"},
+      {0x41b3de4355555555ULL, "333333333.3333333"},
+      {0x41b3de4355555556ULL, "333333333.3333334"},
+      {0x41b3de4355555557ULL, "333333333.33333343"},
+      {0xbecbf647612f3696ULL, "-0.0000033333333333333333"},
+      {0x43143ff3c1cb0959ULL, "1424953923781206.2"}};
+  for (auto [bits, expected] : numeric_vectors)
+    test(number(std::bit_cast<double>(bits)) == expected, "RFC8785 Appendix B");
+  test(number(1000000000000000128.0) == "1000000000000000100",
+       "JCS significant digits before fixed formatting");
+  rejects([] { parse(std::string("{}\0bad", 6)); });
+  rejects([] { parse(std::string(1048577, ' ')); });
+  rejects([] { parse(std::string(66, '[') + "0" + std::string(66, ']')); });
+
   test(canonical(
            parse(R"({"z":-0.0,"a":1e-6,"b":1e21,"c":333333333.33333329})")) ==
            R"({"a":0.000001,"b":1e+21,"c":333333333.3333333,"z":0})",
@@ -423,6 +498,32 @@ void json_tests() {
   for (auto config : {"{}", "{\"n\":1.5}", "{\"n\":11}", "{\"n\":1,\"b\":0}",
                       "{\"n\":1,\"s\":\"aa\"}", "{\"n\":1,\"s\":\"b\"}"})
     rejects([&] { resolve(s, parse(config)); });
+
+  auto base = parse(
+      R"({"schema_version":1,"type":"object","properties":{"x":{"type":"integer","default":1}},"additionalProperties":false})");
+  for (auto property :
+       {R"({"type":"integer","default":9007199254740992})",
+        R"({"type":"number","default":1,"minimum":3,"maximum":2})",
+        R"({"type":"number","default":1,"enum":[1,1]})",
+        R"({"type":"boolean","default":false,"minimum":0})",
+        R"({"type":"string","default":"x","minLength":2,"maxLength":1})",
+        R"({"type":"number","default":1,"enum":["1"]})",
+        R"({"type":"number","default":1,"unknown":true})"}) {
+    auto bad = base;
+    bad["properties"]["x"] = parse(property);
+    rejects([&] { schema(bad); });
+  }
+  auto bad = base;
+  bad["required"] = Json::array({"missing"});
+  rejects([&] { schema(bad); });
+  bad = base;
+  bad["required"] = Json::array({"x", "x"});
+  rejects([&] { schema(bad); });
+  auto a = EvaluatorModule::bundled("material-v1", sha).create("{}");
+  auto changed = EvaluatorModule::bundled("material-v1", std::string(64, 'b'))
+                     .create("{}");
+  test(a->identity().fingerprint != changed->identity().fingerprint,
+       "artifact change identity");
   std::ofstream("m2_hash_vector.tmp", std::ios::binary) << "abc";
   test(evaluator_artifact_sha256("m2_hash_vector.tmp") ==
            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
@@ -440,6 +541,7 @@ int main(int argc, char **argv) {
     test(argc == 2, "encompassing WASM digest required");
     sha = argv[1];
 #endif
+    source_validation();
     raw_contract();
     json_tests();
     hostile();
