@@ -1,3 +1,4 @@
+#include "transposition_table_internal.hpp"
 #include <algorithm>
 #include <chess_lab/search.hpp>
 #include <cmath>
@@ -54,7 +55,7 @@ bool SearchScore::operator==(const SearchScore &b) const noexcept {
 }
 
 namespace {
-struct Cancelled {};
+using Cancelled = detail::SearchCancelled;
 struct OrderedMove {
   std::string text;
   std::unique_ptr<Move> move;
@@ -200,6 +201,7 @@ struct Traversal {
   CancellationToken cancellation{};
   const CompletedDepth *previous = nullptr;
   std::vector<std::string> path{};
+  detail::TTSession *cache = nullptr;
   void poll() const {
     if (cancellation.requested())
       throw Cancelled{};
@@ -238,6 +240,8 @@ struct Traversal {
     }
   }
   std::size_t count(const RepetitionSignature &s) const {
+    poll();
+    if (cache) return cache->count(s);
     std::size_t n = 0;
     for (const auto &entry : history) {
       poll();
@@ -258,15 +262,25 @@ struct Traversal {
         if (track_path) path.pop_back();
         throw;
       }
-      using T = decltype(f());
-      std::optional<T> result;
+      std::uint32_t old_tail = 0;
       try {
-        result.emplace(f());
+        if (cache) old_tail = cache->push(history.back());
       } catch (...) {
         history.pop_back();
         if (track_path) path.pop_back();
         throw;
       }
+      using T = decltype(f());
+      std::optional<T> result;
+      try {
+        result.emplace(f());
+      } catch (...) {
+        if (cache) cache->pop(history.back(), old_tail);
+        history.pop_back();
+        if (track_path) path.pop_back();
+        throw;
+      }
+      if (cache) cache->pop(history.back(), old_tail);
       history.pop_back();
       if (track_path) path.pop_back();
       return std::move(*result);
@@ -332,21 +346,58 @@ struct Traversal {
     // Outside the previous-PV prefix all descendants retain M3's canonical
     // order, so a full-window traversal already supplies its canonical PV.
     // Only a subtree that can actually receive a hint needs tie refinement.
-    if (exact) {
+    if (exact && !cache) {
       const auto *pv = previous ? &previous->best.principal_variation : nullptr;
       exact = pv && path.size() < pv->size() &&
               std::equal(path.begin(), path.end(), pv->begin());
     }
     ++stats.visited_nodes;
+    const auto original_alpha = alpha, original_beta = beta;
     auto s = core.snapshot(position);
+    auto finish = [&](Line line) {
+      if (cache) {
+        poll();
+        cache->store(evaluation_snapshot(*s), history.back(), depth, line.score,
+          detail::classify_bound(line.score, original_alpha, original_beta), line.action, ply);
+      }
+      return line;
+    };
     if (auto end = terminal(ply, *s))
-      return *end;
+      return finish(std::move(*end));
     auto canonical_moves = moves(false);
     if (canonical_moves.empty())
       throw std::runtime_error("ongoing node has no legal moves");
     auto best = claim(*s, canonical_moves);
     auto moves = std::move(canonical_moves);
     prefer_previous(moves);
+    if (cache) {
+      if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
+      poll();
+      auto hit = cache->probe(evaluation_snapshot(*s), history.back(), depth, ply);
+      if (!hit.hint.empty()) {
+        auto found = std::find_if(moves.begin(), moves.end(), [&](const auto &m) { return m.text == hit.hint; });
+        if (found != moves.end()) {
+          std::rotate(moves.begin(), found, found + 1);
+          ++stats.transposition.hint_hits;
+        }
+      }
+      poll();
+      if (hit.score) {
+        if (hit.bound == detail::TTBound::exact) {
+          if (best && hit.decision == best->action)
+            return finish(*best); // exact zero, claim eligibility revalidated
+          if (!exact || (depth == 0 && hit.decision && hit.decision->kind == DecisionKind::play))
+            return finish({*hit.score, hit.decision.value(), {}, PVEnd::horizon, {}});
+          ++stats.transposition.pv_researches;
+        } else if (!exact &&
+            ((hit.bound == detail::TTBound::lower && beta && *hit.score >= *beta) ||
+             (hit.bound == detail::TTBound::upper && alpha && *hit.score <= *alpha))) {
+          ++stats.alpha_beta_cutoffs;
+          ++stats.transposition.bound_cutoffs;
+          return finish({*hit.score, hit.decision.value(), {}, PVEnd::horizon, {}});
+        }
+      }
+    }
     bool white = s->side_to_move() == Side::white;
     auto better = [&](SearchScore a, SearchScore b) {
       return white ? a > b : a < b;
@@ -357,8 +408,8 @@ struct Traversal {
       auto score =
           SearchScore::finite(evaluator.evaluate(evaluation_snapshot(*s)));
       if (!best || better(score, best->score))
-        return {score, {DecisionKind::play, {}}, {}, PVEnd::horizon, {}};
-      return *best;
+        return finish({score, {DecisionKind::play, {}}, {}, PVEnd::horizon, {}});
+      return finish(*best);
     }
     auto update = [&] {
       if (!options.alpha_beta_enabled || !best)
@@ -374,7 +425,7 @@ struct Traversal {
     };
     if (update()) {
       ++stats.alpha_beta_cutoffs;
-      return *best;
+      return finish(*best);
     }
     for (std::size_t i = 0; i < moves.size(); ++i) {
       const auto &m = moves[i];
@@ -404,7 +455,7 @@ struct Traversal {
         break;
       }
     }
-    return *best;
+    return finish(*best);
   }
 };
 } // namespace
@@ -462,7 +513,7 @@ SearchResult search(const ChessCore &c, const Position &root,
 IterativeSearchResult iterative_search(
     const ChessCore &c, const Position &root, const GameHistory &h, Evaluator &e,
     IterativeSearchOptions options, CancellationToken cancellation,
-    SearchProgress progress) {
+    SearchProgress progress, TranspositionTableUse table_use) {
   const auto start = std::chrono::steady_clock::now();
   IterativeSearchResult r;
   r.provenance.options = options;
@@ -483,6 +534,15 @@ IterativeSearchResult iterative_search(
     r.provenance.history = h.occurrences();
     if (!e.usable())
       throw EvaluationError("evaluator is quarantined");
+    std::optional<detail::TTSession> session;
+    if (options.alpha_beta_enabled && table_use.table) {
+      session.emplace(table_use, e.identity().fingerprint, h.complete(),
+                      r.statistics.transposition, cancellation);
+      if (!session->enabled()) session.reset();
+    }
+    r.provenance.tt_numeric_certified = session &&
+        table_use.evaluator == EvaluatorCacheCompatibility::deterministic_position;
+    r.provenance.tt_value_policy = table_use.value_policy;
     auto p = c.clone(root);
     Traversal t{c, *p, e, {1, options.alpha_beta_enabled}, r.statistics,
                 h.occurrences()};
@@ -500,6 +560,11 @@ IterativeSearchResult iterative_search(
         throw std::runtime_error("ongoing root has no legal moves");
       fallback = ChessDecision{DecisionKind::play, legal.front().text};
       t.cancellation = std::move(cancellation);
+      t.poll();
+      if (session) {
+        session->start(h.occurrences());
+        t.cache = &*session;
+      }
       auto variation = [](Line line) {
         return SearchVariation{std::move(line.action), line.score,
              std::move(line.pv), line.end, std::move(line.intended)};
