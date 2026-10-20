@@ -1,0 +1,113 @@
+# M2 validation
+
+## Provenance and scope
+
+Branch `m2/evaluation-abi`, based on fetched `origin/main`
+`3f938236b9154678edffa22600287fbe63546c5c`. M0 merge PR #1 and M1 merge
+PR #2 are ancestors. Verified all four kickoff-required files on that base.
+The approved architecture, ABI specification and public header are unchanged.
+No search, quiescence, TT, UCI, controller, GUI or M3 work is included.
+Decision 37 is implemented at the M2 boundary by propagating failures and
+quarantining the instance until replacement. Whole-search invalidation belongs
+to M3/M4; no fallback decision is provided here.
+
+## Implementation and verification
+
+The independently built native shared material evaluator and bundled provider
+compile the same source. Only the native wrapper exports the required entry.
+Weights are finite, nonnegative and capped at 1e100 to prevent overflow even
+on structurally valid promotion-heavy snapshots; units remain arbitrary.
+
+C11 and C++20 translation units assert status width, both struct sizes,
+8-byte structure alignment and every top-level field offset (including wasm32
+function-pointer slots). The header itself is kept byte-for-byte unchanged.
+
+M2 tests cover all twelve bitboards and snapshot fields against an independent
+FEN decoder, initial/Kiwipete/castling/check positions, capturable and
+noncapturable raw EP, maximum uint32 clocks and both colors' four promotions.
+They run the same golden material vectors against native loading and bundled
+providers, with turn-independent White-positive values and varied parameters.
+
+Tests cover ABI major/minor/size/pointer rejection, incompatible snapshot
+requirements, missing library and symbol, null arguments, insufficient buffers
+without partial JSON, invalid snapshot fields, invalid JSON/UTF-8, duplicates,
+unknown/invalid parameters, flat scalar schema rules, required/default semantics,
+metadata size/length/NUL limits, failed creation and effective-configuration
+mismatch cleanup. Controlled providers test OOM, unknown/negative statuses,
+error diagnostics, NaN and both infinities. Evaluation failure quarantines the
+instance and prevents further provider calls. Live-handle counters verify
+cleanup, and native instances outlive their module facade without unloading.
+
+Independent configurations and interleaved calls produce stable scores.
+Failed replacement preserves the active instance and generation; successful
+replacement increments the cache invalidation generation. This is an explicit
+signal for future cache owners, not an implementation of search caches.
+
+Identity tests cover canonical effective defaults, whitespace/order/numeric
+spelling, Unicode UTF-16 key ordering, Unicode scalar lengths, negative zero,
+JCS decimal/exponent thresholds and a published SHA-256 `abc` vector. Identity
+records ABI/snapshot/schema versions, module ID/version, canonical configuration,
+artifact digest, provider, compiler, engine, platform and build mode. WASM's Node
+launcher hashes the actual encompassing `.wasm` before supplying the digest to
+the registry. Packaging callers must likewise supply the encompassing artifact's
+SHA-256; the host rejects missing/malformed digests.
+
+## Commands and results
+
+Local environment: Linux x86_64, GCC/G++ 14.2.0, CMake 3.31.6, Ninja 1.11.1.
+Run from the repository root with `/workspace/.cloud-toolchain/bin` on PATH:
+
+```sh
+cmake --preset native-debug
+cmake --build --preset native-debug
+ctest --preset native-debug --output-on-failure
+cmake --preset native-release
+cmake --build --preset native-release
+ctest --preset native-release --output-on-failure
+```
+
+Initial Debug execution passed 5/5 tests (M0, M1, M2, C layout, C++ layout),
+16.08 seconds. Final local/CI results will be recorded after validation completes.
+
+The pinned GitHub Actions WASM job uses Ubuntu 24.04, Emscripten 4.0.10,
+emsdk commit `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb`, SDK Node 22.16.0:
+
+```sh
+source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+cmake --preset wasm-debug -DCHESS_LAB_NODE_EXECUTABLE="$EMSDK_NODE"
+cmake --build --preset wasm-debug
+ctest --preset wasm-debug --verbose
+```
+
+`-fexceptions` is enabled during compilation and linking. The WASM harness
+uses the same C/C++ layouts, golden vectors, JSON and hostile-provider tests.
+Native CI has Debug and Release jobs on pinned Ubuntu 24.04 and pinned checkout.
+GitHub Actions execution links will be recorded after the branch is pushed.
+The local SDK is absent, as documented in M1; WASM evidence will come from CI.
+
+## Performance
+
+Method: optimized Release build, separately loaded native material evaluator,
+steady_clock, 1,000 warm-up host calls then 200,000 conversions followed by
+200,000 host+ABI evaluations per position. Snapshot construction/FEN parsing,
+module loading, configuration parsing and hashing are outside timed loops.
+The checksum consumes results. Conversion includes validation. Evaluation
+includes host validation, serialized-instance locking, diagnostics validation,
+ABI dispatch, module snapshot validation and material arithmetic. Measurements
+are observational wall-clock averages, not isolated instruction counts.
+
+```sh
+build/native-release/m2_benchmark "$PWD/build/native-release/libmaterial_evaluator.so"
+```
+
+Measured output and hardware will be recorded after the final Release build.
+No ABI layout/performance claim is inferred from CPU instruction expectations.
+
+## Limits
+
+Only Linux native and Node/WASM are targeted by this validation. Windows/macOS
+loading paths are implemented but unvalidated; browser/Worker, Android and iOS
+validation is unclaimed. Native plugins execute in-process: invalid *non-null*
+pointers or arbitrary native memory corruption cannot be made safe by this ABI.
+Callers serialize selection changes with evaluator use; instances serialize
+individual evaluation calls internally. Destroy instances after uses stop.
