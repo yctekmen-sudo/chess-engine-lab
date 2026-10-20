@@ -1,0 +1,119 @@
+#pragma once
+#include <array>
+#include <chess_lab/chess_core.hpp>
+#include <chess_lab/evaluation.hpp>
+#include <chrono>
+#include <compare>
+#include <optional>
+
+namespace chess_lab {
+// Source-level value, not a wire ABI. All scores are White-perspective.
+class alignas(8) SearchScore {
+public:
+  enum class Kind : std::uint64_t { finite, white_mate, black_mate };
+  static SearchScore finite(double);
+  static SearchScore white_mate(std::uint64_t);
+  static SearchScore black_mate(std::uint64_t);
+  Kind kind() const noexcept { return kind_; }
+  double value() const;                // throws for a mate
+  std::uint64_t distance() const;      // throws for a finite value
+  SearchScore one_ply_farther() const; // checked increment
+  std::strong_ordering operator<=>(const SearchScore &) const noexcept;
+  bool operator==(const SearchScore &) const noexcept;
+
+private:
+  SearchScore(Kind k, double v, std::uint64_t d)
+      : kind_(k), value_(v), distance_(d) {}
+  Kind kind_;
+  double value_;
+  std::uint64_t distance_;
+};
+static_assert(sizeof(SearchScore) == 24 && alignof(SearchScore) == 8);
+
+// Exact repetition evidence; raw EP is normalized through legal move
+// generation.
+struct RepetitionSignature {
+  std::array<PieceCode, 64> pieces{};
+  Side side{};
+  std::array<bool, 4> castling{};
+  std::optional<std::uint8_t> legal_ep;
+  bool operator==(const RepetitionSignature &) const = default;
+};
+RepetitionSignature repetition_signature(const ChessCore &, const Position &);
+
+// Immutable by API. Helpers accept only actual legal moves. The final full
+// snapshot (including raw EP and clocks) must agree with the search root.
+class GameHistory {
+public:
+  static GameHistory starting_at(const ChessCore &, const Position &,
+                                 bool complete = false);
+  static GameHistory replay(const ChessCore &, const Position &start,
+                            const std::vector<std::string> &moves,
+                            bool complete = false);
+  GameHistory after_move(const ChessCore &, const Position &current,
+                         std::string_view move) const;
+  bool matches_root(const ChessCore &, const Position &) const;
+  bool complete() const noexcept { return complete_; }
+  const std::vector<RepetitionSignature> &occurrences() const noexcept {
+    return occurrences_;
+  }
+
+private:
+  std::vector<RepetitionSignature> occurrences_;
+  ChessEvalPosition last_{};
+  bool complete_ = false;
+};
+enum class DecisionKind {
+  play,
+  claim_draw,
+  claim_draw_with_intended_move,
+  terminal
+};
+enum class TerminalOutcome { white_win, black_win, draw };
+struct ChessDecision {
+  DecisionKind kind;
+  // Played move for play; announced, UNPLAYED move for an intended claim.
+  std::string move;
+  // Present exactly for terminal decisions, never for a play or draw claim.
+  std::optional<TerminalOutcome> terminal_outcome{};
+  bool operator==(const ChessDecision &) const = default;
+};
+enum class DecisionSource { search, opening_book }; // book integration deferred
+struct SearchOptions {
+  // Bounded to [1,64] to reject unreasonable recursive stack requests.
+  int nominal_depth = 1;
+  bool alpha_beta_enabled = true;
+};
+enum class SearchStatus { complete, terminal, evaluator_failed, search_error };
+enum class PVEnd {
+  horizon,
+  terminal,
+  claim_draw,
+  claim_draw_with_intended_move
+};
+struct SearchStatistics {
+  // Recursive node entries (including terminals); prospective claim probes do
+  // not count as nodes. Calls count attempted host evaluations. Cutoffs count
+  // nodes where a closed alpha/beta window avoids remaining traversal.
+  std::uint64_t visited_nodes = 0, evaluator_calls = 0, alpha_beta_cutoffs = 0;
+  // Whole invocation, including validation/cloning and failure cleanup.
+  std::chrono::nanoseconds elapsed{};
+};
+struct SearchResult {
+  SearchStatus status = SearchStatus::search_error;
+  DecisionSource source = DecisionSource::search;
+  std::optional<ChessDecision> decision;
+  std::optional<SearchScore> score;
+  int completed_depth = 0;
+  std::vector<std::string> principal_variation;
+  std::optional<PVEnd> pv_end;
+  std::string pv_intended_move;
+  SearchStatistics statistics;
+  EvaluationIdentity evaluator_identity;
+  SearchOptions options;
+  bool history_incomplete = true;
+  std::string diagnostic;
+};
+SearchResult search(const ChessCore &, const Position &, const GameHistory &,
+                    Evaluator &, SearchOptions = {});
+} // namespace chess_lab
