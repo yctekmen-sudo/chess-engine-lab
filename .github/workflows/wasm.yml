@@ -27,12 +27,12 @@ jobs:
           "$RUNNER_TEMP/emsdk/emsdk" activate 4.0.10
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
           emcc --version
-          node --version
+          "$EMSDK_NODE" --version
       - name: Configure WebAssembly Debug
         id: configure
         run: |
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
-          cmake --preset wasm-debug
+          cmake --preset wasm-debug -DCHESS_LAB_NODE_EXECUTABLE="$EMSDK_NODE"
       - name: Build WebAssembly core and tests
         id: build
         run: |

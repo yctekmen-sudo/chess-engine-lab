@@ -100,7 +100,7 @@ See [M1 contracts](m1-contracts.md) and [M1 results](m1-validation.md).
 The separate `.github/workflows/wasm.yml` workflow runs on Ubuntu 24.04 for
 pushes and pull requests, alongside the unchanged native workflow. It installs
 emsdk from immutable commit `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb` and
-SDK version `4.0.10` (including its pinned Node), then configures/builds the
+SDK version `4.0.10` (explicitly selecting its Node 22.16.0 for CTest), then configures/builds the
 existing `wasm-debug` preset and runs both M0 and M1 tests with verbose CTest.
 Successful logs include all golden perft counts and the M1 correctness result.
 The job summary reports installation, configure, build and test outcomes;
@@ -109,3 +109,9 @@ any failed command fails the job. No tests are skipped or relaxed.
 This runner can download the SDK independently of the local cloud environment's
 HTTP policy. CI results, rather than the presence of this workflow, determine
 whether the WASM acceptance gate has passed.
+
+
+Emscripten builds enable `-fexceptions` at compilation and linking, propagated
+through the core target to consumers, because ChessCore's source contract throws
+C++ exceptions for invalid input and undo misuse. The same error-path tests run
+on native and WASM; the WASM job does not disable them.

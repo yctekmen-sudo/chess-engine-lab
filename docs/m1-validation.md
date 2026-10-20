@@ -120,3 +120,21 @@ equivalent WASM golden tests pass. Windows/macOS, browser/Worker, and real-devic
 mobile validation are also unclaimed. Material-only dead-position recognition
 is intentionally conservative; full history-dependent FIDE adjudication is later
 work. Stop for review; do not merge or begin M2.
+
+
+## GitHub-hosted WASM follow-up
+
+Added a separate Ubuntu 24.04 workflow with immutable emsdk checkout and SDK
+4.0.10, retaining the native workflow unchanged. The first PR run at ae091e3
+([run 39370042755](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39370042755))
+installed the SDK, configured and compiled successfully. M0 passed; all 20
+listed perft counts matched. M1 then failed at the first expected invalid-undo
+exception: "Exception thrown, but exception catching is not enabled."
+This was a real portability configuration failure; overall correctness did not
+pass. Native CI passed on the same commit.
+
+The follow-up enables Emscripten `-fexceptions` for compilation and linking
+through the core target's usage requirements. It preserves the exception-based
+error contract and every test. CTest now explicitly selects SDK Node 22.16.0;
+the initial run had found the runner's Node 22.23.3 instead. Validation results
+for this corrected configuration must be observed before declaring success.

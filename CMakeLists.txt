@@ -11,6 +11,13 @@ target_include_directories(chess_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/engine
 target_include_directories(chess_core SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/chess-library")
 target_compile_definitions(chess_core PRIVATE CHESS_LAB_VERSION="${PROJECT_VERSION}")
 
+# ChessCore's public error contract uses C++ exceptions. Emscripten disables
+# catching by default; enable it for the adapter and every linked consumer.
+if(EMSCRIPTEN)
+  target_compile_options(chess_core PUBLIC "-fexceptions")
+  target_link_options(chess_core INTERFACE "-fexceptions")
+endif()
+
 if(BUILD_TESTING)
   foreach(test_name IN ITEMS m0_smoke m1_core)
     add_executable(${test_name} tests/${test_name}.cpp)
