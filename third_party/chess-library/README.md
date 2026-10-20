@@ -5,7 +5,7 @@
 - Retrieved: 2026-10-20
 - License: MIT; complete upstream notice in LICENSE and header.
 - Vendored files: include/chess.hpp (stored as chess.hpp), LICENSE, unmodified.
-- Native validation: see docs/m1-validation.md. WASM validation remains blocked.
+- Native and Node/WASM validation: see docs/m1-validation.md (Emscripten 4.0.10).
 
 The build uses this local header only; it never fetches a mutable branch.
 To update, explicitly review and select a new immutable commit, copy the two

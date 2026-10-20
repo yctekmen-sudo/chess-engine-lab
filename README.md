@@ -6,8 +6,8 @@ C++20 chess engine and experimentation platform, following the approved
 
 Current implementation: **M1 chess core**, with a pinned Disservin adapter,
 FEN, legal moves, reversible traversal, snapshots, position identity and
-correctness tests. Native tests pass; **WASM portability remains unvalidated**
-because the SDK download is blocked. See [M1 validation](docs/m1-validation.md).
+correctness tests. Native and Node/WebAssembly correctness tests pass in
+GitHub Actions with pinned Emscripten 4.0.10. See [M1 validation](docs/m1-validation.md).
 M1 is awaiting review; M2 has not begun.
 
 ## Build and test

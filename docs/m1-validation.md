@@ -85,7 +85,7 @@ leak detection disabled:
 Passed 2/2 in 44.06 s, with address and undefined-behavior instrumentation
 enabled and no reported errors. Memory leak validation is unclaimed.
 
-## WASM attempt: blocked, not validated
+## Original local WASM attempt: blocked
 
 Retried the existing pinned emsdk 4.0.10 installation:
 
@@ -115,8 +115,8 @@ run configure, build and CTest, and record actual results before closing this ga
 
 ## Acceptance status
 
-Native M1 correctness passes. **M1 portability acceptance remains open** until
-equivalent WASM golden tests pass. Windows/macOS, browser/Worker, and real-device
+Native M1 correctness and the equivalent Node/WASM golden tests now pass;
+see the GitHub-hosted follow-up below. Windows/macOS, browser/Worker, and real-device
 mobile validation are also unclaimed. Material-only dead-position recognition
 is intentionally conservative; full history-dependent FIDE adjudication is later
 work. Stop for review; do not merge or begin M2.
@@ -136,5 +136,21 @@ pass. Native CI passed on the same commit.
 The follow-up enables Emscripten `-fexceptions` for compilation and linking
 through the core target's usage requirements. It preserves the exception-based
 error contract and every test. CTest now explicitly selects SDK Node 22.16.0;
-the initial run had found the runner's Node 22.23.3 instead. Validation results
-for this corrected configuration must be observed before declaring success.
+the initial run had found the runner's Node 22.23.3 instead. The corrected configuration passed in
+[run 39370234878](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39370234878)
+at commit fed59e7c1deaf494c0450c4cf027c45c99776320:
+
+- Ubuntu 24.04, Emscripten 4.0.10, SDK Node 22.16.0 (CTest executable path
+  explicitly confirmed in the log).
+- Configure and compilation passed.
+- m0_smoke passed (0.05 s).
+- m1_core passed (40.57 s), including all 20 golden counts listed above,
+  complete restoration checks, special moves and expected invalid-input errors.
+- CTest: 100% tests passed, 0 failed out of 2; total 40.67 s.
+- Native workflow on the same commit also passed
+  ([run 39370234899](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39370234899)).
+
+No test source, expected result, timeout, or native workflow was changed.
+The Node/WASM portability gate is satisfied for this pinned configuration.
+Local cloud SDK downloads remain blocked; browser/Worker and device portability
+are not established by a Node runner. M2 and merging remain unauthorized.

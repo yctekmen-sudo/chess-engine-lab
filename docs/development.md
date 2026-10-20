@@ -77,9 +77,10 @@ set by SDK activation before configuring; the preset uses its toolchain file.
 The SDK download requires GitHub and `storage.googleapis.com` access. No TLS or
 artifact verification should be disabled to bypass a download failure.
 
-**Current blocker:** the cloud environment returned HTTP 403 for the SDK's
+**Local cloud blocker:** the cloud environment returned HTTP 403 for the SDK's
 Node archive at `storage.googleapis.com`. The M1 retry on 2026-10-20 returned the same tunnel HTTP 403. No Emscripten compiler was installed,
-and no WASM compilation or execution passed. Permit that destination in the
+and no local WASM compilation or execution passed. The GitHub-hosted workflow
+subsequently passed both tests; see [M1 results](m1-validation.md). Permit that destination in the
 environment network settings and rerun SDK installation/activation and the
 three WASM commands above. A preset alone is not portability evidence.
 
@@ -90,9 +91,10 @@ native Debug configure/build/CTest sequence on pushes and pull requests. CI has
 been prepared, not observed running on GitHub. Local results are recorded in
 [M0 validation](m0-validation.md).
 
-Only Linux native behavior has been exercised locally. Windows, macOS, mobile,
-browser/Worker integration, and WASM execution are unvalidated. M1 adds the rules adapter and shared perft/special-move/round-trip tests.
-The pinned dependency must pass WASM tests before claiming chess portability.
+Linux native behavior has been exercised locally, and GitHub-hosted Linux
+CI passes the shared golden tests under Node/WebAssembly. Windows, macOS, mobile
+and browser/Worker integration remain unvalidated. M1 includes the rules adapter
+and shared perft/special-move/round-trip tests.
 See [M1 contracts](m1-contracts.md) and [M1 results](m1-validation.md).
 
 ## GitHub-hosted WebAssembly CI
