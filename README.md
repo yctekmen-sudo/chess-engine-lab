@@ -4,10 +4,11 @@ C++20 chess engine and experimentation platform, following the approved
 [architecture](docs/architecture-v1.0.md) and
 [milestone kickoff](docs/codex-kickoff-m0-m1.md).
 
-Current implementation: **M0 scaffold only**. It builds a small static core
-library and a smoke executable, and declares provisional source-level contracts.
-There is no chess rules adapter, evaluator, search, UCI process, or UI yet.
-M1 begins only after M0 review.
+Current implementation: **M1 chess core**, with a pinned Disservin adapter,
+FEN, legal moves, reversible traversal, snapshots, position identity and
+correctness tests. Native tests pass; **WASM portability remains unvalidated**
+because the SDK download is blocked. See [M1 validation](docs/m1-validation.md).
+M1 is awaiting review; M2 has not begun.
 
 ## Build and test
 
@@ -30,14 +31,14 @@ No dependencies are downloaded by CMake or needed at runtime.
 | Path | Responsibility |
 | --- | --- |
 | `engine/` | Core library and our own opaque chess/source snapshot contracts |
-| `tests/` | M0 contract compilation and linked runtime smoke test |
+| `tests/` | Contract smoke, perft, special-rule and restoration tests |
 | `evaluators/` | Reserved for M2 evaluator ABI and modules |
 | `controller/` | Reserved for M6 desktop/headless orchestration |
 | `gui/` | Reserved for M7 UI and M8 mobile packaging |
-| `third_party/` | Dependency pinning policy; no vendored code yet |
+| `third_party/` | Pinned MIT chess library and dependency policy |
 | `docs/` | Approved architecture, milestone instructions, developer guide |
 
 The C++ contracts are intentionally provisional; they are not the future C ABI.
 See [contract notes](docs/m0-contracts.md) and
-[third-party license inventory](THIRD_PARTY_LICENSES.md). This scaffold does not
+[third-party license inventory](THIRD_PARTY_LICENSES.md). This project does not
 assign a license to the project's original code.

@@ -1,7 +1,8 @@
 # Third-party dependency policy
 
-No third-party code is vendored or fetched by the M0 build. M1 may add
-Disservin/chess-library behind our own adapter after a separate review.
+M1 vendors Disservin/chess-library behind our own adapter. See
+[chess-library/README.md](chess-library/README.md) for the immutable pin.
+Configure, build and runtime require no dependency downloads.
 
 For each dependency, pin a full immutable commit (and archive checksum when
 using an archive), record its origin/revision/license in
