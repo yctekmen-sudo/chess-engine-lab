@@ -153,22 +153,23 @@ ChessEvalStatus config(ChessEvalHandle h, char *o, uint64_t n, uint64_t *r,
 ChessEvalStatus evaluate(ChessEvalHandle h, const ChessEvalPosition *p,
                          double *s, char *e, uint64_t en) {
   ++calls;
+  *s = 0; // Diagnostic violations must fail independently of finite-score checks.
   if (mode == "unknown")
     return 99;
   if (mode == "negative_status")
     return -1;
-  if (mode == "error") {
+  if (mode == "error" || mode == "success_diagnostic") {
     std::strcpy(e, "fixture failure");
-    return 6;
+    return mode == "error" ? CHESS_EVAL_INTERNAL_ERROR : CHESS_EVAL_OK;
   }
-  if (mode == "bad_diagnostic") {
+  if (mode == "bad_diagnostic" || mode == "success_unterminated") {
     std::memset(e, 'x', en);
-    return 6;
+    return mode == "bad_diagnostic" ? CHESS_EVAL_INTERNAL_ERROR : CHESS_EVAL_OK;
   }
-  if (mode == "utf8_diagnostic") {
+  if (mode == "utf8_diagnostic" || mode == "success_invalid_utf8") {
     e[0] = char(0xff);
     e[1] = 0;
-    return 6;
+    return mode == "utf8_diagnostic" ? CHESS_EVAL_INTERNAL_ERROR : CHESS_EVAL_OK;
   }
   if (mode == "nan" || mode == "inf" || mode == "-inf") {
     *s = mode == "nan"   ? std::numeric_limits<double>::quiet_NaN()
@@ -413,7 +414,8 @@ void hostile() {
   auto core = create_chess_core();
   auto p = evaluation_snapshot(*core->snapshot(*core->initial_position()));
   for (auto m : {"unknown", "negative_status", "error", "bad_diagnostic",
-                 "utf8_diagnostic", "nan", "inf", "-inf"}) {
+                 "utf8_diagnostic", "success_diagnostic", "success_unterminated",
+                 "success_invalid_utf8", "nan", "inf", "-inf"}) {
     mode = m;
     {
       auto instance = module.create("{}");

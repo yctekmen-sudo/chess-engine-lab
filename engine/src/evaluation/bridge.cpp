@@ -7,8 +7,9 @@ ChessEvalPosition evaluation_snapshot(const PositionSnapshot &s) {
   ChessEvalPosition p{};
   p.struct_size = sizeof p;
   p.schema_major = 1;
+  const auto squares = s.squares();
   for (size_t i = 0; i < 64; ++i) {
-    auto code = static_cast<unsigned>(s.squares()[i]);
+    auto code = static_cast<unsigned>(squares[i]);
     if (code > 12)
       throw EvaluationError("invalid source piece");
     if (code)

@@ -130,6 +130,14 @@ Selection changes must be serialized with uses of the old evaluator. Each
 instance serializes its own evaluation calls and remains quarantined after an
 error until replacement. No search or fallback policy is implemented here.
 
+Native evaluator artifact files must remain immutable from hashing/loading until
+the module is unloaded, including while any instance retains it. Do not overwrite
+or rebuild a loaded library in place: its recorded SHA-256 identifies the bytes
+that were hashed, and mutation can invalidate that identity or mapped code.
+Build replacements at a separate, versioned path, then stop uses and destroy all
+instances before unloading the old module. The in-process loader does not enforce
+filesystem immutability or protect against concurrent artifact modification.
+
 WebAssembly selects `EvaluatorModule::bundled("material-v1", wasm_sha256)`.
 The digest must be the encompassing WASM artifact's actual SHA-256, supplied by
 packaging. `tests/evaluation/run_wasm.cjs` demonstrates this with Node's crypto

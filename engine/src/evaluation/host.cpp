@@ -23,6 +23,10 @@ std::string digest(const std::string &bytes) {
   return picosha2::hash256_hex_string(bytes);
 }
 void check(ChessEvalStatus s, const std::array<char, 4096> &e) {
+  // An empty diagnostic is already terminated and valid UTF-8. Only the known
+  // success status may bypass the full diagnostic validation below.
+  if (s == CHESS_EVAL_OK && e.front() == '\0')
+    return;
   require(std::memchr(e.data(), 0, e.size()), "unterminated diagnostic");
   // JSON escaping validates the entire UTF-8 diagnostic without interpreting
   // it.
