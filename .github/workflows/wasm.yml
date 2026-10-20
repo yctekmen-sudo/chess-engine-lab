@@ -38,7 +38,7 @@ jobs:
         run: |
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
           cmake --build --preset wasm-debug
-      - name: Run M0, M1 and M2 golden tests under Node
+      - name: Run M0, M1, M2 and M3 golden tests under Node
         id: correctness
         run: |
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
@@ -56,9 +56,9 @@ jobs:
             echo "- SDK installation: $SDK_RESULT"
             echo "- Configure: $CONFIGURE_RESULT"
             echo "- Build: $BUILD_RESULT"
-            echo "- Node M0/M1/M2 tests: $TEST_RESULT"
+            echo "- Node M0/M1/M2/M3 tests: $TEST_RESULT"
             if [[ "$TEST_RESULT" == success ]]; then
-              echo "All M0/M1/M2 chess, ABI layout, bundled evaluator and error tests passed."
+              echo "All M0/M1/M2/M3 chess, ABI layout, bundled evaluator and error tests passed."
             else
               echo "WebAssembly validation has NOT passed. Inspect the failing step logs."
             fi
