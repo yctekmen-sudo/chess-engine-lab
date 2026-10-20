@@ -54,14 +54,19 @@ bool SearchScore::operator==(const SearchScore &b) const noexcept {
 }
 
 namespace {
+struct Cancelled {};
 struct OrderedMove {
   std::string text;
   std::unique_ptr<Move> move;
 };
-std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p) {
+std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
+                                       const CancellationToken *token = nullptr) {
   std::vector<OrderedMove> result;
-  for (auto &m : c.legal_moves(p))
+  for (auto &m : c.legal_moves(p)) {
+    if (token && token->requested())
+      throw Cancelled{};
     result.push_back({c.encode_move(p, *m), std::move(m)});
+  }
   std::sort(result.begin(), result.end(),
             [](const auto &a, const auto &b) { return a.text < b.text; });
   for (std::size_t i = 0; i < result.size(); ++i) {
@@ -177,6 +182,14 @@ struct Line {
   PVEnd end;
   std::string intended;
 };
+bool canonical_before(const ChessDecision &a, const ChessDecision &b) {
+  auto rank = [](DecisionKind k) {
+    return k == DecisionKind::claim_draw ? 0
+         : k == DecisionKind::claim_draw_with_intended_move ? 1 : 2;
+  };
+  return rank(a.kind) != rank(b.kind) ? rank(a.kind) < rank(b.kind)
+                                     : a.move < b.move;
+}
 struct Traversal {
   const ChessCore &core;
   Position &position;
@@ -184,30 +197,84 @@ struct Traversal {
   SearchOptions options;
   SearchStatistics &stats;
   std::vector<RepetitionSignature> history;
+  CancellationToken cancellation{};
+  const CompletedDepth *previous = nullptr;
+  std::vector<std::string> path{};
+  void poll() const {
+    if (cancellation.requested())
+      throw Cancelled{};
+  }
+  std::vector<OrderedMove> moves(bool hints) {
+    poll();
+    auto result = ordered_moves(core, position, &cancellation);
+    poll();
+    if (hints)
+      prefer_previous(result);
+    return result;
+  }
+  void prefer_previous(std::vector<OrderedMove> &result) {
+    if (previous) {
+      std::vector<std::string> preferred;
+      if (path.empty()) {
+        for (const auto &v : previous->multipv)
+          if (v.decision.kind == DecisionKind::play)
+            preferred.push_back(v.decision.move);
+      } else {
+        const auto &pv = previous->best.principal_variation;
+        if (path.size() < pv.size() &&
+            std::equal(path.begin(), path.end(), pv.begin()))
+          preferred.push_back(pv[path.size()]);
+      }
+      auto dest = result.begin();
+      for (const auto &text : preferred) {
+        poll();
+        auto found = std::find_if(dest, result.end(),
+                                  [&](const auto &m) { return m.text == text; });
+        if (found != result.end()) {
+          std::rotate(dest, found, found + 1);
+          ++dest;
+        }
+      }
+    }
+  }
   std::size_t count(const RepetitionSignature &s) const {
-    return std::count(history.begin(), history.end(), s);
+    std::size_t n = 0;
+    for (const auto &entry : history) {
+      poll();
+      n += entry == s;
+    }
+    return n;
   }
   template <class F> auto child(const Move &m, F f) {
+    poll();
+    bool track_path = previous != nullptr;
+    auto text = track_path ? core.encode_move(position, m) : std::string{};
     return with_move(core, position, m, [&] {
-      history.push_back(repetition_signature(core, position));
+      if (track_path)
+        path.push_back(std::move(text));
+      try {
+        history.push_back(repetition_signature(core, position));
+      } catch (...) {
+        if (track_path) path.pop_back();
+        throw;
+      }
       using T = decltype(f());
       std::optional<T> result;
       try {
         result.emplace(f());
       } catch (...) {
         history.pop_back();
+        if (track_path) path.pop_back();
         throw;
       }
       history.pop_back();
+      if (track_path) path.pop_back();
       return std::move(*result);
     });
   }
-  Line node(int depth, std::uint64_t ply, std::optional<SearchScore> alpha,
-            std::optional<SearchScore> beta) {
-    ++stats.visited_nodes;
+  std::optional<Line> terminal(std::uint64_t ply, const PositionSnapshot &s) {
     auto status = core.status(position);
-    auto s = core.snapshot(position);
-    bool white = s->side_to_move() == Side::white;
+    bool white = s.side_to_move() == Side::white;
     auto terminal = [](SearchScore score, TerminalOutcome outcome) {
       return Line{score,
                   {DecisionKind::terminal, {}, outcome},
@@ -223,20 +290,24 @@ struct Traversal {
         core.known_dead_position(position))
       return terminal(SearchScore::finite(0), TerminalOutcome::draw);
     auto occurrences = count(history.back());
-    if (occurrences >= 5 || s->halfmove_clock() >= 150)
+    if (occurrences >= 5 || s.halfmove_clock() >= 150)
       return terminal(SearchScore::finite(0), TerminalOutcome::draw);
-    auto moves = ordered_moves(core, position);
-    if (moves.empty())
-      throw std::runtime_error("ongoing node has no legal moves");
+    return {};
+  }
+  std::optional<Line> claim(const PositionSnapshot &s,
+                            const std::vector<OrderedMove> &canonical_moves) {
+    poll();
+    auto occurrences = count(history.back());
     std::optional<Line> best;
-    if (occurrences >= 3 || s->halfmove_clock() >= 100)
+    if (occurrences >= 3 || s.halfmove_clock() >= 100)
       best = Line{SearchScore::finite(0),
                   {DecisionKind::claim_draw, {}},
                   {},
                   PVEnd::claim_draw,
                   {}};
     else
-      for (const auto &m : moves) {
+      for (const auto &m : canonical_moves) {
+        poll();
         bool eligible = child(*m.move, [&] {
           return count(history.back()) >= 3 ||
                  core.snapshot(position)->halfmove_clock() >= 100;
@@ -250,10 +321,38 @@ struct Traversal {
           break;
         }
       }
+    return best;
+  }
+  // exact=true is used only with an unbounded window. An ordered child can
+  // return a bound on equality. Re-search promising/canonically earlier ties
+  // with a full window and exact PV before letting them become publishable.
+  Line node(int depth, std::uint64_t ply, std::optional<SearchScore> alpha,
+            std::optional<SearchScore> beta, bool exact = false) {
+    poll();
+    // Outside the previous-PV prefix all descendants retain M3's canonical
+    // order, so a full-window traversal already supplies its canonical PV.
+    // Only a subtree that can actually receive a hint needs tie refinement.
+    if (exact) {
+      const auto *pv = previous ? &previous->best.principal_variation : nullptr;
+      exact = pv && path.size() < pv->size() &&
+              std::equal(path.begin(), path.end(), pv->begin());
+    }
+    ++stats.visited_nodes;
+    auto s = core.snapshot(position);
+    if (auto end = terminal(ply, *s))
+      return *end;
+    auto canonical_moves = moves(false);
+    if (canonical_moves.empty())
+      throw std::runtime_error("ongoing node has no legal moves");
+    auto best = claim(*s, canonical_moves);
+    auto moves = std::move(canonical_moves);
+    prefer_previous(moves);
+    bool white = s->side_to_move() == Side::white;
     auto better = [&](SearchScore a, SearchScore b) {
       return white ? a > b : a < b;
     };
     if (depth == 0) {
+      poll();
       ++stats.evaluator_calls;
       auto score =
           SearchScore::finite(evaluator.evaluate(evaluation_snapshot(*s)));
@@ -279,12 +378,26 @@ struct Traversal {
     }
     for (std::size_t i = 0; i < moves.size(); ++i) {
       const auto &m = moves[i];
-      auto line =
-          child(*m.move, [&] { return node(depth - 1, ply + 1, alpha, beta); });
-      if (!best || better(line.score, best->score)) {
-        line.action = {DecisionKind::play, m.text};
-        line.pv.insert(line.pv.begin(), m.text);
-        best = std::move(line);
+      poll();
+      bool direct_exact = exact && (!options.alpha_beta_enabled || (!alpha && !beta));
+      auto line = child(*m.move, [&] {
+        return node(depth - 1, ply + 1, alpha, beta, direct_exact);
+      });
+      ChessDecision action{DecisionKind::play, m.text};
+      auto competitive = [&] {
+        return !best || better(line.score, best->score) ||
+               (line.score == best->score && canonical_before(action, best->action));
+      };
+      if (competitive()) {
+        if (exact && !direct_exact)
+          line = child(*m.move, [&] {
+            return node(depth - 1, ply + 1, {}, {}, true);
+          });
+        if (competitive()) {
+          line.action = std::move(action);
+          line.pv.insert(line.pv.begin(), m.text);
+          best = std::move(line);
+        }
       }
       if (update() && i + 1 < moves.size()) {
         ++stats.alpha_beta_cutoffs;
@@ -344,6 +457,127 @@ SearchResult search(const ChessCore &c, const Position &root,
     r.completed_depth = 0;
   }
   r.statistics.elapsed = std::chrono::steady_clock::now() - start;
+  return r;
+}
+IterativeSearchResult iterative_search(
+    const ChessCore &c, const Position &root, const GameHistory &h, Evaluator &e,
+    IterativeSearchOptions options, CancellationToken cancellation,
+    SearchProgress progress) {
+  const auto start = std::chrono::steady_clock::now();
+  IterativeSearchResult r;
+  r.provenance.options = options;
+  r.provenance.history_incomplete = !h.complete();
+  std::optional<ChessDecision> fallback;
+  auto elapsed = [&] {
+    r.statistics.elapsed = std::chrono::steady_clock::now() - start;
+  };
+  try {
+    r.provenance.evaluator_identity = e.identity();
+    if (options.max_depth && (*options.max_depth < 1 || *options.max_depth > 64))
+      throw std::invalid_argument("max depth must be in [1,64]");
+    if (options.multipv_count < 1 || options.multipv_count > 256)
+      throw std::invalid_argument("MultiPV count must be in [1,256]");
+    if (!h.matches_root(c, root))
+      throw std::invalid_argument("history/root mismatch");
+    r.provenance.root = evaluation_snapshot(*c.snapshot(root));
+    r.provenance.history = h.occurrences();
+    if (!e.usable())
+      throw EvaluationError("evaluator is quarantined");
+    auto p = c.clone(root);
+    Traversal t{c, *p, e, {1, options.alpha_beta_enabled}, r.statistics,
+                h.occurrences()};
+    // Validation/terminal detection and safe fallback enumeration precede
+    // attaching the observer: a cancelled terminal never becomes a fallback.
+    auto snapshot = c.snapshot(*p);
+    if (auto line = t.terminal(0, *snapshot)) {
+      ++r.statistics.visited_nodes;
+      r.status = IterativeSearchStatus::terminal;
+      r.terminal_decision = line->action;
+      r.terminal_score = line->score;
+    } else {
+      auto legal = ordered_moves(c, *p);
+      if (legal.empty())
+        throw std::runtime_error("ongoing root has no legal moves");
+      fallback = ChessDecision{DecisionKind::play, legal.front().text};
+      t.cancellation = std::move(cancellation);
+      auto variation = [](Line line) {
+        return SearchVariation{std::move(line.action), line.score,
+             std::move(line.pv), line.end, std::move(line.intended)};
+      };
+      for (int depth = 1; depth <= options.max_depth.value_or(64); ++depth) {
+        t.poll();
+        ++r.statistics.visited_nodes; // one root node per started iteration
+        t.options.nominal_depth = depth;
+        t.previous = options.previous_pv_ordering_enabled && r.completed
+                         ? &*r.completed : nullptr;
+        std::vector<SearchVariation> ranking;
+        if (auto claim = t.claim(*snapshot, legal))
+          ranking.push_back(variation(std::move(*claim)));
+        for (const auto &m : t.moves(true)) {
+          t.poll();
+          // Independent full-window search: every candidate is exact. The
+          // shared traversal refines internal ordering ties before publishing.
+          auto line = t.child(*m.move, [&] {
+            return t.node(depth - 1, 1, {}, {}, true);
+          });
+          line.action = {DecisionKind::play, m.text};
+          line.pv.insert(line.pv.begin(), m.text);
+          ranking.push_back(variation(std::move(line)));
+        }
+        bool white = snapshot->side_to_move() == Side::white;
+        std::sort(ranking.begin(), ranking.end(), [&](const auto &a, const auto &b) {
+          if (a.score != b.score)
+            return white ? a.score > b.score : a.score < b.score;
+          return canonical_before(a.decision, b.decision);
+        });
+        ranking.erase(ranking.begin() + std::min(options.multipv_count, ranking.size()),
+                      ranking.end());
+        if (t.history != h.occurrences() || !t.path.empty())
+          throw std::runtime_error("unbalanced search history/path");
+        elapsed();
+        CompletedDepth next{depth, ranking.front(), std::move(ranking),
+                            r.statistics, r.provenance};
+        // Linearization point: last observation before moving the complete
+        // detached snapshot into committed storage. A later request retains it.
+        t.poll();
+        t.previous = nullptr;
+        r.completed = std::move(next);
+        if (progress) {
+          try {
+            progress(*r.completed); // value-copy: no alias to engine state
+          } catch (const std::exception &ex) {
+            throw std::runtime_error(std::string("progress callback: ") + ex.what());
+          } catch (...) {
+            throw std::runtime_error("unknown progress callback exception");
+          }
+        }
+        t.poll(); // includes requests made by the just-completed callback
+        r.status = options.max_depth ? IterativeSearchStatus::depth_reached
+                                    : IterativeSearchStatus::depth_limit_reached;
+      }
+    }
+  } catch (const Cancelled &) {
+    r.status = IterativeSearchStatus::cancelled;
+    if (!r.completed)
+      r.unevaluated_fallback = std::move(fallback);
+  } catch (const EvaluationError &ex) {
+    r.status = IterativeSearchStatus::evaluator_failed;
+    r.diagnostic = ex.what();
+  } catch (const std::exception &ex) {
+    r.status = IterativeSearchStatus::search_error;
+    r.diagnostic = ex.what();
+  } catch (...) {
+    r.status = IterativeSearchStatus::search_error;
+    r.diagnostic = "unknown iterative search exception";
+  }
+  if (r.status == IterativeSearchStatus::evaluator_failed ||
+      r.status == IterativeSearchStatus::search_error) {
+    r.completed.reset();
+    r.unevaluated_fallback.reset();
+    r.terminal_decision.reset();
+    r.terminal_score.reset();
+  }
+  elapsed();
   return r;
 }
 } // namespace chess_lab
