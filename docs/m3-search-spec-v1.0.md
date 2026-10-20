@@ -1,6 +1,6 @@
 # Chess Engine Lab — M3 Search Specification v1.0
 
-**Status:** APPROVED — Decisions 41–48 (including 42A).  
+**Status:** APPROVED — Decisions 41–49 (including 42A).  
 **Milestone:** M3 — synchronous fixed-depth reference search.  
 **Authority:** Supplements `docs/architecture-v1.0.md`, `docs/m1-contracts.md`, `docs/evaluation-abi-v1.0.md`, and the implemented public C++ headers. It does **not** change the evaluator C ABI.  
 **Repository path:** `docs/m3-search-spec-v1.0.md`.
@@ -18,6 +18,7 @@
 | D46 | Stable deterministic legal-move ordering, first-best tie among moves, claim-on-tie, reproducible PV; no search randomness. |
 | D47 | M3 uses only ChessCore's **sound but incomplete** `known_dead_position()` detector; false means unknown. Full general FIDE dead-position detection is **not** claimed. |
 | D48 | M3 is a fixed-depth correctness baseline. Iterative deepening, deadlines, cancellation, MultiPV, TT, ordering heuristics, quiescence, extensions, opening books and UCI/controller/UI are out of scope. |
+| D49 | Profiling-ready optimized native builds and reproducible search workloads are standard from M3 onward, without intrusive always-on hot-path tracing; measure before optimizing M1/M2/search internals. |
 
 The M3 code is a source-level C++20 interface usable by both native and Emscripten/WASM. It must not include Disservin types in its public headers or change the established C evaluator ABI. Favor exact rules and correctness over premature changes to M1 allocation mechanics; measure costs.
 
@@ -103,7 +104,19 @@ The caller-owned root and supplied actual history must remain unchanged under su
 
 The result records the evaluation identity and configuration, not a fabricated centipawn mapping. All tests use finite White-positive evaluation scores in the module's native units. Stable results are expected for identical inputs/build/provider without a cross-platform bitwise-FP promise.
 
-## 9. Required tests and acceptance gate
+## 9. Profiling and measurement readiness (D49)
+
+The engine must support **both** reproducible benchmarks and sampling-profiler inspection, without changing chess behavior, the evaluation ABI, or hot-path semantics.
+
+- Add a documented native `native-profile` CMake preset (or equivalently named configure/build/test presets) using optimized `RelWithDebInfo` or an equivalent optimized configuration with usable debug symbols. Preserve frame pointers with `-fno-omit-frame-pointer` for GCC/Clang where supported, applied consistently to code being profiled. Use toolchain-appropriate approaches elsewhere; do not assume GCC flags work with MSVC. Keep existing Debug, Release and WASM configurations intact.
+- Make the exact profiling build reproducible via repository commands; CTest must work under that configuration. Do not force `-O0`, globally inhibit inlining, add sanitizers or enable tracing simply to make a profiling build. Inlined frames may be presented by a capable profiler from debug information.
+- Provide a deterministic, headless native search benchmark executable or mode with stable workload inputs: FEN plus supplied occurrence history, evaluator module/parameters or fingerprint, fixed depth, alpha-beta mode, warm-up/iterations, and a consumed result/checksum. Record the build/compiler and platform, visited nodes, evaluator calls, cutoffs, per-run elapsed time and relevant workload identifiers. No network or GUI dependency.
+- Keep standard M3 aggregate search counters inexpensive and precisely defined. Optional detailed tracing, per-phase clocks, allocation tracking or event markers must be explicitly enabled and have negligible/no work in normal benchmark builds; **do not timestamp or log every search node by default**.
+- Preserve distinguishable source-level boundaries for legal move generation, make/undo, draw/repetition checks, snapshot conversion, evaluator dispatch and recursive search. Optimizations may inline functions; do not require artificial no-inline attributes or freeze implementation layout.
+- Document how to attach an external native sampling profiler (for example Linux `perf`, VTune, Windows Performance Analyzer or macOS Instruments where supported) to the headless benchmark, and how to interpret CPU time, call stacks, allocations, cache misses and branch misses. Hardware counters and external tools may be unavailable in CI or restricted environments; do not fabricate such measurements or make them mandatory acceptance gates.
+- Differentiate **normal Release performance benchmarks** from instrumented/traced runs or a profiling build; record compile flags, profiler overhead, warm-up and run conditions. A profiling build is for attributing costs, not automatically the canonical throughput baseline. WASM/browser source-map profiling and device-specific profiler validation may be added later; Node/WASM correctness remains a separate gate.
+
+## 10. Required tests and acceptance gate
 
 **Reference/oracle testing.** Build an independently readable exhaustive reference minimax for small synthetic deterministic trees and selected genuine chess positions. Compare alpha-beta on/off exact root score and selected action, including first-best ties, claim ties, White/Black perspective, strict bound cutoffs, mate preference (faster victory/slower defeat), and finite values above any traditional mate sentinel. Assert each returned PV is legal and ends in a position consistent with the returned decision/termination. Validate root-to-child mate increments and score comparison edge cases (negative zero; reject NaN/infinity).
 
@@ -111,11 +124,11 @@ The result records the evaluation identity and configuration, not a fabricated c
 
 **Failure testing.** Controlled host ABI provider fails on a later evaluation call after earlier candidate moves have been examined; induce explicit statuses, invalid status and nonfinite values through M2 where practical. Assert `EVALUATOR_FAILED`, empty decision/score/PV, quarantined instance, diagnostic, no fallback, unchanged source root/history, and no retained hypothetical frames. Exercise non-evaluator traversal errors independently. Confirm subsequent search with replaced evaluator succeeds. No C++ exceptions cross the C ABI.
 
-**Portability/performance.** Integrate with existing CMake/CTest presets: native Debug, native Release, WASM Debug under pinned Emscripten 4.0.10 / Node and GitHub Actions. Existing M0/M1/M2 and ABI layout tests remain green. Add at least one Release benchmark with reproducible FEN/history, evaluator fingerprint, depth, pruning mode, node/evaluation/cutoff counts, elapsed duration, hardware/compiler/toolchain, and limitations. Run sanitizers where practical; do not claim untested browser, Android, iOS, Windows or macOS success.
+**Portability/performance.** Integrate with existing CMake/CTest presets: native Debug, native Release, the D49 optimized native profiling preset, and WASM Debug under pinned Emscripten 4.0.10 / Node and GitHub Actions. Existing M0/M1/M2 and ABI layout tests remain green. Add at least one Release benchmark with reproducible FEN/history, evaluator fingerprint, depth, pruning mode, node/evaluation/cutoff counts, elapsed duration, hardware/compiler/toolchain, and limitations. Run sanitizers where practical; do not claim untested browser, Android, iOS, Windows or macOS success.
 
-Document real commands and measured results in `docs/m3-validation.md`, including any known limitations or departures from the approved spec. No simulated passing CI and no speculative performance percentages.
+Document real commands and measured results in `docs/m3-validation.md`, including the profiling preset, repeatable profiler command/workload, observed Release benchmark baseline, and any known limitations or departures from the approved spec. No simulated passing CI and no speculative performance percentages.
 
-## 10. M3 completion boundary
+## 11. M3 completion boundary
 
 M3 is complete when a new C++ search library API is exercised by independently verified native and WASM tests; all exact-score, optional-claim, history, deterministic-choice, evaluator-error and restoration requirements pass; and the validation report and benchmarks are submitted for review.
 
