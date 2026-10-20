@@ -102,6 +102,13 @@ endif()
 add_library(chess_search STATIC engine/src/search/search.cpp)
 add_library(ChessEngineLab::Search ALIAS chess_search)
 target_link_libraries(chess_search PUBLIC chess_evaluation)
+if(EMSCRIPTEN)
+  # Uniform depth 64 plus exception-safe traversal exceeds Emscripten's
+  # default 64 KiB stack in Debug. Export the search runtime requirement to
+  # linked consumers; keep the full depth-cap test on WASM as well as native.
+  target_link_options(chess_search INTERFACE -sSTACK_SIZE=2097152
+    "$<$<CONFIG:Debug>:-sSTACK_OVERFLOW_CHECK=2>")
+endif()
 if(BUILD_TESTING)
   add_executable(m3_search tests/search/m3_search.cpp)
   target_link_libraries(m3_search PRIVATE chess_search evaluation_support material_provider)
