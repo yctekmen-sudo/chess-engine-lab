@@ -2,14 +2,15 @@
 
 C++20 chess engine and experimentation platform, following the approved
 [architecture](docs/architecture-v1.0.md) and
-[M4 kickoff](docs/codex-kickoff-m4.md).
+[M5 kickoff](docs/codex-kickoff-m5.md).
 
-Current implementation: **M4 iterative search**, on top of the M1 chess core,
-M2 evaluator host/C ABI and preserved M3 fixed-depth API. Search adds cooperative
-cancellation, completed-depth progress, exact ranked MultiPV and optional
-previous-PV ordering. See [M4 validation](docs/m4-validation.md) for the API,
-commands, tests, measured costs and platform limits, and [M3 validation](docs/m3-validation.md)
-for the fixed-depth baseline. M4 awaits architecture/code review.
+Current implementation: **M5 history-safe transposition tables**, on top of the
+preserved M1–M4 core, evaluator and search APIs. Iterative search can attach a
+controller-owned, bounded table; numeric reuse requires explicit evaluator
+certification and exact context/depth verification. Tables are disabled by
+default. See [M5 validation](docs/m5-validation.md) for the API, tests, measured
+cold/warm costs and platform limits, and [M4 validation](docs/m4-validation.md)
+for iterative cancellation/progress/MultiPV behavior. M5 awaits architecture/code review.
 
 ## Build and test
 
