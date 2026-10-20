@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chess_lab/chess_core.hpp>
 #include <chess_lab/evaluation.hpp>
+#include <chess_lab/transposition_table.hpp>
 #include <chrono>
 #include <compare>
 #include <functional>
@@ -100,6 +101,7 @@ struct SearchStatistics {
   std::uint64_t visited_nodes = 0, evaluator_calls = 0, alpha_beta_cutoffs = 0;
   // Whole invocation, including validation/cloning and failure cleanup.
   std::chrono::nanoseconds elapsed{};
+  TranspositionStatistics transposition;
 };
 struct SearchResult {
   SearchStatus status = SearchStatus::search_error;
@@ -168,6 +170,8 @@ struct SearchProvenance {
   ChessEvalPosition root{};
   std::vector<RepetitionSignature> history;
   bool history_incomplete = true;
+  bool tt_numeric_certified = false;
+  std::uint64_t tt_value_policy = 1;
 };
 struct CompletedDepth {
   int depth;
@@ -196,5 +200,6 @@ struct IterativeSearchResult {
 using SearchProgress = std::function<void(CompletedDepth)>;
 IterativeSearchResult iterative_search(
     const ChessCore &, const Position &, const GameHistory &, Evaluator &,
-    IterativeSearchOptions = {}, CancellationToken = {}, SearchProgress = {});
+    IterativeSearchOptions = {}, CancellationToken = {}, SearchProgress = {},
+    TranspositionTableUse = {});
 } // namespace chess_lab

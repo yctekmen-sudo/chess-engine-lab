@@ -89,7 +89,7 @@ three WASM commands above. A preset alone is not portability evidence.
 `.github/workflows/native.yml` prepares Ubuntu 24.04 build tools and runs the
 native Debug, Release and Profile configure/build/CTest sequences on pushes and
 pull requests. Observed current native and WASM results are linked in
-[M4 validation](m4-validation.md); earlier milestone reports retain their
+[M5 validation](m5-validation.md); earlier milestone reports retain their
 historical environments and results.
 
 Linux native behavior has been exercised locally, and GitHub-hosted Linux
@@ -104,7 +104,7 @@ The separate `.github/workflows/wasm.yml` workflow runs on Ubuntu 24.04 for
 pushes and pull requests, alongside the unchanged native workflow. It installs
 emsdk from immutable commit `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb` and
 SDK version `4.0.10` (explicitly selecting its Node 22.16.0 for CTest), then configures/builds the
-existing `wasm-debug` preset and runs all seven M0–M4 suites with verbose CTest.
+existing `wasm-debug` preset and runs all eight M0–M5 suites with verbose CTest.
 Successful logs include all golden perft counts and the M1 correctness result.
 The job summary reports installation, configure, build and test outcomes;
 any failed command fails the job. No tests are skipped or relaxed.
@@ -216,3 +216,43 @@ browser message/shared-memory transport remains future controller work.
 per-depth/cumulative work, then runs an M3 depth-N reference. See
 [M4 validation](m4-validation.md) for arguments, observed ordering overhead,
 pinned CI evidence and the initial WASM stack-budget failure/correction.
+
+
+## M5 optional transposition tables
+
+Existing calls remain TT-free. An owning controller can attach bounded storage
+across sequential searches/games without changing the evaluator ABI:
+
+```cpp
+chess_lab::TranspositionTable table(8 * 1024 * 1024);
+chess_lab::TranspositionTableUse use{
+    &table, chess_lab::EvaluatorCacheCompatibility::deterministic_position, 1};
+auto result = chess_lab::iterative_search(
+    *core, *root, history, evaluator, options, stop.token(), {}, use);
+if (result.status == chess_lab::IterativeSearchStatus::evaluator_failed ||
+    result.status == chess_lab::IterativeSearchStatus::search_error)
+  table.clear(); // OWNER action, after invocation returns
+```
+
+Certify only deterministic evaluators whose complete inputs/behavior are
+identified by the fingerprint and value-policy namespace. Certification is not
+inferred from M2 identity. The default attachment is hint-only; stateful/random
+experiments should omit the table entirely when preserving evaluation call order
+matters. Exhaustive (`alpha_beta_enabled=false`) mode ignores even a populated
+table, with no probes, hints or writes.
+
+A table allows one active invocation; clear/resize are idle-only and checked.
+The owner must retain it and await search return before resource changes.
+Cancellation preserves completed subtree entries; errors require owner clearing
+of only the attached table. New evaluator/depth/history/policy contexts are
+verified automatically, so correctness does not rely on a manual clear at each
+new game or evaluator selection.
+
+`capacity_bytes()` reports actual owned allocation after conservative rounding,
+including retained context/index storage. Zero/too-small budgets disable
+allocation. Internal cached values/bounds cannot prove a canonical played PV;
+search revalidates endpoints or re-searches before publishing any exact line.
+The initial implementation prioritizes proof over hit rate and measured slower
+than TT off with the cheap material provider, despite useful warm evaluator-call
+reductions. See [M5 validation](m5-validation.md) and its raw CSV for exact
+commands, byte accounting, all cold/warm/off measurements and pinned CI evidence.
