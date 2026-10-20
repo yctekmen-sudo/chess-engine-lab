@@ -324,3 +324,23 @@ linear exact-history comparisons; benchmark throughput includes those costs.
 Only Linux native and the observed Node/WASM execution are validation targets.
 Browser, mobile, Windows and macOS success is not claimed. M3 stops at an open
 PR for ChatGPT architecture/code review; do not merge or begin M4.
+
+## PR #4 terminal-outcome correction
+
+Addresses [the architecture review comment](https://github.com/yctekmen-sudo/chess-engine-lab/pull/4#issuecomment-6296661899)
+on `TERMINAL(outcome)` (architecture D30 / §4.3).
+`ChessDecision::terminal_outcome` is now an optional `TerminalOutcome` with
+`white_win`, `black_win`, and `draw` values (the repository's lowercase C++
+spelling convention). Search supplies the winner directly from checkmate's
+side to move; stalemate, known-dead, fivefold and 75-move terminals carry draw.
+Play and both claim decisions have no terminal payload, including when a
+played move leads to a terminal PV endpoint. Claims remain optional actions.
+
+Both independent oracles now include outcomes in decision equality. Regression
+checks require both checkmate winners (also at clock 150), stalemate/known-dead,
+75-move and fifth-repetition root outcomes, and outcome presence exactly for
+terminal decisions across real and generated trees. Root scoring, mate distances,
+PV semantics, draw precedence, failure cleanup and the C evaluator ABI are
+unchanged. No performance redesign or terminal-reason taxonomy was added.
+
+Validation reruns for this correction are recorded below.

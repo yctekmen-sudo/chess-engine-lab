@@ -208,18 +208,23 @@ struct Traversal {
     auto status = core.status(position);
     auto s = core.snapshot(position);
     bool white = s->side_to_move() == Side::white;
-    auto terminal = [](SearchScore score) {
-      return Line{score, {DecisionKind::terminal, {}}, {}, PVEnd::terminal, {}};
+    auto terminal = [](SearchScore score, TerminalOutcome outcome) {
+      return Line{score,
+                  {DecisionKind::terminal, {}, outcome},
+                  {},
+                  PVEnd::terminal,
+                  {}};
     };
     if (status == PositionStatus::checkmate)
-      return terminal(white ? SearchScore::black_mate(ply)
-                            : SearchScore::white_mate(ply));
+      return terminal(
+          white ? SearchScore::black_mate(ply) : SearchScore::white_mate(ply),
+          white ? TerminalOutcome::black_win : TerminalOutcome::white_win);
     if (status == PositionStatus::stalemate ||
         core.known_dead_position(position))
-      return terminal(SearchScore::finite(0));
+      return terminal(SearchScore::finite(0), TerminalOutcome::draw);
     auto occurrences = count(history.back());
     if (occurrences >= 5 || s->halfmove_clock() >= 150)
-      return terminal(SearchScore::finite(0));
+      return terminal(SearchScore::finite(0), TerminalOutcome::draw);
     auto moves = ordered_moves(core, position);
     if (moves.empty())
       throw std::runtime_error("ongoing node has no legal moves");

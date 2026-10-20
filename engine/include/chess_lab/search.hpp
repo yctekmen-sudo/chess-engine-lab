@@ -69,10 +69,13 @@ enum class DecisionKind {
   claim_draw_with_intended_move,
   terminal
 };
+enum class TerminalOutcome { white_win, black_win, draw };
 struct ChessDecision {
   DecisionKind kind;
   // Played move for play; announced, UNPLAYED move for an intended claim.
   std::string move;
+  // Present exactly for terminal decisions, never for a play or draw claim.
+  std::optional<TerminalOutcome> terminal_outcome{};
   bool operator==(const ChessDecision &) const = default;
 };
 enum class DecisionSource { search, opening_book }; // book integration deferred

@@ -202,13 +202,16 @@ Expected oracle(const Tree &t, int id, int depth) {
   if (n.status == PositionStatus::checkmate)
     return {n.side == Side::white ? SearchScore::black_mate(0)
                                   : SearchScore::white_mate(0),
-            {DecisionKind::terminal, {}},
+            {DecisionKind::terminal,
+             {},
+             n.side == Side::white ? TerminalOutcome::black_win
+                                   : TerminalOutcome::white_win},
             {},
             PVEnd::terminal,
             {}};
   if (n.status == PositionStatus::stalemate || n.dead || n.clock >= 150)
     return {SearchScore::finite(0),
-            {DecisionKind::terminal, {}},
+            {DecisionKind::terminal, {}, TerminalOutcome::draw},
             {},
             PVEnd::terminal,
             {}};
@@ -255,6 +258,9 @@ Expected oracle(const Tree &t, int id, int depth) {
 }
 void verify_pv(const ChessCore &c, const Position &root,
                const SearchResult &r) {
+  check(r.decision->terminal_outcome.has_value() ==
+            (r.decision->kind == DecisionKind::terminal),
+        "terminal outcome present exactly for terminal decisions");
   auto p = c.clone(root);
   std::vector<std::unique_ptr<UndoToken>> undo;
   for (const auto &s : r.principal_variation) {
@@ -428,13 +434,16 @@ Expected chess_oracle(const ChessCore &c, const Position &p, int depth) {
   if (status == PositionStatus::checkmate)
     return {s->side_to_move() == Side::white ? SearchScore::black_mate(0)
                                              : SearchScore::white_mate(0),
-            {DecisionKind::terminal, {}},
+            {DecisionKind::terminal,
+             {},
+             s->side_to_move() == Side::white ? TerminalOutcome::black_win
+                                              : TerminalOutcome::white_win},
             {},
             PVEnd::terminal,
             {}};
   if (status == PositionStatus::stalemate || c.known_dead_position(p))
     return {SearchScore::finite(0),
-            {DecisionKind::terminal, {}},
+            {DecisionKind::terminal, {}, TerminalOutcome::draw},
             {},
             PVEnd::terminal,
             {}};
@@ -499,6 +508,10 @@ void real_rules() {
   for (auto fen : {"7k/6Q1/5K2/8/8/8/8/8 b - - 150 1",
                    "7K/6q1/5k2/8/8/8/8/8 w - - 150 1"}) {
     auto r = run(fen);
+    auto expected = fen[0] == '7' && fen[1] == 'k' ? TerminalOutcome::white_win
+                                                   : TerminalOutcome::black_win;
+    check(r.decision == ChessDecision{DecisionKind::terminal, {}, expected},
+          "explicit checkmate winner payload");
     check(r.status == SearchStatus::terminal && r.completed_depth == 0 &&
               r.score->distance() == 0 && r.statistics.evaluator_calls == 0,
           "mate overrides 75 moves");
@@ -511,6 +524,8 @@ void real_rules() {
               r.score == SearchScore::finite(0) &&
               r.statistics.evaluator_calls == 0,
           "stalemate/known dead");
+    check(r.decision->terminal_outcome == TerminalOutcome::draw,
+          "drawn root payload");
   }
   auto mate = run("7k/8/5KQ1/8/8/8/8/8 w - - 149 1");
   check(mate.score == SearchScore::white_mate(1) &&
@@ -541,6 +556,8 @@ void real_rules() {
   check(auto_draw.status == SearchStatus::terminal &&
             auto_draw.statistics.evaluator_calls == 0,
         "75 automatic");
+  check(auto_draw.decision->terminal_outcome == TerminalOutcome::draw,
+        "75 move draw payload");
   constant = 42;
   auto win = run("4k3/8/8/8/8/8/P7/R3K3 w - - 100 1");
   check(win.decision->kind == DecisionKind::play &&
@@ -623,6 +640,8 @@ void real_rules() {
       check(r.status == SearchStatus::terminal &&
                 r.score == SearchScore::finite(0),
             "exact fifth automatic");
+      check(r.decision->terminal_outcome == TerminalOutcome::draw,
+            "fivefold draw payload");
     }
   }
   auto imported = GameHistory::starting_at(*c, *p);
