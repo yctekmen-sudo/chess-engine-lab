@@ -290,7 +290,28 @@ cmake --build --preset wasm-debug
 ctest --preset wasm-debug --verbose
 ```
 
-Observed follow-up execution results and CI links will be recorded after the
-runs complete. Local WASM remains unavailable because the pinned SDK is absent;
+Local follow-up runs passed all 5/5 tests in native Debug (11.23 s) and
+Release (0.43 s), including M0/M1, M2 with the new diagnostic fixtures, and
+separate C11/C++20 ABI layouts.
+
+Validated implementation/test commit:
+`39c51a2e20988a5bfaad0799623fd14d139eed93`.
+
+- [Native push run 39381407037](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39381407037):
+  Debug and Release both passed 5/5; CTest totals 13.40 s and 0.76 s,
+  respectively (Ubuntu 24.04, GCC/G++ 13.3.0).
+- [Native PR run 39381409569](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39381409569):
+  both matrix jobs also passed.
+- [WASM push run 39381406941](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39381406941):
+  configure/build passed; all 5/5 tests passed in 53.65 s. M0 0.06 s,
+  M1 52.70 s, M2 0.58 s, C layout 0.03 s, C++ layout 0.05 s.
+  The runner recorded encompassing WASM SHA-256
+  `6e843873b5aa63dc49ac0300c2ee6b06de342b25a30d8674e1816f437f7298e6`.
+- [WASM PR run 39381409576](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39381409576):
+  also passed.
+
+The subsequent report update changes documentation only; source and tests
+are exactly those of the validated commit above.
+Local WASM remains unavailable because the pinned SDK is absent;
 Node/WASM evidence comes from the GitHub-hosted workflow. Browser/device and
 Windows/macOS validation remain unclaimed. No merge or M3 work is included.
