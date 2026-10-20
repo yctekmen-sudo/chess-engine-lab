@@ -331,8 +331,8 @@ Addresses [the architecture review comment](https://github.com/yctekmen-sudo/che
 on `TERMINAL(outcome)` (architecture D30 / §4.3).
 `ChessDecision::terminal_outcome` is now an optional `TerminalOutcome` with
 `white_win`, `black_win`, and `draw` values (the repository's lowercase C++
-spelling convention). Search supplies the winner directly from checkmate's
-side to move; stalemate, known-dead, fivefold and 75-move terminals carry draw.
+spelling convention). Search supplies the winner as the opponent of the
+checkmated side to move; stalemate, known-dead, fivefold and 75-move terminals carry draw.
 Play and both claim decisions have no terminal payload, including when a
 played move leads to a terminal PV endpoint. Claims remain optional actions.
 
@@ -343,4 +343,30 @@ terminal decisions across real and generated trees. Root scoring, mate distances
 PV semantics, draw precedence, failure cleanup and the C evaluator ABI are
 unchanged. No performance redesign or terminal-reason taxonomy was added.
 
-Validation reruns for this correction are recorded below.
+Correction commit: `5501597f428b7ecf93f19dc43c3fdc11c6f612f7`.
+Rebuilt with the existing commands above and reran all six tests locally:
+Debug **6/6** (40.82 s), Release **6/6** (3.42 s), Profile **6/6** (2.98 s).
+Builds/tests overlapped; these elapsed times are correctness evidence, not new
+performance measurements. The benchmark baselines above remain the original
+M3 measurements.
+
+
+Observed CI for correction commit `5501597`:
+
+- [Native PR run 39464646461](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39464646461):
+  Debug, Release and Profile each passed **6/6**, in 28.16 s, 0.90 s and
+  1.55 s respectively. M3 passed in 16.01 s, 0.40 s and 0.50 s.
+- [Pinned WASM PR run 39464646379](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39464646379):
+  Emscripten 4.0.10 / Node 22.16.0 passed **6/6**, 44.22 s total; M3 passed
+  in 19.11 s with the updated terminal-outcome oracles and regression checks.
+  M3 encompassing artifact SHA-256:
+  `9c382cb089f1630fa20cd5022061c677f548e48d856f5754f510532701d2ae0d`.
+
+The result-recording follow-up changes documentation only. PR #4 remains open
+for follow-up architecture/code review; no merge or M4 work.
+
+Supplemental correction rerun: rebuilt `build/sanitize-m3` with the existing
+ASan/UBSan configuration and ran
+`ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build/sanitize-m3 -R m3_search --output-on-failure`.
+M3 passed **1/1** (168.95 s), with no reported sanitizer errors or compiler
+warnings. Leak detection remains disabled as documented above.
