@@ -1,6 +1,6 @@
 # Chess Engine Lab — Codex Kickoff for M4
 
-**Status:** DRAFT FOR ARCHITECT REVIEW — do not start coding until approved and present on main.  
+**Status:** READY FOR IMPLEMENTATION — approved and merged in documentation PR #7; M4 only, stop at implementation PR review.  
 **Milestone:** M4 — iterative deepening, cancellation, progress, exact MultiPV, PV ordering.  
 **Authoritative document:** docs/m4-search-spec-v1.0.md (Decisions 50–66).  
 **Existing contracts:** docs/architecture-v1.0.md, docs/m3-search-spec-v1.0.md, docs/m3-validation.md, docs/evaluation-abi-v1.0.md, engine/include/chess_lab/search.hpp, engine/src/search/search.cpp, CMakeLists.txt.  
