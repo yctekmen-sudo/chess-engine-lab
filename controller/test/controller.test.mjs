@@ -5,10 +5,10 @@ import {resolve} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {FideRules,DEFAULT_POSITION,matePossibility,Game,ManagedEngine,analyze} from '../dist/index.js';
+import {nativeEngine as native,nativeExecutable} from './native-paths.mjs';
 const initial={initialFen:DEFAULT_POSITION,moves:[],complete:true};
-const mock=resolve(import.meta.dirname,'mock.mjs'),build=process.env.CHESS_LAB_BUILD??resolve(import.meta.dirname,'../../build/native-debug');
+const mock=resolve(import.meta.dirname,'mock.mjs');
 const engine=(mode='normal',extra={})=>({path:process.execPath,args:[mock,mode],handshakeMs:500,stopGraceMs:50,...extra});
-const native=resolve(build,'chess_lab_uci');
 const record=(initialFen,moves=[],complete=false)=>({initialFen,moves,complete});
 const request=(game,limit={kind:'depth',depth:1})=>{const session=randomUUID();return {session,binding:game.begin(session),record:game.record(),limit};};
 async function instance(t,mode='normal',extra={}){const e=new ManagedEngine(engine(mode,extra));t.after(()=>e.close());await e.start();return e;}
@@ -32,7 +32,7 @@ test('independent Rules vs real ChessCore: generated replay and FIDE edge fixtur
  for(const count of [1,2,4])for(const complete of [true,false])fixtures.push(record(DEFAULT_POSITION,Array(count).fill(cycle).flat(),complete));
  let r=new FideRules();let seed=7;
  for(let i=0;i<24;i++){if(r.terminal())break;seed=(Math.imul(seed,1664525)+1013904223)>>>0;const legal=r.legal();r.play(legal[seed%legal.length]);fixtures.push(r.record());}
- const output=execFileSync(resolve(build,'m6_rules_probe'),[],{input:fixtures.map(f=>JSON.stringify(f)).join('\n')+'\n',encoding:'utf8',maxBuffer:4*1024*1024,timeout:10000}).trim().split('\n').map(JSON.parse);
+ const output=execFileSync(nativeExecutable('m6_rules_probe'),[],{input:fixtures.map(f=>JSON.stringify(f)).join('\n')+'\n',encoding:'utf8',maxBuffer:4*1024*1024,timeout:10000}).trim().split('\n').map(JSON.parse);
  assert.equal(output.length,fixtures.length);
  for(let i=0;i<fixtures.length;i++){
   const r=new FideRules(fixtures[i]),c=output[i];assert(!c.error,JSON.stringify(c));
@@ -113,7 +113,7 @@ test('invalid FENs and counter exhaustion match ChessCore validation boundaries'
  ];
  for(const fen of invalid) {
   assert.throws(()=>new FideRules(record(fen)),fen);
-  const c=JSON.parse(execFileSync(resolve(build,'m6_rules_probe'),[],{input:JSON.stringify(record(fen))+'\n',encoding:'utf8',timeout:2000}));assert(c.error,fen);
+  const c=JSON.parse(execFileSync(nativeExecutable('m6_rules_probe'),[],{input:JSON.stringify(record(fen))+'\n',encoding:'utf8',timeout:2000}));assert(c.error,fen);
  }
  const r=new FideRules(record('7k/8/8/8/8/8/q7/4K3 w - - 4294967295 1'));
  const before=r.fen();assert.throws(()=>r.play('e1d1'),/counter/);assert.equal(r.fen(),before);

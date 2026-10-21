@@ -3,7 +3,7 @@ import { request } from "node:http";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { Workspace } from "../dist/workspace/service.js";
@@ -12,6 +12,7 @@ import { Game } from "../dist/game.js";
 import { DEFAULT_POSITION } from "../dist/rules.js";
 import { document, importPgn, exportPgn } from "../dist/workspace/documents.js";
 import { resumeExperiment, createExperiment } from "../dist/experiment.js";
+import { nativeEngine } from "./native-paths.mjs";
 async function folder(t) {
   const p = await mkdtemp(join(tmpdir(), "m7-"));
   t.after(() => rm(p, { recursive: true, force: true }));
@@ -204,10 +205,7 @@ test("Game checkpoint preserves M6 receipt race and restart pauses clock", () =>
 });
 test("M6 optional boundary hook pauses after a completed game and resume deduplicates", async (t) => {
   const dir = await folder(t),
-    engine = resolve(
-      import.meta.dirname,
-      "../../build/native-debug/chess_lab_uci",
-    );
+    engine = nativeEngine;
   const cfg = {
     engines: [{ path: engine }, { path: engine }],
     openings: [
@@ -283,10 +281,7 @@ test("engine registry trust, stable command retry, identity change and stopped a
     w = await Workspace.open(dir);
   try {
     const config = {
-      path: resolve(
-        import.meta.dirname,
-        "../../build/native-debug/chess_lab_uci",
-      ),
+      path: nativeEngine,
       kind: "chesslab",
     };
     let a = await w.dispatch(
@@ -424,10 +419,7 @@ test("scheduler isolates experiments, records explicit competition, caps childre
         label: "fixture",
         trust: true,
         config: {
-          path: resolve(
-            import.meta.dirname,
-            "../../build/native-debug/chess_lab_uci",
-          ),
+          path: nativeEngine,
           kind: "chesslab",
         },
       }),
@@ -514,10 +506,7 @@ test("workspace pause and stop retain completed paired results at M6 boundaries"
         label: "fixture",
         trust: true,
         config: {
-          path: resolve(
-            import.meta.dirname,
-            "../../build/native-debug/chess_lab_uci",
-          ),
+          path: nativeEngine,
         },
       })
     ).result.id;
