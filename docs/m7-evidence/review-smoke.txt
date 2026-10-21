@@ -1,0 +1,10 @@
+✔ desktop static serving accepts native root/assets paths and rejects traversal and junction escapes (47.83479ms)
+✔ desktop registers the native executable, rejects relative paths, orients toward either human and reconnects its launcher (393.098261ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 488.830694

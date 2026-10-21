@@ -1,0 +1,26 @@
+✔ durable accepted IDs, lost ACK, stale tabs and paused restart (37.186142ms)
+✔ takeback audit restores clocks and variations never alter official moves (13.806762ms)
+✔ PGN branching, comments and illegal atomic rejection (8.247294ms)
+✔ loopback bootstrap, CSRF, hostile origins, WS snapshot and bounded bodies (49.869366ms)
+✔ Game checkpoint preserves M6 receipt race and restart pauses clock (3.972087ms)
+✔ M6 optional boundary hook pauses after a completed game and resume deduplicates (2706.330703ms)
+✔ server rejects oversized JSON, fake Host and unauthenticated websocket (22.983949ms)
+✔ engine registry trust, stable command retry, identity change and stopped analysis (526.902334ms)
+✔ failed durable write cannot acknowledge or publish a move (15.379683ms)
+✔ changed registered argv artifact requires explicit re-registration (450.688784ms)
+✔ workspace layout cannot forge scheduler authorization records (2.523489ms)
+✔ scheduler isolates experiments, records explicit competition, caps children and releases stopped leases (2853.343019ms)
+✔ workspace pause and stop retain completed paired results at M6 boundaries (3920.289049ms)
+✔ repeated launcher uses the protected local channel without another controller (8.489424ms)
+✔ duplicate resume cannot reset a running clock, and background persistence errors become visible (9.109716ms)
+✔ analysis PGN retains its played prefix, headers, root comments and annotations (7.698444ms)
+✔ post-rename write uncertainty freezes memory and restart reconciles the durable command once (13.992766ms)
+✔ provisional PV presentation is validated at the captured root and never changes official moves (5.119881ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10709.371402

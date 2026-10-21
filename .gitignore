@@ -6,3 +6,7 @@
 /work/
 /controller/node_modules/
 /controller/dist/
+/gui/node_modules/
+/gui/dist/
+/gui/test-results/
+/gui/playwright-report/

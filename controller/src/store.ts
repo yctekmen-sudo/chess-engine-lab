@@ -11,7 +11,9 @@ export function canonical(value:unknown):string {
 }
 export const digest=(value:unknown):string=>createHash('sha256').update(canonical(value)).digest('hex');
 export async function syncDirectory(path:string):Promise<void> {
-  const fd=await open(path,'r');try{await fd.sync();}finally{await fd.close();}
+  // Windows FlushFileBuffers requires a write-capable directory handle.
+  // Keep the flush mandatory; failures still prevent a durable ACK.
+  const fd=await open(path,process.platform==='win32'?'r+':'r');try{await fd.sync();}finally{await fd.close();}
 }
 export async function writeRecord(path:string,data:unknown,immutable=true):Promise<void> {
   await mkdir(dirname(path),{recursive:true});const temporary=join(dirname(path),'.tmp-'+randomUUID());

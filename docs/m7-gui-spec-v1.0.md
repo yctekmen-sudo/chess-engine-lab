@@ -1,6 +1,6 @@
 # Chess Engine Lab — M7 Desktop GUI and Local Controller Specification v1.0
 
-**Status:** Architecture APPROVED (D118–D137 individually, D138 architecture freeze). This is a proposed implementation specification for review; **not yet approved or merged**. Implementation must wait for this spec and the M7 kickoff to be reviewed and merged on `main`.
+**Status:** APPROVED AND MERGED — architecture D118–D137 and freeze D138 were approved; the specification and M7 kickoff were merged to `main` in PR #13 (merge `b057f5b89dacf6b812e61ccf2e344edfe86e7824`). User subsequently authorized M7 implementation. This status correction is carried on the M7 implementation branch; the code implementation remains subject to its own unmerged review PR.
 **Milestone:** M7 desktop browser GUI, local Node controller/server, pluggable evaluator calibration display, interactive games, analysis and experiments.
 **Baseline:** M6 merged on `main` at `b9c2ebd22019981ea9acc5665be8ccd39e21a5f3` when drafting. Authoritative older contracts: `docs/m6-controller-spec-v1.0.md`, `docs/evaluation-abi-v1.0.md`, M3–M5 specifications, C++ and TypeScript code. The implementation branch must re-check the current `main` SHA before any change.
 **Change rule:** User approval was per-decision for M7. D138 freezes feature-level architecture. Implementer may resolve compatible mechanical details, but any material behavioral conflict, new scope, or breach of M0–M6 guarantees requires explicit user review.

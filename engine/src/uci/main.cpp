@@ -59,6 +59,9 @@ class Adapter {
   }
   void identity() {
     const auto &i=evaluation.active().identity();
+    const auto &ev=evaluation.active();
+    if(!ev.calibration_json().empty())emit("info string chesslab evaluator calibration "+ev.calibration_digest()+" "+ev.calibration_json()+"\n");
+    else if(ev.calibration_diagnostic()!="raw_only: optional capability absent")emit("info string chesslab evaluator calibration "+clean(ev.calibration_diagnostic())+"\n");
     emit("info string chesslab evaluator artifact_sha256 "+i.artifact_sha256+" fingerprint "+i.fingerprint+"\ninfo string chesslab evaluator config "+clean(i.canonical_configuration)+"\n");
   }
   void position(const std::vector<std::string>&v) {
@@ -133,6 +136,7 @@ class Adapter {
             const auto &v=d.multipv[i];
             if(v.score.kind()==SearchScore::Kind::finite)o << score(v.score,white);
             o << "info depth " << d.depth << " time " << std::chrono::duration_cast<std::chrono::milliseconds>(d.statistics.elapsed).count() << " nodes " << d.statistics.visited_nodes << " multipv " << i+1;
+            if(v.score.kind()==SearchScore::Kind::finite){if(auto cp=evaluation.active().centipawns(v.score.value()))o << " score cp " << (white?*cp:-*cp);}
             if(v.score.kind()!=SearchScore::Kind::finite) {
               bool won=(v.score.kind()==SearchScore::Kind::white_mate)==white;
               o << " score mate " << (won?"":"-") << (v.score.distance()+1)/2;

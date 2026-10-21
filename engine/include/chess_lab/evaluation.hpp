@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <optional>
 namespace chess_lab {
 // Conversion validates all source discriminants and the resulting ABI fields.
 ChessEvalPosition evaluation_snapshot(const PositionSnapshot &source);
@@ -47,6 +48,11 @@ public:
   double evaluate(const ChessEvalPosition &position);
   const EvaluationIdentity &identity() const noexcept;
   bool usable() const;
+  // Presentation only: raw search/TT semantics and legacy identity stay intact.
+  const std::string &calibration_json() const noexcept;
+  const std::string &calibration_digest() const noexcept;
+  const std::string &calibration_diagnostic() const noexcept;
+  std::optional<int> centipawns(double raw_white) const noexcept;
 
 private:
   struct Impl;

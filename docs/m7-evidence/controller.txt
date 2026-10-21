@@ -1,0 +1,97 @@
+
+> @chess-lab/controller@0.6.0 test
+> npm run build && node --test --test-isolation=none --test-reporter=spec test/*.test.mjs
+
+
+> @chess-lab/controller@0.6.0 build
+> tsc
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+✔ independent Rules vs real ChessCore: generated replay and FIDE edge fixtures (3513.907506ms)
+✔ claim intentions remain unplayed; incomplete history retains positive evidence (27.52497ms)
+✔ timeout proof classes: witnesses, bare king, minor, KNN and cooperating material (9.859566ms)
+✔ receipt linearization, exact deadline, increment, stale and illegal candidates (348.516532ms)
+✔ accepted claims end clocks without increment or playing intended move (0.678384ms)
+✔ unknown flag is adjudication required; no heuristic chess winner (1321.210728ms)
+✔ partial stdout/CRLF, serial search barrier and ordinary UCI spoof ignored (398.743694ms)
+✔ adversarial duplicate invalidates session and process (190.446748ms)
+✔ adversarial bad invalidates session and process (189.283648ms)
+✔ adversarial huge invalidates session and process (181.131344ms)
+✔ adversarial crash invalidates session and process (191.679752ms)
+✔ unresolved stop discards process: hang (243.615763ms)
+✔ unresolved stop discards process: stop-late (241.78691ms)
+✔ bounded handshake no-uci (647.727111ms)
+✔ bounded handshake no-ready (690.975271ms)
+✔ trusted extension provenance requires explicit hash, rejects conflicts/nonadjacent (694.730259ms)
+✔ native analysis never plays; trusted claims validated independently (265.412103ms)
+✔ invalid FENs and counter exhaustion match ChessCore validation boundaries (278.336684ms)
+✔ superseded game failure never accepts a later completed engine proposal (628.49018ms)
+✔ stop grace gives no clock subsidy and unverified claim cannot stop time (1090.227926ms)
+✔ FIDE timeout win/draw requires certified possibility/impossibility (134.248901ms)
+✔ explicit shutdown invalidates active proposals and bounds unresponsive children (192.311838ms)
+✔ fixed-depth analysis watchdog kills a handshaken hung engine (243.246909ms)
+✔ intentional infinite analysis requires external cancellation and disposes the process (234.283688ms)
+✔ standard clock-mode fields carry projected remaining time and both increments (195.674996ms)
+✔ disposal during executable hashing cannot revive a closed process (138.026829ms)
+✔ seeded paired schedule swaps colors and preserves identical opening conditions (0.933546ms)
+✔ real native/mock paired match, durable identities, PGN, idempotent resume (3077.922999ms)
+✔ technical forfeit is separate from chess WDL and invalid-game policy (4749.522299ms)
+✔ writer lock conflicts, explicit stale recovery and live-owner refusal (5.303971ms)
+✔ torn records detected, interrupted attempts preserved and restarted from opening (2401.542553ms)
+✔ crash between immutable final and official publication recovers exactly once (3171.448262ms)
+✔ immutable records reject replacement and corrupt manifest is never counted (751.099394ms)
+✔ resume refuses changed argv artifact, missing executable and config identity (2707.904469ms)
+✔ actual CLI analyze, paired match, inspect, export, and repeated resume (5352.455053ms)
+✔ automated unresolved flag stops pair without fabricating result or forfeit (4528.761793ms)
+✔ startup forfeits name actual failed engine/color across paired colors and opening turns (11991.195473ms)
+✔ neutral startup identity drift invalidates games without assigning a forfeit (2435.931681ms)
+✔ fixed-depth CLI analysis uses searchCapMs and exits on a hung UCI engine (369.563842ms)
+✔ Fischer clock-mode paired matches send standard clock fields on every search (2442.537584ms)
+✔ native frozen v1.0 module stays raw-only after minor negotiation fallback (288.789727ms)
+✔ native calibrated cp has correct White/Black polarity and raw provenance (580.967697ms)
+✔ malformed optional calibration downgrades without evaluator failure; mate bypasses cp (585.236329ms)
+✔ durable accepted IDs, lost ACK, stale tabs and paused restart (19.562405ms)
+✔ takeback audit restores clocks and variations never alter official moves (16.268411ms)
+✔ PGN branching, comments and illegal atomic rejection (9.284784ms)
+✔ loopback bootstrap, CSRF, hostile origins, WS snapshot and bounded bodies (55.359913ms)
+✔ Game checkpoint preserves M6 receipt race and restart pauses clock (4.944471ms)
+✔ M6 optional boundary hook pauses after a completed game and resume deduplicates (2704.5844ms)
+✔ server rejects oversized JSON, fake Host and unauthenticated websocket (37.52151ms)
+✔ engine registry trust, stable command retry, identity change and stopped analysis (547.007156ms)
+✔ failed durable write cannot acknowledge or publish a move (12.077301ms)
+✔ changed registered argv artifact requires explicit re-registration (523.267228ms)
+✔ workspace layout cannot forge scheduler authorization records (3.425738ms)
+✔ scheduler isolates experiments, records explicit competition, caps children and releases stopped leases (2897.863592ms)
+✔ workspace pause and stop retain completed paired results at M6 boundaries (3889.226818ms)
+✔ repeated launcher uses the protected local channel without another controller (10.248232ms)
+✔ duplicate resume cannot reset a running clock, and background persistence errors become visible (11.216523ms)
+✔ analysis PGN retains its played prefix, headers, root comments and annotations (5.003676ms)
+✔ post-rename write uncertainty freezes memory and restart reconciles the durable command once (13.108635ms)
+✔ provisional PV presentation is validated at the captured root and never changes official moves (2.328835ms)
+✔ real handshake, honest raw scores, responsive isready, stop and serialization (325.914442ms)
+✔ transactional bad position/options and semantic go rejection (270.193856ms)
+✔ terminal 0000, mate polarity and bounded zero-time fallback (236.948444ms)
+✔ claim extension immediately adjacent with legal evaluated PLAY at MultiPV=1 (236.473567ms)
+✔ evaluator replacement rejects invalid module and preserves healthy selection (482.136924ms)
+✔ infinite retains depth-64 result until stop, including ready responsiveness (261.752773ms)
+✔ intended claim differs from strongest evaluated PLAY fallback (232.433816ms)
+✔ blocking evaluator keeps isready responsive and fast stop fallback is unevaluated (459.651502ms)
+✔ failure after provisional depth exits without bestmove and clears TT after search (502.53001ms)
+✔ quit during active search cancels, joins and exits cleanly (234.695163ms)
+ℹ tests 71
+ℹ suites 0
+ℹ pass 71
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 71810.259191
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

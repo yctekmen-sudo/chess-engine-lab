@@ -99,7 +99,7 @@ async function finalize(directory:string,g:ScheduledGame,attempt:Attempt):Promis
   await writeRecord(join(directory,'attempts',attempt.id,'final.json'),attempt);
   await writeRecord(join(directory,'games',g.id+'.json'),{game:g.id,attempt:attempt.id});
 }
-export async function resumeExperiment(directory:string,options:{takeoverStaleLock?:boolean;onProgress?:(value:unknown)=>void}={}) {
+export async function resumeExperiment(directory:string,options:{takeoverStaleLock?:boolean;onProgress?:(value:unknown)=>void;shouldContinue?:()=>boolean|Promise<boolean>}={}) {
   const release=await writerLock(directory,options.takeoverStaleLock??false);
   try {
     const {manifest,games}=await load(directory),config=manifest.config;
@@ -129,6 +129,7 @@ export async function resumeExperiment(directory:string,options:{takeoverStaleLo
     const done=await completed(directory,games);
     for(const g of games) {
       if(done.has(g.id))continue;
+      if(options.shouldContinue&&!await options.shouldContinue())break;
       const id='attempt-'+randomUUID(),dir=join(directory,'attempts',id),started=monotonic.now();
       await writeRecord(join(dir,'start.json'),{id,game:g.id,opening:g.opening,configDigest:digest(config)});
       let game=new Game(g.opening,config.time);const progress:unknown[]=[];

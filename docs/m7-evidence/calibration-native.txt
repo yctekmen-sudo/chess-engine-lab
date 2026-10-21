@@ -1,0 +1,11 @@
+✔ native frozen v1.0 module stays raw-only after minor negotiation fallback (294.217663ms)
+✔ native calibrated cp has correct White/Black polarity and raw provenance (586.547724ms)
+✔ malformed optional calibration downgrades without evaluator failure; mate bypasses cp (590.116943ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1481.86988
