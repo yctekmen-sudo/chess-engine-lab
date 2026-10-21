@@ -169,11 +169,15 @@ export class ManagedEngine implements EngineTransport {
   }
   async close():Promise<void> {
     if(this.state==='CLOSED')return;const child=this.process;
-    this.fail(Error('engine disposed'));this.state='CLOSED';
+    const closed=Error('engine disposed');this.state='CLOSED';
+    for(const w of this.waits){clearTimeout(w.timer);w.reject(closed);}this.waits.clear();
+    const a=this.active;this.active=undefined;
+    if(a){if(a.timer)clearTimeout(a.timer);if(a.grace)clearTimeout(a.grace);a.reject(closed);}
     if(!child||child.exitCode!==null||child.signalCode!==null)return;
     await new Promise<void>(resolve=>{
-      const timer=setTimeout(()=>{child.kill('SIGKILL');resolve();},this.stopMs);timer.unref();
-      child.once('exit',()=>{clearTimeout(timer);resolve();});child.kill('SIGKILL');
+      const timer=setTimeout(()=>child.kill('SIGKILL'),this.stopMs);timer.unref();
+      child.once('exit',()=>{clearTimeout(timer);resolve();});
+      child.stdin.write('quit\n',()=>{});
     });
   }
 }

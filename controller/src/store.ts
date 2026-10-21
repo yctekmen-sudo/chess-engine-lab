@@ -7,7 +7,7 @@ export function canonical(value:unknown):string {
     const s=JSON.stringify(value);if(s===undefined)throw Error('non-JSON data');return s;
   }
   if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
-  return '{'+Object.entries(value).sort(([a],[b])=>a.localeCompare(b,'en')).map(([k,v])=>JSON.stringify(k)+':'+canonical(v)).join(',')+'}';
+  return '{'+Object.entries(value).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([k,v])=>JSON.stringify(k)+':'+canonical(v)).join(',')+'}';
 }
 export const digest=(value:unknown):string=>createHash('sha256').update(canonical(value)).digest('hex');
 export async function syncDirectory(path:string):Promise<void> {

@@ -77,3 +77,7 @@ test('failure after provisional depth exits without bestmove and clears TT after
  const fatal=c.wait(s=>s.includes('chesslab fatal'));c.send('go depth 2');await fatal;
  assert(c.lines.some(s=>s.startsWith('info depth 1 ')));assert(!c.lines.some(s=>s.startsWith('bestmove ')));
 });
+test('quit during active search cancels, joins and exits cleanly',async t=>{
+ const c=client(t);await handshake(c);const exit=new Promise(resolve=>c.p.once('exit',code=>resolve(code)));
+ c.send('go infinite');c.send('quit');assert.equal(await exit,0);
+});

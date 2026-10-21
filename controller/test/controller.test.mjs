@@ -134,3 +134,7 @@ test('FIDE timeout win/draw requires certified possibility/impossibility',()=>{
  const v2=virtual(),win=new Game(record('7k/8/5K2/6Q1/8/8/8/8 b - - 0 1'),{kind:'fischer',initialMs:1,incrementMs:0},v2.clock);v2.set(1);
  assert.equal(win.flag().result,'1-0');assert.equal(win.events.at(-1).proof.status,'CAN_MATE');
 });
+test('explicit shutdown invalidates active proposals and bounds unresponsive children',async t=>{
+ const e=await instance(t,'hang'),g=new Game(initial);const p=e.search(request(g));
+ const rejected=assert.rejects(p,/disposed/);await e.close();await rejected;assert.equal(e.state,'CLOSED');assert.equal(g.record().moves.length,0);
+});

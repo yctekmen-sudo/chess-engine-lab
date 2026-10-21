@@ -107,7 +107,7 @@ handshake output, 8 MiB search output, bounded stderr/transcript, strict protoco
 states and argv spawn with shell:false. Every active result carries a local
 session, process generation and game/root/history/side binding. One go at a time;
 bestmove consumes exactly one session and a readyok barrier drains queued finals
-before reuse. Duplicate/unsolicited/malformed finals poison the process. Stop
+before reuse. Duplicate/unsolicited/malformed finals poison the process. Shutdown sends quit with a bounded kill deadline. Stop
 expires to kill; new activity requires a fresh explicit instance. Explicit kind
 and matching configured executable SHA-256 authorize Chess Lab claims; name alone
 never does. Conflicting/nonadjacent trusted extensions fail. Ordinary engine claim
@@ -180,7 +180,7 @@ requires inspecting the directory; there is no automatic destructive repair.
   was performed. General timeout/dead-position reachability is explicitly not
   claimed; uncertified timeout cases remain unresolved as required by D110.
 
-Local final controller result: **40/40 tests passed** in 35.739 s;
+Local final controller result: **42/42 tests passed** in 37.266 s;
 `m6-evidence/controller-tests.txt`. `npm audit --omit=dev` reported zero known
 runtime dependency vulnerabilities (`m6-evidence/runtime-dependency-audit.json`).
 Native final CTest totals: Debug 48.32 s, Release 2.94 s, Profile 2.23 s; each 9/9.
