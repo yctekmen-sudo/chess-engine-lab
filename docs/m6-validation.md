@@ -185,3 +185,19 @@ Local final controller result: **42/42 tests passed** in 37.266 s;
 runtime dependency vulnerabilities (`m6-evidence/runtime-dependency-audit.json`).
 Native final CTest totals: Debug 48.32 s, Release 2.94 s, Profile 2.23 s; each 9/9.
 These timings include concurrent local work and are evidence, not benchmarks.
+
+## Observed GitHub CI
+
+All required PR workflows completed successfully for implementation commit
+`bd07e38005a8d708c25daada47faf647523f31a9`:
+
+| Gate | Observed conclusion | Run |
+| --- | --- | --- |
+| Native Debug / Release / Profile, M0–M6 | success (all three matrix jobs) | https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39523133194 |
+| Node typecheck / lint / 42 controller and real-process integration tests | success | https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39523133299 |
+| Pinned Emscripten 4.0.10 / SDK Node M0–M5 | success | https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39523133202 |
+
+The final evidence commit updates documentation only. These are observed results
+for the tested implementation SHA, not assumed results for a queued rerun.
+The additional active-quit native test was also rerun locally through CTest in all
+three native configurations after the full baseline passes; all passed.
