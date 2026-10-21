@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { nativeEngine } from "../../controller/test/native-paths.mjs";
 // Compiled controller is the real server used in production, no HTTP mock.
 const serverModule = await import("../../controller/dist/server/server.js");
 let directory: string,
@@ -35,7 +36,7 @@ test("real browser play, engine registration, analysis, imports, refresh and Qui
   await page.getByRole("button", { name: /Engines/ }).click();
   await page
     .getByLabel("Absolute executable path")
-    .fill(resolve("../build/native-debug/chess_lab_uci"));
+    .fill(nativeEngine);
   await page.getByLabel("Extension provenance").selectOption("chesslab");
   await page.getByLabel("I trust this executable").check();
   await page.getByRole("button", { name: "Inspect and save profile" }).click();
@@ -143,7 +144,7 @@ test("promotion, FEN export and real paired experiment workspace", async ({
   await page.getByRole("button", { name: /Engines/ }).click();
   await page
     .getByLabel("Absolute executable path")
-    .fill(resolve("../build/native-debug/chess_lab_uci"));
+    .fill(nativeEngine);
   await page.getByLabel("I trust this executable").check();
   await page.getByRole("button", { name: "Inspect and save profile" }).click();
   await expect(page.getByText("Generation 1", { exact: true })).toBeVisible();
@@ -166,7 +167,12 @@ test("promotion, FEN export and real paired experiment workspace", async ({
       ],
     }),
   );
+  await page.getByLabel("Use independent engine limits").check();
+  await page.getByLabel("Engine A depth").fill("8");
+  await page.getByLabel("Engine B depth").fill("3");
+  await page.getByLabel("Capture bounded UCI protocol evidence").check();
   await page.getByRole("button", { name: "Create paired experiment" }).click();
+  await expect(page.getByText(/Engine A: depth 8; Engine B: depth 3/)).toBeVisible();
   await page.getByRole("button", { name: "Start / resume" }).click();
   await expect(page.getByText("completed", { exact: true })).toBeVisible({
     timeout: 20000,
@@ -216,7 +222,7 @@ test("new human-engine games face either human color and preserve manual flip", 
   await page.getByRole("button", { name: /Engines/ }).click();
   await page
     .getByLabel("Absolute executable path")
-    .fill(resolve("../build/native-debug/chess_lab_uci"));
+    .fill(nativeEngine);
   await page.getByLabel("I trust this executable").check();
   await page.getByRole("button", { name: "Inspect and save profile" }).click();
   await expect(page.getByText("Generation 1", { exact: true })).toBeVisible();

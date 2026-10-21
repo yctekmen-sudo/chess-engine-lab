@@ -4,3 +4,4 @@ export * from './engine.js';
 export * from './analysis.js';
 export * from './store.js';
 export * from './experiment.js';
+export * from './diagnostics.js';

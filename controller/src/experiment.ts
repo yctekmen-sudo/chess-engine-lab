@@ -7,14 +7,23 @@ import { ManagedEngine, executableIdentity, type EngineConfig, type EngineIdenti
 import { Game, monotonic, type Outcome, type TimeControl } from './game.js';
 import { FideRules, DEFAULT_POSITION, type RecordState, type Side } from './rules.js';
 import { canonical, digest, exists, names, readRecord, writeRecord, writerLock } from './store.js';
-export type MatchConfig={engines:[EngineConfig,EngineConfig];openings:RecordState[];seed:number;limit:Exclude<SearchLimit,{kind:'infinite'|'clock'}>|{kind:'clock'};time:TimeControl;failurePolicy:'technical_forfeit'|'invalid';maxPlies:number;searchCapMs:number};
+import { ProtocolCapture, SearchEvidenceCapture, DEFAULT_SEARCH_EVIDENCE_LIMITS, emptySearchTotals, addSearchTotals, mergeSearchTotals, type MoveSearch } from './diagnostics.js';
+export type MatchLimit=Exclude<SearchLimit,{kind:'infinite'|'clock'}>|{kind:'clock'};
+export type MatchConfig={engines:[EngineConfig,EngineConfig];openings:RecordState[];seed:number;limit:MatchLimit;engineLimits?:[MatchLimit,MatchLimit];uciDiagnostics?:{maxEntries:number;maxBytes:number};searchEvidence?:{maxEntries:number;maxBytes:number};time:TimeControl;failurePolicy:'technical_forfeit'|'invalid';maxPlies:number;searchCapMs:number};
 export type ScheduledGame={id:string;pair:string;white:0|1;black:0|1;opening:RecordState};
 type Artifact={path:string;sha256:string};
 type Manifest={id:string;created:string;config:MatchConfig;identities:EngineIdentity[];artifacts:Artifact[][];scheduleDigest:string;runtime:{node:string;controller:string;platform:string;arch:string;host:string;compiler:string};policies:Record<string,string>};
-type Attempt={id:string;game:string;record:RecordState;events:unknown[];clocks:Record<string,number|null>;outcome:Outcome;elapsedMs:number;progress:unknown[]};
+type Attempt={id:string;game:string;record:RecordState;events:unknown[];clocks:Record<string,number|null>;outcome:Outcome;elapsedMs:number;progress:unknown[];searches?:MoveSearch[];searchEvidence?:ReturnType<SearchEvidenceCapture['snapshot']>['searchEvidence'];protocol?:ReturnType<ProtocolCapture['snapshot']>};
 type Official={game:string;attempt:string};
 function object(v:unknown):Record<string,unknown> {if(!v||typeof v!=='object'||Array.isArray(v))throw Error('expected config object');return v as Record<string,unknown>;}
 function int(v:unknown,lo:number,hi:number):number {if(typeof v!=='number'||!Number.isSafeInteger(v)||v<lo||v>hi)throw Error(`expected integer ${lo}..${hi}`);return v;}
+function matchLimit(value:unknown,label:string):MatchLimit {
+  try {
+    const limit=object(value);
+    if(limit.kind==='depth')int(limit.depth,1,64);else if(limit.kind==='movetime')int(limit.ms,0,2147483647);else if(limit.kind!=='clock')throw Error('requires depth, movetime or clock');
+    return structuredClone(limit) as MatchLimit;
+  }catch(e){throw Error(`${label}: ${String(e)}`);}
+}
 export function validateConfig(value:unknown):MatchConfig {
   const v=object(value);if(!Array.isArray(v.engines)||v.engines.length!==2)throw Error('exactly two engines required');
   const engines=v.engines.map(raw=>{
@@ -32,12 +41,24 @@ export function validateConfig(value:unknown):MatchConfig {
     const r=object(raw);if(typeof r.initialFen!=='string'||typeof r.complete!=='boolean'||!Array.isArray(r.moves)||r.moves.some(m=>typeof m!=='string'))throw Error('invalid opening history');
     const rules=new FideRules(r as RecordState);return rules.record();
   });
-  const limit=object(v.limit);if(limit.kind==='depth')int(limit.depth,1,64);else if(limit.kind==='movetime')int(limit.ms,0,2147483647);else if(limit.kind!=='clock')throw Error('match requires depth, movetime or clock');
+  const limit=matchLimit(v.limit,'limit');
+  let engineLimits:MatchConfig['engineLimits'];
+  if(v.engineLimits!==undefined){
+    if(!Array.isArray(v.engineLimits)||v.engineLimits.length!==2)throw Error('engineLimits requires exactly two limits: Engine A, Engine B');
+    engineLimits=v.engineLimits.map((l,i)=>matchLimit(l,`engineLimits[${i}] (Engine ${i===0?'A':'B'})`)) as [MatchLimit,MatchLimit];
+  }
+  let uciDiagnostics:MatchConfig['uciDiagnostics'];
+  if(v.uciDiagnostics!==undefined){const d=object(v.uciDiagnostics);uciDiagnostics={maxEntries:int(d.maxEntries??4096,1,65536),maxBytes:int(d.maxBytes??1048576,1,8388608)};}
+  let searchEvidence:MatchConfig['searchEvidence'];
+  if(v.searchEvidence!==undefined){
+    const d=object(v.searchEvidence);
+    searchEvidence={maxEntries:int(d.maxEntries??DEFAULT_SEARCH_EVIDENCE_LIMITS.maxEntries,1,4096),maxBytes:int(d.maxBytes??DEFAULT_SEARCH_EVIDENCE_LIMITS.maxBytes,1,4194304)};
+  }
   const time=object(v.time??{kind:'untimed'});
   if(time.kind==='fischer'){int(time.initialMs,0,2147483647);int(time.incrementMs,0,2147483647);}else if(time.kind!=='untimed')throw Error('unsupported clock');
-  if(limit.kind==='clock'&&time.kind!=='fischer')throw Error('clock search mode requires Fischer time control');
+  if([limit,...(engineLimits??[])].some(l=>l.kind==='clock')&&time.kind!=='fischer')throw Error('clock search mode requires Fischer time control');
   if(v.failurePolicy!==undefined&&v.failurePolicy!=='technical_forfeit'&&v.failurePolicy!=='invalid')throw Error('invalid failure policy');
-  return {engines,openings:records,seed:int(v.seed??1,0,0xffffffff),limit:limit as MatchConfig['limit'],time:time as TimeControl,failurePolicy:v.failurePolicy??'technical_forfeit',maxPlies:int(v.maxPlies??1000,1,100000),searchCapMs:int(v.searchCapMs??60000,1,2147483647)};
+  return {engines,openings:records,seed:int(v.seed??1,0,0xffffffff),limit,...(engineLimits?{engineLimits}:{}),...(uciDiagnostics?{uciDiagnostics}:{}),...(searchEvidence?{searchEvidence}:{}),time:time as TimeControl,failurePolicy:v.failurePolicy??'technical_forfeit',maxPlies:int(v.maxPlies??1000,1,100000),searchCapMs:int(v.searchCapMs??60000,1,2147483647)};
 }
 export function schedule(config:MatchConfig):ScheduledGame[] {
   const indices=config.openings.map((_,i)=>i);let state=config.seed>>>0;
@@ -63,7 +84,7 @@ export async function createExperiment(directory:string,input:unknown):Promise<M
     let revision='unknown',compiler='unknown';
     try{revision=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();}catch{/* source archive */}
     try{compiler=execFileSync('c++',['--version'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).split('\n')[0]!;}catch{/* external engines */}
-    const manifest:Manifest={id:randomUUID(),created:new Date().toISOString(),config,identities,artifacts:files,scheduleDigest:digest(games),runtime:{node:process.version,controller:revision,platform:platform(),arch:arch(),host:hostname(),compiler},policies:{gameClock:'monotonic receipt < deadline; accepted move only increment',adapterClock:'min(remaining, remaining/30 + increment/2)',comparison:config.limit.kind,scoreUnits:'raw per evaluator; no cross-evaluator normalization',tt:'effective UCI options; no certification inferred',recovery:'fresh attempt from scheduled opening'}};
+    const manifest:Manifest={id:randomUUID(),created:new Date().toISOString(),config,identities,artifacts:files,scheduleDigest:digest(games),runtime:{node:process.version,controller:revision,platform:platform(),arch:arch(),host:hostname(),compiler},policies:{gameClock:'monotonic receipt < deadline; accepted move only increment',adapterClock:'min(remaining, remaining/30 + increment/2)',comparison:config.engineLimits?'per-engine limits indexed by immutable engine identity (0=A, 1=B)':config.limit.kind,scoreUnits:'raw per evaluator; no cross-evaluator normalization',tt:'effective UCI options; no certification inferred',recovery:'fresh attempt from scheduled opening'}};
     await writeRecord(join(directory,'schedule.json'),games);await writeRecord(join(directory,'manifest.json'),manifest);return manifest;
   }finally{await release();}
 }
@@ -133,8 +154,12 @@ export async function resumeExperiment(directory:string,options:{takeoverStaleLo
       const id='attempt-'+randomUUID(),dir=join(directory,'attempts',id),started=monotonic.now();
       await writeRecord(join(dir,'start.json'),{id,game:g.id,opening:g.opening,configDigest:digest(config)});
       let game=new Game(g.opening,config.time);const progress:unknown[]=[];
-      const engines=[new ManagedEngine(config.engines[g.white]),new ManagedEngine(config.engines[g.black])];
+      const searchLimits=config.searchEvidence??DEFAULT_SEARCH_EVIDENCE_LIMITS,searches=new SearchEvidenceCapture(searchLimits.maxEntries,searchLimits.maxBytes);
+      const capture=config.uciDiagnostics?new ProtocolCapture(config.uciDiagnostics.maxEntries,config.uciDiagnostics.maxBytes):undefined;
+      const currentSearch:({session:string;ply:number}|undefined)[]=[undefined,undefined];
+      const engines=([g.white,g.black] as const).map((index,i)=>new ManagedEngine(config.engines[index],monotonic,capture?line=>capture.add({...line,game:g.id,attempt:id,engine:index,color:i===0?'w':'b',...(line.session&&currentSearch[i]?.session===line.session?{ply:currentSearch[i]!.ply}:{})}):undefined));
       const snapshot=()=>({record:game.record(),events:game.events,clocks:{w:Number.isFinite(game.clocks().w)?game.clocks().w:null,b:Number.isFinite(game.clocks().b)?game.clocks().b:null}});
+      const evidenceSnapshot=(finished=false)=>({...snapshot(),...searches.snapshot(finished),...(capture?{protocol:capture.snapshot(finished&&engines.every(e=>e.protocolComplete),engines.reduce((n,e)=>n+e.protocolObserverFailures,0))}:{})});
       try {
         for(let i=0;i<2;i++) {
           const side:Side=i===0?'w':'b',index=i===0?g.white:g.black;
@@ -149,17 +174,19 @@ export async function resumeExperiment(directory:string,options:{takeoverStaleLo
         while(!game.outcome()) {
           if(game.record().moves.length-g.opening.moves.length>=config.maxPlies){game.fail('explicit maxPlies work limit','invalid');break;}
           if(game.available()<=0){game.flag();break;}
-          const session=randomUUID(),binding=game.begin(session),engine=engines[game.side()==='w'?0:1]!;
+          const session=randomUUID(),binding=game.begin(session),color=game.side(),index=color==='w'?g.white:g.black,engine=engines[color==='w'?0:1]!,ply=game.record().moves.length+1;
+          const limit=config.engineLimits?.[index]??config.limit;currentSearch[color==='w'?0:1]={session,ply};let accepted=false;
           try {
-            const p=await engine.search({session,binding,record:game.record(),limit:config.limit.kind==='clock'?{kind:'clock',...game.uciClock()}:config.limit,stopAfterMs:Math.min(config.searchCapMs,game.available()),onProgress:p=>{progress.push(p);if(progress.length>128)progress.shift();}});
-            game.accept(p);
+            const p=await engine.search({session,binding,record:game.record(),limit:limit.kind==='clock'?{kind:'clock',...game.uciClock()}:limit,stopAfterMs:Math.min(config.searchCapMs,game.available()),onProgress:p=>{progress.push(p);if(progress.length>128)progress.shift();}});
+            const inTime=p.receivedAt<game.deadline();game.accept(p);accepted=inTime;
           }catch(e){if(game.available()<=0)game.flag();else game.fail(String(e),config.failurePolicy);}
-          await writeRecord(join(dir,'state.json'),snapshot(),false);
+          finally{if(engine.lastSearchEvidence?.session===session)searches.add({...engine.lastSearchEvidence,engine:index,color,ply,accepted});}
+          await writeRecord(join(dir,'state.json'),evidenceSnapshot(),false);
           options.onProgress?.({game:g.id,attempt:id,...snapshot()});
         }
       }catch(e){game.invalidate('orchestration failure: '+String(e));}
       finally{for(const e of engines)await e.close();}
-      const attempt:Attempt={id,game:g.id,...snapshot(),outcome:game.outcome()??{kind:'invalid',reason:'attempt stopped without an attributable engine failure'},elapsedMs:monotonic.now()-started,progress};
+      const attempt:Attempt={id,game:g.id,...evidenceSnapshot(true),outcome:game.outcome()??{kind:'invalid',reason:'attempt stopped without an attributable engine failure'},elapsedMs:monotonic.now()-started,progress};
       await finalize(directory,g,attempt);
       await writeRecord(join(directory,'summary.json'),await experimentStatus(directory),false);
       if(attempt.outcome.kind==='adjudication_required')break;
@@ -172,5 +199,28 @@ export async function exportExperiment(directory:string):Promise<{pgn:string;sid
   for(const g of games) {
     const a=done.get(g.id);if(!a)continue;
     pgn.push(new FideRules(a.record).pgn(a.outcome.kind==='chess'?a.outcome:undefined,{White:manifest.identities[g.white]!.id.join('; '),Black:manifest.identities[g.black]!.id.join('; '),Round:g.id}));
-  }return {pgn:pgn.join('\n\n'),sidecar:{manifest,scheduled:games,attempts:[...done.values()]}};
+  }
+  const incompleteAttempts:unknown[]=[];
+  for(const id of await names(join(directory,'attempts'))) {
+    if(!/^attempt-[0-9a-f-]+$/.test(id))throw Error('invalid attempt directory');
+    const dir=join(directory,'attempts',id);
+    if(await exists(join(dir,'final.json')))continue;
+    const start=await readRecord<{id:string;game:string}>(join(dir,'start.json'));
+    if(start.id!==id||!games.some(g=>g.id===start.game))throw Error('invalid interrupted attempt identity');
+    // A crash can lose evidence since the latest fsynced move checkpoint.
+    // Corrupt snapshots fail export rather than becoming purported evidence.
+    const state=await exists(join(dir,'state.json'))?await readRecord(join(dir,'state.json')):null;
+    const interrupted=await exists(join(dir,'interrupted.json'))?await readRecord(join(dir,'interrupted.json')):null;
+    incompleteAttempts.push({id,game:start.game,complete:false,status:interrupted?'interrupted':'unfinished',interrupted,evidenceThrough:'last durable move checkpoint only',state});
+  }
+  const searchSummary=([0,1] as const).map(engine=>{
+    const total=emptySearchTotals(engine);let retainedSearches=0,attemptsWithTruncatedSearchEvidence=0;
+    for(const attempt of done.values()) {
+      const retained=(attempt.searches??[]).filter(s=>s.engine===engine);retainedSearches+=retained.length;
+      if(attempt.searchEvidence){mergeSearchTotals(total,attempt.searchEvidence.summary[engine]!);if(attempt.searchEvidence.truncated)attemptsWithTruncatedSearchEvidence++;}
+      else for(const search of retained)addSearchTotals(total,search);
+    }
+    return {...total,retainedSearches,droppedSearches:total.searches-retainedSearches,attemptsWithTruncatedSearchEvidence,attemptsWithSearchEvidence:[...done.values()].filter(a=>a.searches!==undefined).length,attemptsWithoutSearchEvidence:[...done.values()].filter(a=>a.searches===undefined).length};
+  });
+  return {pgn:pgn.join('\n\n'),sidecar:{manifest,scheduled:games,attempts:[...done.values()],incompleteAttempts,searchSummary}};
 }

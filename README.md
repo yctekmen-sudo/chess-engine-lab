@@ -10,6 +10,10 @@ authenticated local server, with backward-compatible optional evaluator
 calibration. See the [GUI guide](gui/README.md), [M7 validation](docs/m7-validation.md)
 and [design checkpoint](docs/m7-design-checkpoint.md). No M8 work is included.
 
+M7.1 adds independent engine search limits, optional bounded UCI experiment
+capture and per-move search statistics. See the [configuration example](controller/README.md#m71-independent-experiment-limits-and-diagnostics)
+and [local validation](docs/m7.1-validation.md).
+
 ## Build and test
 
 Prerequisites: C++20 compiler, CMake 3.21+, and Ninja. From the repository root:

@@ -50,6 +50,16 @@ interrupted, requiring explicit Resume/Start.
   `controller/README.md`), then start/pause/resume/stop paired runs. Pause/stop finish
   the current game. Review completed records in Analyze, or export PGN plus JSON
   metadata. The M6 runner owns immutable schedules, attempts and adjudication.
+  M7.1 adds **Use independent engine limits**: select depth, movetime in ms or
+  Fischer clock separately for Engine A and Engine B. Limits follow engine identity
+  through the color swap. Controls and the JSON `engineLimits` array stay in sync;
+  switching independent limits off restores the shared JSON `limit`. For Chess Lab
+  depth 8 versus Stockfish depth 3, select those profiles as A/B, enable independent
+  limits and enter 8/3. Clock mode requires Fischer `time` in JSON. Optional
+  **Capture bounded UCI protocol evidence** is off by default; its limits can be
+  adjusted through `uciDiagnostics` in JSON. Search statistics and enabled traces
+  are included in the metadata export, with explicit missing/truncated/incomplete
+  evidence. See the [configuration and evidence format](../controller/README.md#m71-independent-experiment-limits-and-diagnostics).
 
 FEN and PGN export use browser downloads; PGN exports include a JSON metadata
 sidecar. PGN upload parses into a new analysis document and never overwrites a
@@ -101,7 +111,8 @@ Chromium. Locally an installed `/usr/bin/chromium` is supported; CI uses the
 browser pinned by Playwright. `CHROMIUM_EXECUTABLE` explicitly overrides it.
 See [validation](../docs/m7-validation.md) and the
 [design checkpoint](../docs/m7-design-checkpoint.md). Linux/Chromium is validated;
-Native Windows smoke covers static assets, executable registration and launcher
-reconnect. Windows C++ engine builds, automatic browser opening, macOS packaging
+M7.1 local Windows x64 validation also covers native Debug build/CTest and all
+five browser scenarios using installed Chrome through `CHROMIUM_EXECUTABLE`;
+see [M7.1 results](../docs/m7.1-validation.md). Automatic browser opening, macOS packaging
 and other browser compatibility remain unvalidated. Installers,
 Electron, M8/mobile and additional engine search features are outside M7.
