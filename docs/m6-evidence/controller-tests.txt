@@ -1,0 +1,68 @@
+
+> @chess-lab/controller@0.6.0 test
+> npm run build && node --test --test-isolation=none --test-reporter=spec test/*.test.mjs
+
+
+> @chess-lab/controller@0.6.0 build
+> tsc
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+✔ independent Rules vs real ChessCore: generated replay and FIDE edge fixtures (3419.607326ms)
+✔ claim intentions remain unplayed; incomplete history retains positive evidence (1.927628ms)
+✔ timeout proof classes: witnesses, bare king, minor, KNN and cooperating material (9.063241ms)
+✔ receipt linearization, exact deadline, increment, stale and illegal candidates (351.513291ms)
+✔ accepted claims end clocks without increment or playing intended move (0.646572ms)
+✔ unknown flag is adjudication required; no heuristic chess winner (1275.542346ms)
+✔ partial stdout/CRLF, serial search barrier and ordinary UCI spoof ignored (395.510744ms)
+✔ adversarial duplicate invalidates session and process (184.311585ms)
+✔ adversarial bad invalidates session and process (179.782697ms)
+✔ adversarial huge invalidates session and process (176.756123ms)
+✔ adversarial crash invalidates session and process (177.977233ms)
+✔ unresolved stop discards process: hang (233.362216ms)
+✔ unresolved stop discards process: stop-late (232.03458ms)
+✔ bounded handshake no-uci (643.687735ms)
+✔ bounded handshake no-ready (676.844845ms)
+✔ trusted extension provenance requires explicit hash, rejects conflicts/nonadjacent (647.079096ms)
+✔ native analysis never plays; trusted claims validated independently (270.28615ms)
+✔ invalid FENs and counter exhaustion match ChessCore validation boundaries (317.237766ms)
+✔ superseded game failure never accepts a later completed engine proposal (595.967384ms)
+✔ stop grace gives no clock subsidy and unverified claim cannot stop time (1039.156005ms)
+✔ FIDE timeout win/draw requires certified possibility/impossibility (129.736346ms)
+✔ explicit shutdown invalidates active proposals and bounds unresponsive children (175.701431ms)
+✔ seeded paired schedule swaps colors and preserves identical opening conditions (0.785951ms)
+✔ real native/mock paired match, durable identities, PGN, idempotent resume (3040.900068ms)
+✔ technical forfeit is separate from chess WDL and invalid-game policy (4666.720963ms)
+✔ writer lock conflicts, explicit stale recovery and live-owner refusal (4.087433ms)
+✔ torn records detected, interrupted attempts preserved and restarted from opening (2379.637677ms)
+✔ crash between immutable final and official publication recovers exactly once (3097.81895ms)
+✔ immutable records reject replacement and corrupt manifest is never counted (732.003216ms)
+✔ resume refuses changed argv artifact, missing executable and config identity (2185.3088ms)
+✔ actual CLI analyze, paired match, inspect, export, and repeated resume (3671.956789ms)
+✔ automated unresolved flag stops pair without fabricating result or forfeit (2969.608302ms)
+✔ real handshake, honest raw scores, responsive isready, stop and serialization (317.095497ms)
+✔ transactional bad position/options and semantic go rejection (274.360623ms)
+✔ terminal 0000, mate polarity and bounded zero-time fallback (240.469558ms)
+✔ claim extension immediately adjacent with legal evaluated PLAY at MultiPV=1 (250.171374ms)
+✔ evaluator replacement rejects invalid module and preserves healthy selection (501.339715ms)
+✔ infinite retains depth-64 result until stop, including ready responsiveness (272.241875ms)
+✔ intended claim differs from strongest evaluated PLAY fallback (240.466728ms)
+✔ blocking evaluator keeps isready responsive and fast stop fallback is unevaluated (490.582878ms)
+✔ failure after provisional depth exits without bestmove and clears TT after search (521.069148ms)
+✔ quit during active search cancels, joins and exits cleanly (244.303855ms)
+ℹ tests 42
+ℹ suites 0
+ℹ pass 42
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 37266.019616
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -4,3 +4,5 @@
 .DS_Store
 *.user
 /work/
+/controller/node_modules/
+/controller/dist/
