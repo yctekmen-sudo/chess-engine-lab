@@ -1,16 +1,14 @@
 # Chess Engine Lab
 
-C++20 chess engine and experimentation platform, following the approved
-[architecture](docs/architecture-v1.0.md) and
-[M5 kickoff](docs/codex-kickoff-m5.md).
+C++20 chess engine, headless controller and local desktop GUI following the
+[approved architecture](docs/architecture-v1.0.md).
 
-Current implementation: **M5 history-safe transposition tables**, on top of the
-preserved M1–M4 core, evaluator and search APIs. Iterative search can attach a
-controller-owned, bounded table; numeric reuse requires explicit evaluator
-certification and exact context/depth verification. Tables are disabled by
-default. See [M5 validation](docs/m5-validation.md) for the API, tests, measured
-cold/warm costs and platform limits, and [M4 validation](docs/m4-validation.md)
-for iterative cancellation/progress/MultiPV behavior. M5 awaits architecture/code review.
+M0–M6 supply chess rules, configurable evaluators, search, history-safe optional
+transposition tables and durable paired experiments. **M7 desktop GUI is
+implemented for review**: Play, Analyze, Experiments and Engines over an
+authenticated local server, with backward-compatible optional evaluator
+calibration. See the [GUI guide](gui/README.md), [M7 validation](docs/m7-validation.md)
+and [design checkpoint](docs/m7-design-checkpoint.md). No M8 work is included.
 
 ## Build and test
 
@@ -36,8 +34,8 @@ No dependencies are downloaded by CMake or needed at runtime.
 | `engine/` | Core, evaluation and search libraries with repository-owned contracts |
 | `tests/` | ABI, perft, rule, search oracle and failure tests; headless benchmarks |
 | `evaluators/` | Future external evaluator packaging (M2 implementation is in engine/) |
-| `controller/` | Reserved for M6 desktop/headless orchestration |
-| `gui/` | Reserved for M7 UI and M8 mobile packaging |
+| `controller/` | M6 headless orchestration and M7 workspace/local server |
+| `gui/` | M7 React/Vite desktop UI and browser/component tests |
 | `third_party/` | Pinned MIT chess library and dependency policy |
 | `docs/` | Approved architecture, milestone instructions, developer guide |
 

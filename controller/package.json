@@ -17,10 +17,12 @@
     "test": "npm run build && node --test --test-isolation=none --test-reporter=spec test/*.test.mjs"
   },
   "dependencies": {
-    "chess.js": "1.4.0"
+    "chess.js": "1.4.0",
+    "ws": "8.18.3"
   },
   "devDependencies": {
     "typescript": "5.9.3",
-    "@types/node": "24.10.0"
+    "@types/node": "24.10.0",
+    "@types/ws": "8.18.1"
   }
 }

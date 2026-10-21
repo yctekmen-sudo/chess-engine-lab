@@ -110,6 +110,16 @@ typedef struct ChessEvalApi {
     CHESS_EVAL_ALIGN8 ChessEvalDestroyFn destroy_evaluator;
 } ChessEvalApi;
 
+/* ABI minor 1: compatible optional tail. The legacy 72-byte type above stays
+ * source/binary compatible; the extended wire table appends one padded slot.
+ * Negotiate requested_minor=1, capacity=80. A v1.0 caller always gets prefix 72.
+ */
+#define CHESS_EVAL_CALIBRATION_MINOR ((uint64_t)1)
+typedef struct ChessEvalApiV1_1 {
+    ChessEvalApi v1;
+    CHESS_EVAL_ALIGN8 ChessEvalGetConfigFn get_calibration_json;
+} ChessEvalApiV1_1;
+
 typedef ChessEvalStatus (CHESS_EVAL_CALL *ChessEvalGetApiFn)(
     uint64_t requested_major, uint64_t requested_minor,
     void* out_api, uint64_t out_api_capacity,

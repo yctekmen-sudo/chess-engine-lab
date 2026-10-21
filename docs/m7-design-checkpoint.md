@@ -139,3 +139,11 @@ Validation records actual commands and failures, decision/file/test traceability
 Any incompatible ABI, weakened persistence/auth/chess guarantee or additional
 feature requirement stops for user architecture review. No such conflict found
 at checkpoint. Finish at an unmerged implementation PR for review.
+
+Implementation reconciliation: M6 receives only the optional async
+`shouldContinue` boundary hook; the workspace owns AbortSignal and passes its
+state through that hook. No M6 default behavior or new signal argument is required.
+Each analysis job records its actual started identity/options and trust provenance.
+Uncertain storage failure freezes all further writes; shutdown preserves the
+uncertain checkpoint for verified restart/command-status reconciliation. These
+are compatible mechanical details within the approved checkpoint and D137.

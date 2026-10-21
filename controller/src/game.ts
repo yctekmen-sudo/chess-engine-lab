@@ -6,7 +6,8 @@ export type Outcome=ChessOutcome|{kind:'adjudication_required';reason:string;pro
 export type Binding={game:string;generation:number;fen:string;history:string;side:Side};
 export type Proposal={session:string;binding:Binding;receivedAt:number;decision:Decision;bestmove:string};
 export class Game {
-  readonly id=globalThis.crypto.randomUUID();
+  private identity=globalThis.crypto.randomUUID();
+  get id(){return this.identity;}
   private rules:FideRules;
   private generation=0;
   private start:number;
@@ -23,6 +24,29 @@ export class Game {
     this.start=clock.now();this.result=this.rules.terminal();
   }
   readonly time:TimeControl;
+  fork():Game {
+    const g=new Game(this.record(),this.time,this.clock);
+    g.identity=this.identity;g.generation=this.generation;g.start=this.start;g.remaining={...this.remaining};
+    g.result=this.outcome();g.paused=this.paused;g.pending=this.pending;
+    g.accepted=new Set(this.accepted);g.events.push(...structuredClone(this.events));return g;
+  }
+  checkpoint(at=this.clock.now()):GameCheckpoint {
+    const remaining={...this.remaining};
+    if(!this.paused&&!this.result)remaining[this.side()]=Math.max(0,remaining[this.side()]-(at-this.start));
+    return {record:this.record(),time:this.time,remaining:{w:Number.isFinite(remaining.w)?remaining.w:null,b:Number.isFinite(remaining.b)?remaining.b:null},outcome:this.outcome()??null,paused:this.paused,generation:this.generation,events:structuredClone(this.events)};
+  }
+  static restore(c:GameCheckpoint,clock:MonotonicClock=monotonic):Game {
+    const g=new Game(c.record,c.time,clock);g.remaining={w:c.remaining.w??Infinity,b:c.remaining.b??Infinity};
+    if(Object.values(g.remaining).some(n=>n<0||Number.isNaN(n)))throw Error('invalid restored clocks');
+    g.result=c.outcome??undefined;g.paused=true;g.generation=c.generation+1;g.events.push(...structuredClone(c.events));return g;
+  }
+  pause(at=this.clock.now()):void {
+    if(!this.paused&&!this.result){if(at>=this.deadline())this.flag(at);else this.remaining[this.side()]-=at-this.start;}
+    this.pending=undefined;this.paused=true;this.generation++;
+  }
+  resume():void {if(!this.paused)throw Error('game is already running');if(this.result)throw Error('game ended');this.paused=false;this.start=this.clock.now();this.generation++;}
+  resign(side:Side):void {if(this.result)throw Error('game ended');this.pause();if(!this.result)this.result={kind:'chess',result:side==='w'?'0-1':'1-0',reason:'resignation'};}
+
   binding():Binding {return {game:this.id,generation:this.generation,fen:this.rules.fen(),history:JSON.stringify(this.rules.record()),side:this.rules.side()};}
   begin(session:string):Binding {
     if(this.result||this.paused||this.pending)throw Error('game is terminal, paused or has an active proposal session');
@@ -83,3 +107,5 @@ export class Game {
     this.events.push({kind:'accepted',session:p.session,decision:p.decision,receivedAt:p.receivedAt,clocks:this.clocks()});
   }
 }
+
+export type GameCheckpoint={record:RecordState;time:TimeControl;remaining:{w:number|null;b:number|null};outcome:Outcome|null;paused:boolean;generation:number;events:unknown[]};

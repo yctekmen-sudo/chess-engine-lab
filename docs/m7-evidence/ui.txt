@@ -1,0 +1,20 @@
+
+> @chess-lab/gui@0.7.0 test
+> vitest run
+
+
+ RUN  v4.0.18 /workspace/chess-engine-lab/gui
+
+ ✓ test/forms.test.tsx (2 tests) 127ms
+ ✓ test/ui.test.tsx (7 tests) 100ms
+
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+   Start at  03:57:19
+   Duration  1.42s (transform 179ms, setup 172ms, import 190ms, tests 227ms, environment 650ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

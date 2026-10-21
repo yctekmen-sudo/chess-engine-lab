@@ -256,3 +256,20 @@ The initial implementation prioritizes proof over hit rate and measured slower
 than TT off with the cheap material provider, despite useful warm evaluator-call
 reductions. See [M5 validation](m5-validation.md) and its raw CSV for exact
 commands, byte accounting, all cold/warm/off measurements and pinned CI evidence.
+
+
+## M6 controller and M7 desktop GUI
+
+Node 24 is required for controller/UI development, separate from native core
+builds. Follow [GUI build/launch/test instructions](../gui/README.md). The
+controller package builds independently, and importing its public library does
+not load the GUI/server. `chess-lab gui DIRECTORY` lazily starts/reconnects the
+loopback server after both packages are built; other CLI commands retain their
+M6 behavior.
+
+CI preserves all native Debug/Release/Profile, Node controller and pinned
+Emscripten gates. The WASM suite now also executes the legacy72/extended80 C and
+C++ calibration checks. `.github/workflows/gui.yml` adds Node 24.10.0, locked
+Vite/React checks, Vitest/RTL and pinned Playwright Chromium against the real
+server/native engine. Actual results and D118–D138 traceability are in
+[M7 validation](m7-validation.md).
