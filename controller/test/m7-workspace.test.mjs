@@ -474,6 +474,16 @@ test("scheduler isolates experiments, records explicit competition, caps childre
       () => w.snapshot().experiments[e.result.id].status === "completed",
     );
     assert.equal(w.snapshot().experiments[e.result.id].summary.completed, 2);
+    assert.equal(shared.result.authorization.allowCompetition, true);
+    // The bounded recent-layout window is not the integrity record.
+    w.state.snapshot.settings.concurrencyAuthorizations = [];
+    const exported = await w.export("experiment", e.result.id);
+    assert(
+      exported.sidecar.m7.authorizations.some(
+        (a) => a.command === shared.commandId,
+      ),
+    );
+    assert.equal(exported.sidecar.m7.share, true);
     await fresh(w, "analysis.stop", {}, id);
     await waitFor(
       () => w.snapshot().jobs[start.result.id].status === "stopped",

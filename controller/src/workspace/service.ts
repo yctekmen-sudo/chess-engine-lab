@@ -739,15 +739,26 @@ export class Workspace extends EventEmitter {
             )
               job.status = "stopping";
         if (p.allowCompetition === true) {
-          const log = (s.settings.concurrencyAuthorizations ?? []) as unknown[];
+          const authorization = {
+            command: c.commandId,
+            operation: c.operation,
+            objectId: id ?? null,
+            revision: s.revision + 1,
+            allowCompetition: true,
+            activeExperiments: Object.values(s.experiments)
+              .filter((e) =>
+                ["running", "pause_requested", "stop_requested"].includes(
+                  e.status,
+                ),
+              )
+              .map((e) => e.id),
+          };
           s.settings.concurrencyAuthorizations = [
-            ...log,
-            {
-              command: c.commandId,
-              operation: c.operation,
-              revision: s.revision + 1,
-            },
+            ...((s.settings.concurrencyAuthorizations ?? []) as unknown[]),
+            authorization,
           ].slice(-500);
+          // Full authorization remains with its non-evicted durable command ACK.
+          result = { ...object(result), authorization };
         }
         s.diagnostics = s.diagnostics.slice(-100);
         s.revision++;
@@ -1033,8 +1044,7 @@ export class Workspace extends EventEmitter {
         {
           share: ref.share,
           workspace: this.state.snapshot.id,
-          authorizations:
-            this.state.snapshot.settings.concurrencyAuthorizations ?? [],
+          authorizations: this.authorizations(id),
         },
         false,
       );
@@ -1067,8 +1077,7 @@ export class Workspace extends EventEmitter {
         {
           share: ref.share,
           workspace: this.state.snapshot.id,
-          authorizations:
-            this.state.snapshot.settings.concurrencyAuthorizations ?? [],
+          authorizations: this.authorizations(id),
         },
         false,
       );
@@ -1085,13 +1094,44 @@ export class Workspace extends EventEmitter {
       });
     });
   }
+  private authorizations(id: string) {
+    return Object.values(this.state.commands).flatMap((c) => {
+      const authorization = (
+        c.ack.result as
+          | {
+              authorization?: {
+                objectId: string | null;
+                activeExperiments: string[];
+              };
+            }
+          | undefined
+      )?.authorization;
+      return c.ack.accepted &&
+        authorization &&
+        (authorization.objectId === id ||
+          authorization.activeExperiments.includes(id))
+        ? [authorization]
+        : [];
+    });
+  }
   async export(kind: string, id: string): Promise<unknown> {
     const s = this.state.snapshot;
     if (kind === "experiment") {
       identifier(id);
       if (!s.experiments[id])
         throw new Fault("NOT_FOUND", "Experiment missing");
-      return exportExperiment(join(this.directory, "experiments", id));
+      const path = join(this.directory, "experiments", id),
+        exported = await exportExperiment(path);
+      const execution = await readRecord<Record<string, unknown>>(
+        join(path, "m7-execution.json"),
+      );
+      return {
+        ...exported,
+        sidecar: {
+          ...object(exported.sidecar),
+          m7: { ...execution, authorizations: this.authorizations(id) },
+        },
+      };
     }
     if (kind === "analysis") {
       const d = s.analyses[id];

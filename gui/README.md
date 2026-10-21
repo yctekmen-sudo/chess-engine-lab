@@ -57,7 +57,9 @@ unsupported PGN syntax fails visibly. An imported FEN has incomplete history.
 
 Experiment resources are isolated by default. Interactive engine work conflicts
 until the experiment pauses or you explicitly authorize and record competition.
-Four process slots are available; an experiment reserves two. Limits never
+Four process slots are available; an experiment reserves two. Full authorization
+records are retained in durable command outcomes and exported experiment JSON,
+separate from the recent UI window and immutable M6 manifests. Limits never
 silently change Hash, Threads, clocks, search limits or experimental conditions.
 Play engine turns default to depth 2 when untimed; timed games use their Fischer
 clock with a 60-second maximum per-search watchdog. Analysis depth searches also

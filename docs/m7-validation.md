@@ -178,9 +178,11 @@ Paths below are repository-relative. `m7-workspace` means
 Linux/Chromium is exercised; Windows/macOS launch paths and other browsers are
 unvalidated. This is a local application, not an OS sandbox for native modules or
 protection against another process running as the same user. Artifacts must remain
-immutable while loaded, as required by M2/M6. Resource authorization records are
-bounded to the latest 500 entries; a workspace-lifetime log (10,000 durable command
-outcomes) and launch/final experiment sidecar preserve the relevant commands.
+immutable while loaded, as required by M2/M6. The recent authorization window is
+bounded to 500 entries; full authorization metadata remains in non-evicted durable
+command ACKs (10,000-command cap). Launch/final experiment sidecars and GUI JSON
+exports include the applicable authorization records, including crash-time records
+reconciled from the workspace.
 Workspace command/size limits require a new workspace rather than unsafe ID eviction.
 Browser X cannot guarantee a custom dialog and intentionally keeps work running.
 WASM is a core/calibration CI correctness target, not a browser engine-process
