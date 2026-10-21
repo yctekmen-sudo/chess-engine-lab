@@ -23,3 +23,19 @@ toolchain artifacts and their obligations when packaging is introduced.
   `third_party/picosha2/README.md`.
 
 Both are vendored and require no build-time network access.
+
+## M6 controller dependencies
+
+Exact resolutions and registry integrity hashes are in `controller/package-lock.json`.
+
+| Package | Version | License | Use |
+| --- | --- | --- | --- |
+| chess.js | 1.4.0 | BSD-2-Clause | Runtime legal move/board adapter; notice copied to `controller/CHESS_JS_LICENSE`. |
+| TypeScript | 5.9.3 | Apache-2.0 | Build/typecheck/lint development tool; package LICENSE.txt. |
+| @types/node | 24.10.0 | MIT | Development declarations; package LICENSE. |
+| undici-types | 7.16.0 | MIT | Transitive development declarations; package LICENSE. |
+
+Runtime is Node.js 24 (Node distribution license applies separately).
+M6 adds no license grant to original repository source. Keep dependency notices
+when distributing dependencies or generated controller bundles. There is no
+runtime download or network service requirement after `npm ci` and native build.

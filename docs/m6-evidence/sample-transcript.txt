@@ -1,0 +1,56 @@
+Actual Linux native analysis: initial FEN 7k/8/5KQ1/8/8/8/8/8 w - - 149 1; go depth 1
+info depth 1 time 0 nodes 24 multipv 1 score mate 1 pv g6g7
+info string chesslab metrics evaluator_calls 0 tt_lookups 0 tt_exact_hits 0
+bestmove g6g7
+
+Actual complete paired match summary:
+{
+  "experiment": "6258a534-6ead-46d1-9a14-91eb9e7f8e7c",
+  "scheduled": 2,
+  "completed": 2,
+  "counts": {
+    "chess": {
+      "white": 1,
+      "black": 0,
+      "draw": 1
+    },
+    "technicalForfeits": 0,
+    "invalid": 0,
+    "unresolved": 0,
+    "matchPoints": [
+      1.5,
+      0.5
+    ]
+  },
+  "incompletePairs": [],
+  "attempts": [
+    "attempt-023e7b05-fd8c-4d81-b3ac-1beae0fbbe03",
+    "attempt-bc3db53d-8784-4a5e-9a76-9c9506208927"
+  ]
+}
+
+Repeated explicit resume summary:
+{
+  "experiment": "6258a534-6ead-46d1-9a14-91eb9e7f8e7c",
+  "scheduled": 2,
+  "completed": 2,
+  "counts": {
+    "chess": {
+      "white": 1,
+      "black": 0,
+      "draw": 1
+    },
+    "technicalForfeits": 0,
+    "invalid": 0,
+    "unresolved": 0,
+    "matchPoints": [
+      1.5,
+      0.5
+    ]
+  },
+  "incompletePairs": [],
+  "attempts": [
+    "attempt-023e7b05-fd8c-4d81-b3ac-1beae0fbbe03",
+    "attempt-bc3db53d-8784-4a5e-9a76-9c9506208927"
+  ]
+}

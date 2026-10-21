@@ -1,0 +1,26 @@
+{
+  "name": "@chess-lab/controller",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "exports": "./dist/index.js",
+  "bin": {
+    "chess-lab": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "test": "npm run build && node --test --test-isolation=none --test-reporter=spec test/*.test.mjs"
+  },
+  "dependencies": {
+    "chess.js": "1.4.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "24.10.0"
+  }
+}

@@ -1,0 +1,66 @@
+
+> @chess-lab/controller@0.6.0 test
+> npm run build && node --test --test-isolation=none --test-reporter=spec test/*.test.mjs
+
+
+> @chess-lab/controller@0.6.0 build
+> tsc
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+✔ independent Rules vs real ChessCore: generated replay and FIDE edge fixtures (3483.977644ms)
+✔ claim intentions remain unplayed; incomplete history retains positive evidence (1.983962ms)
+✔ timeout proof classes: witnesses, bare king, minor, KNN and cooperating material (9.178325ms)
+✔ receipt linearization, exact deadline, increment, stale and illegal candidates (355.847786ms)
+✔ accepted claims end clocks without increment or playing intended move (0.710338ms)
+✔ unknown flag is adjudication required; no heuristic chess winner (1272.321124ms)
+✔ partial stdout/CRLF, serial search barrier and ordinary UCI spoof ignored (378.86383ms)
+✔ adversarial duplicate invalidates session and process (177.770498ms)
+✔ adversarial bad invalidates session and process (175.855909ms)
+✔ adversarial huge invalidates session and process (184.696097ms)
+✔ adversarial crash invalidates session and process (168.079271ms)
+✔ unresolved stop discards process: hang (223.703967ms)
+✔ unresolved stop discards process: stop-late (228.605457ms)
+✔ bounded handshake no-uci (654.596768ms)
+✔ bounded handshake no-ready (682.932888ms)
+✔ trusted extension provenance requires explicit hash, rejects conflicts/nonadjacent (702.530267ms)
+✔ native analysis never plays; trusted claims validated independently (271.636649ms)
+✔ invalid FENs and counter exhaustion match ChessCore validation boundaries (328.468838ms)
+✔ superseded game failure never accepts a later completed engine proposal (593.992685ms)
+✔ stop grace gives no clock subsidy and unverified claim cannot stop time (1012.057857ms)
+✔ FIDE timeout win/draw requires certified possibility/impossibility (129.147474ms)
+✔ seeded paired schedule swaps colors and preserves identical opening conditions (0.837118ms)
+✔ real native/mock paired match, durable identities, PGN, idempotent resume (3050.268934ms)
+✔ technical forfeit is separate from chess WDL and invalid-game policy (4664.203525ms)
+✔ writer lock conflicts, explicit stale recovery and live-owner refusal (4.352031ms)
+✔ torn records detected, interrupted attempts preserved and restarted from opening (2339.11031ms)
+✔ crash between immutable final and official publication recovers exactly once (3030.225426ms)
+✔ immutable records reject replacement and corrupt manifest is never counted (714.87499ms)
+✔ resume refuses changed argv artifact, missing executable and config identity (1146.384081ms)
+✔ actual CLI analyze, paired match, inspect, export, and repeated resume (3640.307313ms)
+✔ automated unresolved flag stops pair without fabricating result or forfeit (2981.982366ms)
+✔ real handshake, honest raw scores, responsive isready, stop and serialization (312.527376ms)
+✔ transactional bad position/options and semantic go rejection (272.963931ms)
+✔ terminal 0000, mate polarity and bounded zero-time fallback (242.393827ms)
+✔ claim extension immediately adjacent with legal evaluated PLAY at MultiPV=1 (243.979841ms)
+✔ evaluator replacement rejects invalid module and preserves healthy selection (501.42224ms)
+✔ infinite retains depth-64 result until stop, including ready responsiveness (276.186574ms)
+✔ intended claim differs from strongest evaluated PLAY fallback (241.772805ms)
+✔ blocking evaluator keeps isready responsive and fast stop fallback is unevaluated (482.673471ms)
+✔ failure after provisional depth exits without bestmove and clears TT after search (521.097161ms)
+ℹ tests 40
+ℹ suites 0
+ℹ pass 40
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35739.013816
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

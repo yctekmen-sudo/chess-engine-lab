@@ -1,0 +1,23 @@
+Test project /workspace/chess-engine-lab/build/native-debug
+    Start 1: m0_smoke
+1/9 Test #1: m0_smoke .........................   Passed    0.00 sec
+    Start 2: m1_core
+2/9 Test #2: m1_core ..........................   Passed   17.84 sec
+    Start 3: m2_evaluation
+3/9 Test #3: m2_evaluation ....................   Passed    0.68 sec
+    Start 4: abi_c
+4/9 Test #4: abi_c ............................   Passed    0.00 sec
+    Start 5: abi_cpp
+5/9 Test #5: abi_cpp ..........................   Passed    0.00 sec
+    Start 6: m3_search
+6/9 Test #6: m3_search ........................   Passed   13.63 sec
+    Start 7: m4_search
+7/9 Test #7: m4_search ........................   Passed   10.95 sec
+    Start 8: m5_search
+8/9 Test #8: m5_search ........................   Passed    2.06 sec
+    Start 9: m6_uci
+9/9 Test #9: m6_uci ...........................   Passed    3.16 sec
+
+100% tests passed, 0 tests failed out of 9
+
+Total Test time (real) =  48.32 sec
