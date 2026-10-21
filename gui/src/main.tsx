@@ -1164,6 +1164,7 @@ function Experiments({
         </label>
       </section>
       <section>
+        {reviewData?.error && <p role="alert">{reviewData.error}</p>}
         {Object.values(s?.experiments ?? {}).map((e) => (
           <article className="panel" key={e.id}>
             <div className="panel-title">
@@ -1199,6 +1200,7 @@ function Experiments({
                   void api
                     .post("export", { kind: "experiment", id: e.id })
                     .then(setReview)
+                    .catch((e) => setReview({ error: String(e) }))
                 }
               >
                 Review games

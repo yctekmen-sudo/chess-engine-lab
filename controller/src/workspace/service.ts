@@ -1162,6 +1162,9 @@ export class Workspace extends EventEmitter {
         g.checkpoint.outcome?.kind === "chess"
           ? g.checkpoint.outcome
           : undefined,
+        g.checkpoint.record.complete
+          ? {}
+          : { SetUp: "1", FEN: g.checkpoint.record.initialFen },
       ),
       sidecar: g,
     };

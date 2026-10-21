@@ -61,7 +61,8 @@ CI preserves the existing native matrix, controller suite and WASM suite, and ad
 `.github/workflows/gui.yml`. The shared WASM suite now also runs M7 C and C++
 legacy72/extended80/calibration tests. Its status is determined by execution,
 not by this workflow's presence. Exact implementation-head CI links/results are
-recorded in the review PR once the jobs finish.
+recorded in [implementation PR #14](https://github.com/yctekmen-sudo/chess-engine-lab/pull/14)
+once the jobs finish; its Checks tab always identifies the current head.
 
 ## What the tests establish
 
@@ -88,7 +89,8 @@ survives validation after the deadline, exact paused restoration, audited takeba
 clock restoration and duplicate Resume cannot reset a running clock. Analysis
 branches never change official records. PGN tests cover legal SAN, branches,
 comments, NAGs, headers, initial played prefixes, root annotations and atomic
-malformed-input rejection. Import retains partial FEN history. Analysis history
+malformed-input rejection. Import/export retains partial FEN history, including an explicitly imported
+standard-position FEN using SetUp/FEN headers. Analysis history
 navigation targets the displayed ancestor; branching before an imported played
 prefix creates an independent document. Analysis export uses `Result "*"`; source
 headers/records remain in its JSON sidecar rather than asserting an analysis tree

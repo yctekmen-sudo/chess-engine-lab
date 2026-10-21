@@ -135,7 +135,7 @@ export function exportPgn(doc: AnalysisDocument): string {
     .join("");
   const head =
     headers +
-    (root.record.initialFen === DEFAULT_POSITION
+    (root.record.initialFen === DEFAULT_POSITION && root.record.complete
       ? ""
       : '[SetUp "1"]\n[FEN "' + root.record.initialFen + '"]\n');
   const children = (id: string) =>

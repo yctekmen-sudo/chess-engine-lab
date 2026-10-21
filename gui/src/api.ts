@@ -52,8 +52,11 @@ export class Gateway {
         const ack = await this.post("command-status", {
           commandId: c.commandId,
         });
-        if (ack) sessionStorage.removeItem("chesslab.pending");
-        else
+        if (ack) {
+          sessionStorage.removeItem("chesslab.pending");
+          if (!ack.accepted)
+            this.error = ack.error?.message ?? "Previous command was rejected";
+        } else
           this.error =
             "Previous command has no recorded outcome. Refresh and explicitly retry your action.";
       }

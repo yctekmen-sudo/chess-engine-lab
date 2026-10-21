@@ -615,7 +615,7 @@ test("duplicate resume cannot reset a running clock, and background persistence 
     await w.close();
   }
 });
-test("analysis PGN retains its played prefix, headers, root comments and annotations", () => {
+test("analysis PGN retains its played prefix, headers, root comments and annotations", async (t) => {
   const d = document({
     initialFen: DEFAULT_POSITION,
     moves: ["e2e4", "e7e5"],
@@ -638,6 +638,24 @@ test("analysis PGN retains its played prefix, headers, root comments and annotat
   assert(exported.includes("$5"));
   assert(exported.includes("$1"));
   assert.throws(() => importPgn("1. e4 {unclosed"));
+  const partial = document({
+    initialFen: DEFAULT_POSITION,
+    moves: [],
+    complete: false,
+  });
+  const restored = importPgn(exportPgn(partial));
+  assert.equal(restored.nodes[restored.cursor].record.complete, false);
+  const workspace = await Workspace.open(await folder(t));
+  try {
+    const id = (
+      await fresh(workspace, "game.create", { fen: DEFAULT_POSITION })
+    ).result.id;
+    const exported = await workspace.export("game", id);
+    const imported = importPgn(exported.pgn);
+    assert.equal(imported.nodes[imported.cursor].record.complete, false);
+  } finally {
+    await workspace.close();
+  }
 });
 
 test("post-rename write uncertainty freezes memory and restart reconciles the durable command once", async (t) => {
