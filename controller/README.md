@@ -102,3 +102,128 @@ controller still stops at the earlier of its authoritative game deadline and
 Fixed-depth and movetime comparison modes remain explicit alternatives. Clock
 mode is rejected for untimed matches and for the CLI's single-position analysis.
 Direct `ManagedEngine` clock requests require an explicit `stopAfterMs` budget.
+
+## M7.1 independent experiment limits and diagnostics
+
+The shared `limit` remains required and keeps its existing meaning. Optionally
+add `engineLimits: [limitForA, limitForB]` to override it for paired experiments.
+Index 0 is `engines[0]` (Engine A); index 1 is `engines[1]` (Engine B), regardless
+of which engine plays White. Both elements are required when the array is present.
+Depth is an integer 1..64; movetime is an integer 0..2147483647 milliseconds.
+Depth/movetime may be mixed. `{ "kind": "clock" }` may also be mixed with either,
+and requires Fischer `time`. The shared limit must still be valid. Fischer clocks,
+authoritative deadlines, `searchCapMs`, stop grace and adjudication are unchanged.
+CLI `analyze` continues to use the shared limit; `engineLimits` applies to matches.
+
+For example, Chess Lab depth 8 versus Stockfish depth 3 on Windows:
+
+```json
+{
+  "engines": [
+    { "path": "C:\\cursor\\chess-engine-lab\\build\\native-debug\\chess_lab_uci.exe" },
+    { "path": "C:\\engines\\stockfish\\stockfish-windows-x86-64-avx2.exe" }
+  ],
+  "seed": 1,
+  "limit": { "kind": "depth", "depth": 1 },
+  "engineLimits": [
+    { "kind": "depth", "depth": 8 },
+    { "kind": "depth", "depth": 3 }
+  ],
+  "time": { "kind": "untimed" },
+  "searchCapMs": 60000,
+  "maxPlies": 300,
+  "uciDiagnostics": { "maxEntries": 4096, "maxBytes": 1048576 }
+}
+```
+
+Replace paths with installed absolute executables (including `.exe` on Windows).
+This example uses ordinary UCI trust. For Chess Lab draw extensions, set Engine A's
+`kind` to `chesslab` and supply its actual executable `sha256`, as in the existing
+sample generator. Stockfish's filename depends on the installed build.
+Save as `work/depth-comparison.json`, then run
+`node controller/dist/cli.js match work/depth-comparison.json work/depth-comparison`
+and export with
+`node controller/dist/cli.js experiment export work/depth-comparison work/depth-comparison-export`.
+Depth 8 is a request: the watchdog may interrupt before that depth completes.
+
+Omit `uciDiagnostics` to disable protocol capture (the default); `{}` enables
+the defaults above. Limits apply **per attempt across both engine processes**:
+1..65536 entries, 1..8388608 bytes. The byte budget counts serialized entries
+including attribution. Capture retains an ordered prefix; it never evicts older
+commands to imply an uninterrupted trace. `entries`, `observedEntries`,
+`droppedEntries`, `retainedBytes` and `truncated` describe its coverage.
+`lifecycleComplete` is false for checkpoints, failed/forced process shutdowns,
+unterminated output or an observer failure. Observer exceptions cannot fail normal
+chess operations, but their sticky `observerFailures` count prevents the engine
+and exported capture from claiming complete evidence, even if later observation
+succeeds. `complete` requires lifecycle completion, no truncation and zero
+observer failures.
+Captured traffic consists of submitted stdin commands and complete stdout lines
+from the attempt's handshake through quit, including options, position, go, stop,
+readiness and responses. Preflight identity inspections and stderr are outside
+this trace. An attempted write is not proof the engine consumed that command.
+Entries carry observation sequence, monotonic timestamp, process generation,
+scheduled game, attempt, engine index and color. Search traffic additionally
+carries session and absolute replay ply; setup and idle shutdown have no search attribution.
+These are controller bindings under the existing UCI stream barriers, not IDs
+echoed by the engine. Ordering records controller observations across processes.
+
+Each new attempt's `searches` records per-move `requested`, engine/color/ply/session,
+`reported` depth/nodes/timeMs/nps, `measuredElapsedMs`, `stopRequested`, `status`
+and whether the proposal was `accepted`. Requested depth and engine-reported depth
+are separate. Measurement runs from search submission through bestmove receipt
+(or failure/disposal), excluding the subsequent readiness barrier. Counters are
+the latest reported values per field; malformed/negative/unsafe integer values
+make that field unavailable. Omitted fields remain absent until reported;
+zero is retained only when actually reported. `info string` and PV payloads are
+not parsed as counters. Four recent standard info lines of at most 512 characters
+are retained per search; `infoDropped` and each line's `truncated` flag label loss.
+Fuller raw evidence is available when protocol capture is enabled and fits its limits.
+
+Per-move search detail is also bounded **per attempt across both engines**, even
+with protocol capture disabled. By default `searches` retains an ordered prefix
+of at most 256 records and 262144 serialized entry bytes. Optional JSON
+`searchEvidence: { "maxEntries": 256, "maxBytes": 262144 }` selects budgets
+(1..4096 records, 1..4194304 bytes). This does not change `maxPlies`, engine limits,
+clocks or game records. Once either budget fills, no subsequent raw search detail
+is retained or serialized into the collector; per-engine aggregate counters,
+elapsed totals and reported-field sample counts/ranges continue across **every
+observed search**, including omitted records. These aggregates do not reconstruct
+the missing per-move detail or raw UCI lines.
+
+Each checkpoint/final includes `searchEvidence`: budgets, `retainedBytes`,
+`retainedSearches`, `observedSearches`, `droppedSearches`, `truncated`, first/last
+dropped session/engine/color/ply, and the aggregate `summary`. `complete` describes
+per-search record coverage and requires a finalized attempt with zero omitted
+records; checkpoints always have `lifecycleComplete: false` and `complete: false`.
+Raw info loss remains separately labeled within retained records. Exported
+`searchSummary` uses the aggregates for all observed searches and additionally
+reports retained/dropped counts and attempts with truncated search detail.
+Earlier M7.1 array-only attempts remain readable and are summarized from their
+existing records; M6 attempts without statistics remain explicitly unavailable.
+
+Retained evidence, aggregate state and session-to-ply bookkeeping use bounded
+memory independent of `maxPlies`. Checkpoints still rewrite the bounded prefix
+plus fixed-size summaries, so added evidence serialization is linear in the
+number of searches after saturation, rather than repeatedly growing with the
+whole search history. The authoritative move/event history still grows normally;
+the evidence budget does not truncate it or make total game storage constant.
+
+`completed` means bestmove plus a successful session barrier, `interrupted` means
+a controller stop/disposal, and `failed` means a transport/protocol failure. A
+completed exchange does not certify reaching the requested depth, and an
+interrupted search can still yield a legally accepted move. Engine-reported time
+is distinct from measured elapsed time and authoritative playing time. Statistics
+and scores are not normalized or certified comparable between engines.
+
+Evidence shares the existing checksummed, fsynced incremental state and immutable
+final attempt records; no separate logging write can acknowledge a game early.
+After a crash, only the latest durable move checkpoint is available; active-search
+and shutdown traffic since that checkpoint may be lost. Export adds
+`incompleteAttempts` (unfinished or explicitly interrupted, always labeled partial)
+and per-engine `searchSummary` sample counts/ranges and elapsed totals for official
+attempts. It retains the existing `manifest`, `scheduled`, `attempts` and PGN.
+Old manifests/results resume and export without fabricated historical statistics;
+summary coverage counts distinguish attempts lacking search evidence. Corrupt
+evidence fails integrity checks. Resume still verifies identities/artifacts and
+never rewrites completed attempts, manifests or schedules.

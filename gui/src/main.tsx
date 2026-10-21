@@ -1099,7 +1099,38 @@ export function EnginePanel({
     </div>
   );
 }
-function Experiments({
+function validateExperimentLimits(config: any): void {
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    throw Error("Match conditions must be a JSON object");
+  const check = (limit: any, name: string) => {
+    if (limit?.kind === "depth") {
+      if (!Number.isInteger(limit.depth) || limit.depth < 1 || limit.depth > 64)
+        throw Error(`${name}: depth must be an integer from 1 to 64`);
+    } else if (limit?.kind === "movetime") {
+      if (!Number.isSafeInteger(limit.ms) || limit.ms < 0 || limit.ms > 2147483647)
+        throw Error(`${name}: movetime must be an integer from 0 to 2147483647 ms`);
+    } else if (limit?.kind !== "clock") {
+      throw Error(`${name}: select depth, movetime or clock`);
+    }
+    if (limit.kind === "clock" && config.time?.kind !== "fischer")
+      throw Error(`${name}: clock mode requires Fischer time in Match conditions JSON`);
+  };
+  check(config.limit, "Shared limit");
+  if (config.engineLimits !== undefined) {
+    if (!Array.isArray(config.engineLimits) || config.engineLimits.length !== 2)
+      throw Error("engineLimits must contain exactly two limits: Engine A and Engine B");
+    config.engineLimits.forEach((limit: any, i: number) => check(limit, `Engine ${i === 0 ? "A" : "B"}`));
+  }
+}
+function experimentLimitLabel(limit: any): string {
+  if (limit?.kind === "depth") return `depth ${limit.depth}`;
+  if (limit?.kind === "movetime") return `${limit.ms} ms per move`;
+  return limit?.kind === "clock" ? "Fischer clock" : "invalid limit";
+}
+function assignedExperimentLimit(config: any, index: number): string {
+  return experimentLimitLabel(config?.engineLimits?.[index] ?? config?.limit);
+}
+export function Experiments({
   snapshot: s,
   command,
   download,
@@ -1115,8 +1146,27 @@ function Experiments({
     [json, setJson] = useState(
       '{"seed":1,"limit":{"kind":"depth","depth":1},"time":{"kind":"untimed"},"maxPlies":300,"searchCapMs":60000}',
     ),
+    [formError, setFormError] = useState(""),
     [competition, setCompetition] = useState(false),
     [reviewData, setReview] = useState<any>(null);
+  let conditions: any = null;
+  try {
+    conditions = JSON.parse(json);
+  } catch { /* Report when the user submits or edits a control. */ }
+  const updateConditions = (edit: (config: any) => void) => {
+    try {
+      const config = JSON.parse(json);
+      if (!config || typeof config !== "object" || Array.isArray(config))
+        throw Error("Match conditions must be a JSON object");
+      edit(config);
+      setJson(JSON.stringify(config, null, 2));
+      setFormError("");
+    } catch (e) {
+      setFormError(e instanceof SyntaxError
+        ? "Fix Match conditions JSON before editing controls"
+        : (e as Error).message);
+    }
+  };
   return (
     <div className="management">
       <section className="panel">
@@ -1145,26 +1195,103 @@ function Experiments({
             </select>
           </label>
         ))}
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={conditions?.engineLimits !== undefined}
+            onChange={(e) => updateConditions((c) => {
+              if (e.target.checked) c.engineLimits = [structuredClone(c.limit), structuredClone(c.limit)];
+              else delete c.engineLimits;
+            })}
+          />
+          Use independent engine limits
+        </label>
+        <p>
+          Engine A and Engine B keep their assigned limits when colors swap.
+          With independent limits off, both use the shared JSON limit.
+        </p>
+        {conditions?.engineLimits !== undefined && ["A", "B"].map((name, i) => (
+          <fieldset key={name}>
+            <legend>Engine {name} search limit</legend>
+            <label>
+              Engine {name} limit mode
+              <select
+                value={conditions.engineLimits?.[i]?.kind ?? ""}
+                onChange={(e) => updateConditions((c) => {
+                  if (!Array.isArray(c.engineLimits) || c.engineLimits.length !== 2)
+                    throw Error("Fix engineLimits to contain Engine A and Engine B limits");
+                  c.engineLimits[i] = e.target.value === "depth"
+                    ? {kind:"depth", depth:1}
+                    : e.target.value === "movetime"
+                      ? {kind:"movetime", ms:1000}
+                      : {kind:"clock"};
+                })}
+              >
+                <option value="depth">Depth</option>
+                <option value="movetime">Movetime</option>
+                <option value="clock">Fischer clock</option>
+              </select>
+            </label>
+            {["depth", "movetime"].includes(conditions.engineLimits?.[i]?.kind) && <label>
+              Engine {name} {conditions.engineLimits[i].kind === "depth" ? "depth" : "movetime (ms)"}
+              <input
+                type="number"
+                step="1"
+                min={conditions.engineLimits[i].kind === "depth" ? 1 : 0}
+                max={conditions.engineLimits[i].kind === "depth" ? 64 : 2147483647}
+                value={conditions.engineLimits[i].kind === "depth" ? conditions.engineLimits[i].depth ?? "" : conditions.engineLimits[i].ms ?? ""}
+                onChange={(e) => updateConditions((c) => {
+                  const field = c.engineLimits[i].kind === "depth" ? "depth" : "ms";
+                  c.engineLimits[i][field] = e.target.value === "" ? "" : Number(e.target.value);
+                })}
+              />
+            </label>}
+          </fieldset>
+        ))}
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={conditions?.uciDiagnostics !== undefined}
+            onChange={(e) => updateConditions((c) => {
+              if (e.target.checked) c.uciDiagnostics = {};
+              else delete c.uciDiagnostics;
+            })}
+          />
+          Capture bounded UCI protocol evidence
+        </label>
+        <p>
+          Off by default. Export includes search statistics and, when enabled,
+          protocol evidence with explicit capture limits.
+        </p>
         <label>
           Match conditions JSON
           <textarea
             rows={9}
             value={json}
-            onChange={(e) => setJson(e.target.value)}
+            onChange={(e) => {
+              setJson(e.target.value);
+              setFormError("");
+            }}
           />
         </label>
+        {formError && <p role="alert">{formError}</p>}
         <button
           className="primary"
           disabled={!a || !b}
           onClick={() => {
             try {
+              const config = JSON.parse(json);
+              validateExperimentLimits(config);
+              setFormError("");
               void command("experiment.create", {
                 white: a,
                 black: b,
-                config: JSON.parse(json),
+                config,
               });
-            } catch {
-              alert("Match conditions must be valid JSON");
+            } catch (e) {
+              setFormError(e instanceof SyntaxError
+                ? "Match conditions must be valid JSON"
+                : (e as Error).message);
             }
           }}
         >
@@ -1187,6 +1314,11 @@ function Experiments({
               <h2>Experiment {e.id.slice(0, 6)}</h2>
               <span className="pill">{e.status}</span>
             </div>
+            <p>
+              Engine A: {assignedExperimentLimit(e.config, 0)};
+              Engine B: {assignedExperimentLimit(e.config, 1)}.
+              Limits follow engine identity across colors.
+            </p>
             <div className="game-actions">
               {[
                 ["Start / resume", "experiment.resume"],
