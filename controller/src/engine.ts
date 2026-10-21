@@ -7,7 +7,7 @@ import { monotonic, type Binding, type MonotonicClock, type Proposal } from './g
 import { DEFAULT_POSITION, type Decision, type RecordState } from './rules.js';
 export type EngineConfig={path:string;args?:string[];kind?:'uci'|'chesslab';sha256?:string;options?:Record<string,string>;handshakeMs?:number;stopGraceMs?:number};
 export type EngineState='STARTING'|'UCI_HANDSHAKE'|'READY'|'SEARCHING'|'STOPPING'|'FAILED'|'CLOSED';
-export type SearchLimit={kind:'depth';depth:number}|{kind:'movetime';ms:number}|{kind:'infinite'};
+export type SearchLimit={kind:'depth';depth:number}|{kind:'movetime';ms:number}|{kind:'clock';wtime:number;btime:number;winc:number;binc:number}|{kind:'infinite'};
 export type Option={type:string;default:string;min?:number;max?:number;choices?:string[]};
 export type EngineIdentity={path:string;sha256:string;args:string[];id:string[];options:Record<string,Option>;effective:Record<string,string>;m2:string[]|'unknown'};
 export type SearchRequest={session:string;binding:Binding;record:RecordState;limit:SearchLimit;stopAfterMs?:number;onProgress?:(p:{session:string;line:string;receivedAt:number;provisional:true})=>void};
@@ -100,7 +100,7 @@ export class ManagedEngine implements EngineTransport {
       this.active=undefined;this.state='STOPPING';
       const proposal:Proposal={session:a.request.session,binding:a.request.binding,receivedAt:at,decision,bestmove:m[1]!};
       this.wait('readyok','isready').then(()=>{
-        if(this.failure){a.reject(this.failure);return;}this.state='READY';a.resolve(proposal);
+        if(this.failure||this.state==='CLOSED'){a.reject(this.failure??Error('engine disposed'));return;}this.state='READY';a.resolve(proposal);
       },e=>a.reject(e));return;
     }
     if(a) {
@@ -119,7 +119,9 @@ export class ManagedEngine implements EngineTransport {
   }
   async start():Promise<EngineIdentity> {
     if(this.state!=='STARTING')throw Error('engine already started');
-    const id=await executableIdentity(this.config);this.state='UCI_HANDSHAKE';
+    const id=await executableIdentity(this.config);
+    if(this.state!=='STARTING')throw this.failure??Error('engine disposed during startup');
+    this.state='UCI_HANDSHAKE';
     this.process=spawn(id.path,this.config.args??[],{shell:false,stdio:'pipe'});
     this.process.on('error',e=>this.fail(e));
     this.process.on('exit',(code,signal)=>{if(this.state!=='CLOSED')this.fail(Error(`engine exit ${code}/${signal}`));});
@@ -138,7 +140,9 @@ export class ManagedEngine implements EngineTransport {
       if(o.type==='button'&&value!=='')throw await this.abort('invalid button option');
       this.send('setoption name '+name+(o.type==='button'?'':' value '+value));effective[name]=value;
     }
-    await this.wait('readyok','isready');this.send('ucinewgame');await this.wait('readyok','isready');this.state='READY';
+    await this.wait('readyok','isready');this.send('ucinewgame');await this.wait('readyok','isready');
+    if(this.state!=='UCI_HANDSHAKE')throw this.failure??Error('engine disposed during handshake');
+    this.state='READY';
     this.identity={...id,args:[...(this.config.args??[])],id:[...this.observedId],options:structuredClone(this.observedOptions),effective,m2:this.m2.length?[...this.m2]:'unknown'};
     return structuredClone(this.identity);
   }
@@ -151,7 +155,13 @@ export class ManagedEngine implements EngineTransport {
       if(!Number.isInteger(request.limit.depth)||request.limit.depth<1||request.limit.depth>64)throw Error('invalid depth');go='go depth '+request.limit.depth;
     }else if(request.limit.kind==='movetime') {
       if(!Number.isSafeInteger(request.limit.ms)||request.limit.ms<0||request.limit.ms>2147483647)throw Error('invalid budget');go='go movetime '+request.limit.ms;
-    }else go='go infinite';
+    }else if(request.limit.kind==='clock') {
+      const {wtime,btime,winc,binc}=request.limit;
+      if(![wtime,btime,winc,binc].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=2147483647))throw Error('invalid UCI clock fields');
+      go=`go wtime ${wtime} btime ${btime} winc ${winc} binc ${binc}`;
+      if(request.stopAfterMs===undefined)throw Error('clock mode requires an authoritative stop budget');
+    }else if(request.limit.kind==='infinite')go='go infinite';
+    else throw Error('unsupported search mode');
     if(request.stopAfterMs!==undefined&&(!Number.isFinite(request.stopAfterMs)||request.stopAfterMs<0||request.stopAfterMs>2147483647))throw Error('invalid stop budget');
     const position=request.record.complete&&request.record.initialFen===DEFAULT_POSITION?'startpos':'fen '+request.record.initialFen;
     return new Promise((resolve,reject)=>{

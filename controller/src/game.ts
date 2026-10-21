@@ -2,7 +2,7 @@ import { FideRules, matePossibility, opposite, type ChessOutcome, type Decision,
 export interface MonotonicClock {now():number}
 export const monotonic:MonotonicClock={now:()=>performance.now()};
 export type TimeControl={kind:'untimed'}|{kind:'fischer';initialMs:number;incrementMs:number};
-export type Outcome=ChessOutcome|{kind:'adjudication_required';reason:string;proof:MateProof}|{kind:'technical_forfeit'|'invalid';reason:string;loser:Side};
+export type Outcome=ChessOutcome|{kind:'adjudication_required';reason:string;proof:MateProof}|{kind:'technical_forfeit';reason:string;loser:Side}|{kind:'invalid';reason:string;loser?:Side};
 export type Binding={game:string;generation:number;fen:string;history:string;side:Side};
 export type Proposal={session:string;binding:Binding;receivedAt:number;decision:Decision;bestmove:string};
 export class Game {
@@ -35,11 +35,23 @@ export class Game {
   clocks():Record<Side,number> {return {...this.remaining};}
   deadline():number {return this.start+this.remaining[this.side()];}
   available():number {return Math.max(0,this.deadline()-this.clock.now());}
-  fail(reason:string,policy:'pause'|'technical_forfeit'|'invalid'='pause'):void {
+  fail(reason:string,policy:'pause'|'technical_forfeit'|'invalid'='pause',loser:Side=this.side()):void {
     if(this.result)return;
     this.pending=undefined;this.paused=true;
-    this.events.push({kind:'technical_failure',reason,side:this.side(),at:this.clock.now()});
-    if(policy!=='pause')this.result={kind:policy,reason,loser:this.side()};
+    this.events.push({kind:'technical_failure',reason,side:loser,at:this.clock.now()});
+    if(policy!=='pause')this.result={kind:policy,reason,loser};
+  }
+  invalidate(reason:string):void {
+    if(this.result)return;
+    this.pending=undefined;this.paused=true;
+    this.events.push({kind:'orchestration_failure',reason,at:this.clock.now()});
+    this.result={kind:'invalid',reason};
+  }
+  uciClock():{wtime:number;btime:number;winc:number;binc:number} {
+    if(this.time.kind!=='fischer')throw Error('UCI clock mode requires Fischer clocks');
+    const at=this.clock.now(),side=this.side();
+    const remaining=(s:Side)=>Math.min(2147483647,Math.max(0,Math.floor(this.remaining[s]-(s===side?at-this.start:0))));
+    return {wtime:remaining('w'),btime:remaining('b'),winc:this.time.incrementMs,binc:this.time.incrementMs};
   }
   flag(at=this.clock.now()):Outcome {
     if(this.result)return this.result;

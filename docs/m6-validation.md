@@ -201,3 +201,36 @@ The final evidence commit updates documentation only. These are observed results
 for the tested implementation SHA, not assumed results for a queued rerun.
 The additional active-quit native test was also rerun locally through CTest in all
 three native configurations after the full baseline passes; all passed.
+
+## PR #12 requested corrections
+
+Request: https://github.com/yctekmen-sudo/chess-engine-lab/pull/12#issuecomment-6305318667
+
+- Startup errors record the actual failed engine index and White/Black assignment,
+  independent of the opening side to move. `Game.fail` accepts explicit loser;
+  technical forfeit/invalid policy preserves attribution. Neutral orchestration or
+  identity drift records an invalid attempt with no loser and no match points.
+- Finite `analyze` has a 60000 ms default watchdog, overridden by CLI config
+  `searchCapMs`; movetime stops at the earlier limit. Stop resolves a cooperative
+  final proposal or fails/kills after bounded grace. Infinite library analysis
+  requires caller-supplied AbortSignal; cancellation rejects AbortError after
+  disposal. Startup/barrier disposal guards prevent reviving closed processes.
+- Added standard controller-originated live UCI clock mode: match limit
+  `{kind:'clock'}` requires Fischer clocks. `Game.uciClock()` debits the active
+  clock to one monotonic snapshot and transmits floored, bounded wtime/btime and
+  both increments. Controller deadline/work cap still governs stop. Depth and
+  movetime remain explicit comparison modes; no existing condition is reinterpreted.
+
+Regression evidence includes black-side startup failure and swapped assignments
+for both White/Black-to-move openings and both failure policies; neutral startup
+identity drift; hung fixed-depth library and actual CLI analysis; signal-cancelled
+infinite analysis and pre-aborted/no-spawn; disposal during startup; exact clock
+wire transcript, virtual elapsed-time projections, and real paired clock matches.
+The original native/core/WASM implementation is unchanged by these corrections.
+
+Correction validation: `npm run typecheck` and `npm run lint` passed; full
+`npm test` passed **50/50** in 52.883 s on the same Linux/Node environment.
+Actual output: `m6-evidence/review-corrections-tests.txt`. This includes all prior
+real native UCI, rules differential, virtual-clock, persistence and CLI tests.
+No C++ or WASM code changed, so the preserved native/WASM evidence above still
+applies to those implementations; new-head CI results are recorded in PR #12.

@@ -6,7 +6,9 @@ async function json(path:string) {return JSON.parse(await readFile(path,'utf8'))
 async function main(args:string[]):Promise<unknown> {
   const [command,action,arg,extra]=args;
   if(command==='analyze'&&action) {
-    const c=validateConfig(await json(action));return analyze(c.engines[0],c.openings[0]!,c.limit);
+    const c=validateConfig(await json(action));
+    if(c.limit.kind==='clock')throw Error('clock mode is for live matches; analysis requires depth or movetime');
+    return analyze(c.engines[0],c.openings[0]!,c.limit,{searchCapMs:c.searchCapMs});
   }
   if(command==='match'&&action&&arg){await createExperiment(arg,await json(action));return resumeExperiment(arg);}
   if(command==='experiment'&&action&&arg) {

@@ -5,9 +5,9 @@ import { hostname, platform, arch } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { ManagedEngine, executableIdentity, type EngineConfig, type EngineIdentity, type SearchLimit } from './engine.js';
 import { Game, monotonic, type Outcome, type TimeControl } from './game.js';
-import { FideRules, DEFAULT_POSITION, type RecordState } from './rules.js';
+import { FideRules, DEFAULT_POSITION, type RecordState, type Side } from './rules.js';
 import { canonical, digest, exists, names, readRecord, writeRecord, writerLock } from './store.js';
-export type MatchConfig={engines:[EngineConfig,EngineConfig];openings:RecordState[];seed:number;limit:Exclude<SearchLimit,{kind:'infinite'}>;time:TimeControl;failurePolicy:'technical_forfeit'|'invalid';maxPlies:number;searchCapMs:number};
+export type MatchConfig={engines:[EngineConfig,EngineConfig];openings:RecordState[];seed:number;limit:Exclude<SearchLimit,{kind:'infinite'|'clock'}>|{kind:'clock'};time:TimeControl;failurePolicy:'technical_forfeit'|'invalid';maxPlies:number;searchCapMs:number};
 export type ScheduledGame={id:string;pair:string;white:0|1;black:0|1;opening:RecordState};
 type Artifact={path:string;sha256:string};
 type Manifest={id:string;created:string;config:MatchConfig;identities:EngineIdentity[];artifacts:Artifact[][];scheduleDigest:string;runtime:{node:string;controller:string;platform:string;arch:string;host:string;compiler:string};policies:Record<string,string>};
@@ -32,9 +32,10 @@ export function validateConfig(value:unknown):MatchConfig {
     const r=object(raw);if(typeof r.initialFen!=='string'||typeof r.complete!=='boolean'||!Array.isArray(r.moves)||r.moves.some(m=>typeof m!=='string'))throw Error('invalid opening history');
     const rules=new FideRules(r as RecordState);return rules.record();
   });
-  const limit=object(v.limit);if(limit.kind==='depth')int(limit.depth,1,64);else if(limit.kind==='movetime')int(limit.ms,0,2147483647);else throw Error('match requires depth or movetime');
+  const limit=object(v.limit);if(limit.kind==='depth')int(limit.depth,1,64);else if(limit.kind==='movetime')int(limit.ms,0,2147483647);else if(limit.kind!=='clock')throw Error('match requires depth, movetime or clock');
   const time=object(v.time??{kind:'untimed'});
   if(time.kind==='fischer'){int(time.initialMs,0,2147483647);int(time.incrementMs,0,2147483647);}else if(time.kind!=='untimed')throw Error('unsupported clock');
+  if(limit.kind==='clock'&&time.kind!=='fischer')throw Error('clock search mode requires Fischer time control');
   if(v.failurePolicy!==undefined&&v.failurePolicy!=='technical_forfeit'&&v.failurePolicy!=='invalid')throw Error('invalid failure policy');
   return {engines,openings:records,seed:int(v.seed??1,0,0xffffffff),limit:limit as MatchConfig['limit'],time:time as TimeControl,failurePolicy:v.failurePolicy??'technical_forfeit',maxPlies:int(v.maxPlies??1000,1,100000),searchCapMs:int(v.searchCapMs??60000,1,2147483647)};
 }
@@ -135,26 +136,29 @@ export async function resumeExperiment(directory:string,options:{takeoverStaleLo
       const snapshot=()=>({record:game.record(),events:game.events,clocks:{w:Number.isFinite(game.clocks().w)?game.clocks().w:null,b:Number.isFinite(game.clocks().b)?game.clocks().b:null}});
       try {
         for(let i=0;i<2;i++) {
-          const identity=await engines[i]!.start(),index=i===0?g.white:g.black;
+          const side:Side=i===0?'w':'b',index=i===0?g.white:g.black;
+          let identity:EngineIdentity;
+          try{identity=await engines[i]!.start();}
+          catch(e){game.fail(`engine startup failure: engine=${index} color=${side}; ${String(e)}`,config.failurePolicy,side);break;}
           if(canonical(identity)!==canonical(manifest.identities[index]))throw Error('engine identity changed at attempt start');
         }
         // Engine startup is setup time. Construct the actual game clock only
         // after both fresh processes have completed their handshake.
-        game=new Game(g.opening,config.time);
+        if(!game.outcome())game=new Game(g.opening,config.time);
         while(!game.outcome()) {
           if(game.record().moves.length-g.opening.moves.length>=config.maxPlies){game.fail('explicit maxPlies work limit','invalid');break;}
           if(game.available()<=0){game.flag();break;}
           const session=randomUUID(),binding=game.begin(session),engine=engines[game.side()==='w'?0:1]!;
           try {
-            const p=await engine.search({session,binding,record:game.record(),limit:config.limit,stopAfterMs:Math.min(config.searchCapMs,game.available()),onProgress:p=>{progress.push(p);if(progress.length>128)progress.shift();}});
+            const p=await engine.search({session,binding,record:game.record(),limit:config.limit.kind==='clock'?{kind:'clock',...game.uciClock()}:config.limit,stopAfterMs:Math.min(config.searchCapMs,game.available()),onProgress:p=>{progress.push(p);if(progress.length>128)progress.shift();}});
             game.accept(p);
           }catch(e){if(game.available()<=0)game.flag();else game.fail(String(e),config.failurePolicy);}
           await writeRecord(join(dir,'state.json'),snapshot(),false);
           options.onProgress?.({game:g.id,attempt:id,...snapshot()});
         }
-      }catch(e){game.fail(String(e),config.failurePolicy);}
+      }catch(e){game.invalidate('orchestration failure: '+String(e));}
       finally{for(const e of engines)await e.close();}
-      const attempt:Attempt={id,game:g.id,...snapshot(),outcome:game.outcome()??{kind:'invalid',reason:'attempt stopped',loser:game.side()},elapsedMs:monotonic.now()-started,progress};
+      const attempt:Attempt={id,game:g.id,...snapshot(),outcome:game.outcome()??{kind:'invalid',reason:'attempt stopped without an attributable engine failure'},elapsedMs:monotonic.now()-started,progress};
       await finalize(directory,g,attempt);
       await writeRecord(join(directory,'summary.json'),await experimentStatus(directory),false);
       if(attempt.outcome.kind==='adjudication_required')break;

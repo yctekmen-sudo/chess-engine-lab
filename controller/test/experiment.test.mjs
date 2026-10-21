@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile,writeFile,unlink,mkdir,readdir} from 'node:fs/promises';
 import {tmpdir,hostname} from 'node:os';
-import {resolve,join} from 'node:path';
+import {resolve,join,relative} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {createExperiment,resumeExperiment,experimentStatus,exportExperiment,schedule,validateConfig,readRecord,writeRecord,writerLock} from '../dist/index.js';
@@ -72,4 +72,33 @@ test('automated unresolved flag stops pair without fabricating result or forfeit
  const d=await dir(t);await createExperiment(d,config('normal',{openings:[{initialFen:'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',moves:[],complete:true}],time:{kind:'fischer',initialMs:0,incrementMs:0}}));
  const s=await resumeExperiment(d);assert.equal(s.completed,1);assert.equal(s.counts.unresolved,1);assert.equal(s.counts.technicalForfeits,0);assert.deepEqual(s.counts.chess,{white:0,black:0,draw:0});assert.equal(s.incompletePairs.length,1);
  const out=await exportExperiment(d);assert(out.pgn.includes('[Result "*"]'));
+});
+test('startup forfeits name actual failed engine/color across paired colors and opening turns',async t=>{
+ for(const turn of ['w','b'])for(const failurePolicy of ['technical_forfeit','invalid']) {
+  const d=await dir(t),marker=relative(process.cwd(),join(d,'starts'));
+  const c=config('startup-fail',{failurePolicy,openings:[{initialFen:`rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR ${turn} KQkq - 0 1`,moves:[],complete:false}]});
+  c.engines[1].args.push(marker);await createExperiment(d,c);
+  const status=await resumeExperiment(d);const exported=await exportExperiment(d);
+  assert.equal(status.completed,2);assert.deepEqual(status.counts.chess,{white:0,black:0,draw:0});
+  assert.deepEqual(status.counts.matchPoints,failurePolicy==='technical_forfeit'?[2,0]:[0,0]);
+  for(const a of exported.sidecar.attempts){const expected=a.game==='game-0-0'?'b':'w';assert.equal(a.outcome.kind,failurePolicy);assert.equal(a.outcome.loser,expected);assert.match(a.outcome.reason,new RegExp(`engine=1 color=${expected}`));assert.equal(a.record.moves.length,0);}
+ }
+});
+test('neutral startup identity drift invalidates games without assigning a forfeit',async t=>{
+ const d=await dir(t),c=config('identity-drift');c.engines[1].args.push(relative(process.cwd(),join(d,'starts')));
+ await createExperiment(d,c);const s=await resumeExperiment(d),out=await exportExperiment(d);
+ assert.equal(s.counts.invalid,2);assert.equal(s.counts.technicalForfeits,0);assert.deepEqual(s.counts.matchPoints,[0,0]);
+ for(const a of out.sidecar.attempts){assert.equal(a.outcome.kind,'invalid');assert(!('loser' in a.outcome));assert.match(a.outcome.reason,/orchestration failure.*identity changed/);assert.equal(a.events.at(-1).kind,'orchestration_failure');}
+});
+test('fixed-depth CLI analysis uses searchCapMs and exits on a hung UCI engine',async t=>{
+ const d=await dir(t),cfg=join(d,'config.json'),c=config('hang',{searchCapMs:10});c.engines.reverse();await writeFile(cfg,JSON.stringify(c));
+ assert.throws(()=>execFileSync(process.execPath,[resolve(import.meta.dirname,'../dist/cli.js'),'analyze',cfg],{encoding:'utf8',timeout:5000,stdio:['ignore','pipe','pipe']}),e=>e.status===1&&e.signal===null&&/stop grace expired/.test(e.stderr));
+});
+test('Fischer clock-mode paired matches send standard clock fields on every search',async t=>{
+ const d=await dir(t),log=join(d,'clock-go.txt'),c=config('clock-log',{limit:{kind:'clock'},time:{kind:'fischer',initialMs:5000,incrementMs:41}});
+ c.engines[1].args.push(relative(process.cwd(),log));await createExperiment(d,c);const s=await resumeExperiment(d);
+ assert.equal(s.completed,2);assert.equal(s.counts.technicalForfeits,0);assert.equal(s.counts.invalid,0);
+ const lines=(await readFile(log,'utf8')).trim().split('\n');assert(lines.length>=1);
+ for(const line of lines){const m=/^go wtime (\d+) btime (\d+) winc 41 binc 41$/.exec(line);assert(m,line);assert(Number(m[1])>=0&&Number(m[1])<=5041);assert(Number(m[2])>=0&&Number(m[2])<=5041);}
+ assert.throws(()=>validateConfig(config('normal',{limit:{kind:'clock'},time:{kind:'untimed'}})),/requires Fischer/);
 });

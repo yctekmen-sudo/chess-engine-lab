@@ -138,3 +138,28 @@ test('explicit shutdown invalidates active proposals and bounds unresponsive chi
  const e=await instance(t,'hang'),g=new Game(initial);const p=e.search(request(g));
  const rejected=assert.rejects(p,/disposed/);await e.close();await rejected;assert.equal(e.state,'CLOSED');assert.equal(g.record().moves.length,0);
 });
+test('fixed-depth analysis watchdog kills a handshaken hung engine',async()=>{
+ await assert.rejects(analyze(engine('hang'),initial,{kind:'depth',depth:1},{searchCapMs:10}),/stop grace expired/);
+});
+test('intentional infinite analysis requires external cancellation and disposes the process',async()=>{
+ await assert.rejects(analyze(engine('hang'),initial,{kind:'infinite'}),/requires an AbortSignal/);
+ const cancel=new AbortController();
+ await assert.rejects(analyze(engine('hang'),initial,{kind:'infinite'},{signal:cancel.signal,onProgress:p=>{if(p.line==='info string fixture searching')cancel.abort();}}),{name:'AbortError'});
+ const early=new AbortController();early.abort();
+ await assert.rejects(analyze({path:'/missing-engine'},initial,{kind:'infinite'},{signal:early.signal}),{name:'AbortError'});
+});
+test('standard clock-mode fields carry projected remaining time and both increments',async t=>{
+ const v=virtual(),g=new Game(initial,{kind:'fischer',initialMs:1000,incrementMs:25},v.clock);v.set(125.75);
+ assert.deepEqual(g.uciClock(),{wtime:874,btime:1000,winc:25,binc:25});
+ const e=await instance(t,'clock-trace'),lines=[];
+ const p=await e.search({...request(new Game(initial)),limit:{kind:'clock',...g.uciClock()},stopAfterMs:500,onProgress:p=>lines.push(p.line)});
+ assert(lines.includes('info string received_go go wtime 874 btime 1000 winc 25 binc 25'));assert.equal(p.decision.kind,'play');
+ const black=new Game({initialFen:DEFAULT_POSITION.replace(' w ',' b '),moves:[],complete:false},{kind:'fischer',initialMs:500,incrementMs:3},v.clock);v.set(150.75);
+ assert.deepEqual(black.uciClock(),{wtime:500,btime:475,winc:3,binc:3});
+ assert.throws(()=>e.search({...request(new Game(initial)),limit:{kind:'clock',wtime:-1,btime:1,winc:0,binc:0},stopAfterMs:1}),/clock fields/);
+ assert.throws(()=>e.search({...request(new Game(initial)),limit:{kind:'clock',wtime:1,btime:1,winc:0,binc:0}}),/authoritative stop budget/);
+});
+test('disposal during executable hashing cannot revive a closed process',async()=>{
+ const e=new ManagedEngine(engine('hang')),starting=e.start(),rejected=assert.rejects(starting,/disposed during startup/);
+ await e.close();await rejected;assert.equal(e.state,'CLOSED');assert.deepEqual(e.transcript,[]);
+});
