@@ -586,3 +586,11 @@ footer {
 .calibration-status {
   color: #d3c597;
 }
+
+.pv-line {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+  color: #b6c7b9;
+}

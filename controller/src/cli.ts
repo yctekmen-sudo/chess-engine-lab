@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { analyze } from './analysis.js';
 import { createExperiment, experimentStatus, exportExperiment, resumeExperiment, validateConfig } from './experiment.js';
 async function json(path:string) {return JSON.parse(await readFile(path,'utf8')) as unknown;}
 async function main(args:string[]):Promise<unknown> {
   const [command,action,arg,extra]=args;
-  if(command==='gui'){const {launch}=await import('./server/launcher.js');return launch(action??'work/chess-lab-workspace',new URL('../../gui/dist',import.meta.url).pathname,{takeover:arg==='--takeover-stale-lock'});}
+  if(command==='gui'){const {launch}=await import('./server/launcher.js');return launch(action??'work/chess-lab-workspace',fileURLToPath(new URL('../../gui/dist',import.meta.url)),{takeover:arg==='--takeover-stale-lock'});}
   if(command==='analyze'&&action) {
     const c=validateConfig(await json(action));
     if(c.limit.kind==='clock')throw Error('clock mode is for live matches; analysis requires depth or movetime');

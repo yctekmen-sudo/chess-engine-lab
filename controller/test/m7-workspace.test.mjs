@@ -669,3 +669,23 @@ test("post-rename write uncertainty freezes memory and restart reconciles the du
     await w.close();
   }
 });
+
+test("provisional PV presentation is validated at the captured root and never changes official moves", async (t) => {
+  const w = await Workspace.open(await folder(t));
+  try {
+    const events = [];
+    w.on("event", (e) => events.push(e));
+    const progress = w.progress(
+      { session: "s", objectId: "d", root: DEFAULT_POSITION, generation: 1 },
+      { initialFen: DEFAULT_POSITION, moves: [], complete: true },
+    );
+    progress({ line: "info depth 2 score cp 30 nodes 20 pv e2e4 e7e5" });
+    progress({ line: "info depth 2 score cp 30 nodes 20 pv e2e5" });
+    assert(events[0].line.includes("pv e2e4 e7e5"));
+    assert(!events[1].line.includes(" pv "));
+    assert(events[1].line.includes("illegal provisional PV omitted"));
+    assert.equal(Object.keys(w.snapshot().games).length, 0);
+  } finally {
+    await w.close();
+  }
+});

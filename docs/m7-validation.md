@@ -52,7 +52,7 @@ need the session's permitted network-enabled execution profile.
 | Native Debug | 11/11 CTest passed | [Debug log](m7-evidence/native-debug.txt) |
 | Native Release | 11/11 CTest passed | [Release log](m7-evidence/native-release.txt) |
 | Native Profile | 11/11 CTest passed | [Profile log](m7-evidence/native-profile.txt) |
-| Controller | Typecheck/lint and 70/70 full regression tests passed | [Node log](m7-evidence/controller.txt) |
+| Controller | Typecheck/lint and 71/71 full regression tests passed | [Node log](m7-evidence/controller.txt) |
 | UI | Typecheck/lint/build and 9 Vitest/RTL tests passed | [UI log](m7-evidence/ui.txt) |
 | Browser | 4 Playwright scenarios passed against real server/native engine | [Browser log](m7-evidence/browser.txt), [screenshot](m7-evidence/desktop.png) |
 | WASM | Local SDK download blocked by environment HTTP 403; not claimed locally | Pinned GitHub Actions gate; review PR links exact head results |
@@ -71,6 +71,9 @@ snapshot, unauthenticated upgrade rejection, bounded JSON, stable command retrie
 lost ACK, changed-ID-content rejection, stale revision/generation and restart
 reconciliation. Gateway tests reject late/duplicate/root-mismatched progress,
 ignore snapshot rollback, refresh revision gaps and diagnose incompatible versions.
+Provisional PVs are replay-validated at the captured root; illegal PVs are omitted.
+The UI hides old-root and failed-session results and disables board actions while
+an authoritative legal-position projection is loading.
 Repeated launcher uses the owner-only local channel and stores no launch/CSRF
 secret in the runtime locator. Workspace state uses existing integrity envelopes,
 writer locks, atomic rename and fsync. Injected write failures cannot acknowledge

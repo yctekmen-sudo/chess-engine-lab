@@ -822,9 +822,20 @@ export class Workspace extends EventEmitter {
     this.tasks.set(id, { abort, done });
     void done.catch((e) => this.emit("errorNotice", String(e)));
   }
-  private progress(job: Job) {
+  private progress(job: Job, record: RecordState) {
     let sequence = 0;
-    return ({ line }: { line: string }) =>
+    return ({ line }: { line: string }) => {
+      const pv = /\spv\s+(.+)$/.exec(line);
+      if (pv) {
+        try {
+          const moves = pv[1]!.trim().split(/\s+/);
+          if (moves.length > 256) throw Error("PV length");
+          const rules = new FideRules(record);
+          for (const move of moves) rules.play(move);
+        } catch {
+          line = line.slice(0, pv.index) + " [illegal provisional PV omitted]";
+        }
+      }
       this.emit("event", {
         version: 1,
         type: "progress",
@@ -836,6 +847,7 @@ export class Workspace extends EventEmitter {
         provisional: true,
         line,
       } satisfies Event);
+    };
   }
   private launchAnalysis(
     id: string,
@@ -863,7 +875,7 @@ export class Workspace extends EventEmitter {
           ...(limit.kind === "infinite"
             ? {}
             : { stopAfterMs: limit.kind === "movetime" ? limit.ms : 60000 }),
-          onProgress: this.progress(job),
+          onProgress: this.progress(job, record),
         });
         if (!signal.aborted) {
           const rules = new FideRules(record),
@@ -970,7 +982,10 @@ export class Workspace extends EventEmitter {
                   ? { kind: "clock", ...source.uciClock() }
                   : { kind: "depth", depth: 2 },
               stopAfterMs: Math.min(60000, source.available()),
-              onProgress: this.progress(this.state.snapshot.jobs[jid]!),
+              onProgress: this.progress(
+                this.state.snapshot.jobs[jid]!,
+                source.record(),
+              ),
             });
             await this.serial(async () => {
               const current = this.state.snapshot.games[id]!;

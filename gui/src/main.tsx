@@ -19,6 +19,7 @@ export function App() {
       fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
       legal: [] as string[],
       claim: false,
+      source: "",
     }),
     [cursor, setCursor] = useState<number | null>(null),
     [profile, setProfile] = useState(""),
@@ -39,6 +40,7 @@ export function App() {
     record && cursor !== null
       ? { ...record, moves: record.moves.slice(0, cursor) }
       : record;
+  const positionReady = position.source === JSON.stringify(displayed);
   useEffect(() => {
     const change = () => render((n) => n + 1);
     api.listeners.add(change);
@@ -66,7 +68,7 @@ export function App() {
     void api
       .post("position", displayed)
       .then((p) => {
-        if (active) setPosition(p);
+        if (active) setPosition({ ...p, source: JSON.stringify(displayed) });
       })
       .catch((e) => setError(String(e)));
     return () => {
@@ -271,7 +273,7 @@ export function App() {
                 Export PGN + metadata
               </button>
               <button
-                disabled={!record}
+                disabled={!record || !positionReady}
                 onClick={() => saveFile("chess-lab.fen", position.fen)}
               >
                 Export FEN
@@ -308,6 +310,7 @@ export function App() {
                     flipped={flipped}
                     disabled={
                       !api.connected ||
+                      !positionReady ||
                       busy ||
                       (tab === "Play" &&
                         (g?.checkpoint.paused ||
@@ -706,15 +709,28 @@ export function App() {
                     </div>
                     <div className="progress">
                       {jobs
-                        .filter((j) => j.objectId === d?.id && cursor === null)
+                        .filter(
+                          (j) =>
+                            j.objectId === d?.id &&
+                            cursor === null &&
+                            positionReady &&
+                            j.root === position.fen &&
+                            !["stopping", "stopped", "interrupted"].includes(
+                              j.status,
+                            ),
+                        )
                         .slice(-1)
                         .map((j) => (
                           <div key={j.id}>
                             <strong>
-                              {j.status} · session {j.session.slice(0, 6)}
+                              {j.status} · session {j.session.slice(0, 6)} ·{" "}
+                              {j.identity?.id.join(" · ")}
                             </strong>
                             {j.error && <p role="alert">{j.error.message}</p>}
-                            {(api.progress.get(j.session) ?? [])
+                            {(j.status === "failed"
+                              ? []
+                              : (api.progress.get(j.session) ?? [])
+                            )
                               .slice(-8)
                               .map((p) => (
                                 <p key={p.sequence}>
@@ -727,6 +743,7 @@ export function App() {
                                       ? "calibrated"
                                       : "external",
                                   )}
+                                  <code className="pv-line">{p.line}</code>
                                   <small>Provisional · {p.root}</small>
                                   {/ pv /.test(p.line) && (
                                     <button
