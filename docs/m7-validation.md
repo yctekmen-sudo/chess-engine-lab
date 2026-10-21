@@ -181,8 +181,10 @@ Paths below are repository-relative. `m7-workspace` means
 
 ## Explicit limits
 
-Linux/Chromium is exercised; Windows/macOS launch paths and other browsers are
-unvalidated. This is a local application, not an OS sandbox for native modules or
+Linux/Chromium is exercised. Windows Server 2022 / Node 24.10.0 has native
+static-serving, executable-registration and launcher-reconnect smoke coverage;
+Windows C++ engine builds, automatic browser opening, macOS and other browsers
+remain unvalidated. This is a local application, not an OS sandbox for native modules or
 protection against another process running as the same user. Artifacts must remain
 immutable while loaded, as required by M2/M6. The recent authorization window is
 bounded to 500 entries; full authorization metadata remains in non-evicted durable
@@ -225,3 +227,12 @@ Chromium scenarios, controller and GUI static checks/build passed. Retained logs
 [browser](m7-evidence/review-browser.txt). Native/controller/WASM/GUI workflows
 rerun on the pushed review commit; exact-head results and Windows status are
 recorded in PR #14. Keep the PR unmerged for re-review.
+
+The native Windows smoke initially exposed `EPERM` from directory fsync. libuv
+uses `FlushFileBuffers`, which requires write access: `syncDirectory` now opens
+Windows directory handles with `r+` and retains `r` on POSIX. The actual flush
+remains mandatory and all failure paths still prevent a durable ACK; no durability
+check is skipped. Native Windows [CI passed on c07c989](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39546143481/job/119044648588),
+including 11 frontend tests and both real desktop smoke scenarios. Player names
+and clocks follow the board's orientation as well as the squares. Local full
+controller regression now passes 73/73 tests; see PR #14 for final-head reruns.

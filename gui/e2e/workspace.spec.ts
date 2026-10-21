@@ -227,14 +227,23 @@ test("new human-engine games face either human color and preserve manual flip", 
   await page.getByLabel("White player").selectOption({ label: "Chess Lab" });
   await create.click();
   await expect(firstSquare).toHaveAttribute("data-square", "h1");
+  await expect(page.locator(".board-panel .player strong").last()).toHaveText(
+    "Black · Human",
+  );
   await flip.click();
   await expect(firstSquare).toHaveAttribute("data-square", "a8");
+  await expect(page.locator(".board-panel .player strong").first()).toHaveText(
+    "Black · Human",
+  );
   await create.click();
   await expect(firstSquare).toHaveAttribute("data-square", "h1");
   await page.getByLabel("White player").selectOption("human");
   await page.getByLabel("Black player").selectOption({ label: "Chess Lab" });
   await create.click();
   await expect(firstSquare).toHaveAttribute("data-square", "a8");
+  await expect(page.locator(".board-panel .player strong").last()).toHaveText(
+    "White · Human",
+  );
   await flip.click();
   await expect(firstSquare).toHaveAttribute("data-square", "h1");
   await create.click();

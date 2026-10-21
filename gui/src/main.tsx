@@ -41,6 +41,8 @@ export function App() {
       ? { ...record, moves: record.moves.slice(0, cursor) }
       : record;
   const positionReady = position.source === JSON.stringify(displayed);
+  const topSide = flipped ? "w" : "b",
+    bottomSide = flipped ? "b" : "w";
   useEffect(() => {
     const change = () => render((n) => n + 1);
     api.listeners.add(change);
@@ -63,7 +65,7 @@ export function App() {
   }, [s?.id]);
   useEffect(() => {
     setFlipped(Boolean(s?.settings.flipped));
-  }, [s?.settings.flipped]);
+  }, [s?.settings.flipped, s?.activeGameId]);
   useEffect(() => {
     if (!displayed) return;
     let active = true;
@@ -287,12 +289,17 @@ export function App() {
             >
               <section className="board-panel">
                 <div className="player">
-                  <span className="avatar">♚</span>
+                  <span
+                    className={"avatar " + (topSide === "w" ? "light" : "")}
+                  >
+                    {topSide === "w" ? "♔" : "♚"}
+                  </span>
                   <div>
                     <strong>
-                      {g?.players.b === "human"
-                        ? "Black · Human"
-                        : (s?.profiles[g?.players.b ?? ""]?.label ?? "Black")}
+                      {g?.players[topSide] === "human"
+                        ? (topSide === "w" ? "White" : "Black") + " · Human"
+                        : (s?.profiles[g?.players[topSide] ?? ""]?.label ??
+                          (topSide === "w" ? "White" : "Black"))}
                     </strong>
                     <small>
                       {g?.checkpoint.paused
@@ -301,7 +308,9 @@ export function App() {
                     </small>
                   </div>
                   <b className="clock">
-                    {clock(tab === "Play" ? g?.checkpoint.remaining.b : null)}
+                    {clock(
+                      tab === "Play" ? g?.checkpoint.remaining[topSide] : null,
+                    )}
                   </b>
                 </div>
                 {record ? (
@@ -351,12 +360,17 @@ export function App() {
                   </div>
                 )}
                 <div className="player">
-                  <span className="avatar light">♔</span>
+                  <span
+                    className={"avatar " + (bottomSide === "w" ? "light" : "")}
+                  >
+                    {bottomSide === "w" ? "♔" : "♚"}
+                  </span>
                   <div>
                     <strong>
-                      {g?.players.w === "human"
-                        ? "White · Human"
-                        : (s?.profiles[g?.players.w ?? ""]?.label ?? "White")}
+                      {g?.players[bottomSide] === "human"
+                        ? (bottomSide === "w" ? "White" : "Black") + " · Human"
+                        : (s?.profiles[g?.players[bottomSide] ?? ""]?.label ??
+                          (bottomSide === "w" ? "White" : "Black"))}
                     </strong>
                     <small>
                       {tab === "Analyze"
@@ -365,7 +379,11 @@ export function App() {
                     </small>
                   </div>
                   <b className="clock">
-                    {clock(tab === "Play" ? g?.checkpoint.remaining.w : null)}
+                    {clock(
+                      tab === "Play"
+                        ? g?.checkpoint.remaining[bottomSide]
+                        : null,
+                    )}
                   </b>
                 </div>
                 {tab === "Play" && g && (

@@ -101,5 +101,7 @@ Chromium. Locally an installed `/usr/bin/chromium` is supported; CI uses the
 browser pinned by Playwright. `CHROMIUM_EXECUTABLE` explicitly overrides it.
 See [validation](../docs/m7-validation.md) and the
 [design checkpoint](../docs/m7-design-checkpoint.md). Linux/Chromium is validated;
-Windows/macOS packaging and browser compatibility remain unvalidated. Installers,
+Native Windows smoke covers static assets, executable registration and launcher
+reconnect. Windows C++ engine builds, automatic browser opening, macOS packaging
+and other browser compatibility remain unvalidated. Installers,
 Electron, M8/mobile and additional engine search features are outside M7.
