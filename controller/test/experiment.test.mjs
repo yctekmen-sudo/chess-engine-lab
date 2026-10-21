@@ -6,7 +6,7 @@ import {resolve,join,relative} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {createExperiment,resumeExperiment,experimentStatus,exportExperiment,schedule,validateConfig,readRecord,writeRecord,writerLock} from '../dist/index.js';
-const native=process.env.CHESS_LAB_UCI??resolve(import.meta.dirname,'../../build/native-debug/chess_lab_uci');
+import {nativeEngine as native} from './native-paths.mjs';
 const mock=resolve(import.meta.dirname,'mock.mjs');
 const config=(mode='normal',extra={})=>({engines:[{path:native},{path:process.execPath,args:[mock,mode],handshakeMs:1000,stopGraceMs:50}],openings:[{initialFen:'7k/8/5KQ1/8/8/8/8/8 w - - 149 1',moves:[],complete:false}],seed:13,limit:{kind:'depth',depth:1},time:{kind:'untimed'},maxPlies:4,searchCapMs:2000,...extra});
 async function dir(t){const d=await mkdtemp(join(tmpdir(),'m6-experiment-'));t.after(()=>rm(d,{recursive:true,force:true}));return d;}

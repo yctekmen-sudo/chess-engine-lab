@@ -1,15 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { resolve, join } from "node:path";
-const build =
-  process.env.CHESS_LAB_BUILD ??
-  resolve(import.meta.dirname, "../../build/native-debug");
+import { promisify } from "node:util";
+import { nativeEngine, sharedLibrary } from "./native-paths.mjs";
 async function transcript(t, kind, fen, descriptor) {
   const child = spawn(
-    join(build, "chess_lab_uci"),
-    [join(build, `libm7_${kind}_evaluator.so`)],
+    nativeEngine,
+    [sharedLibrary(`m7_${kind}_evaluator`, process.env.CHESS_LAB_BUILD)],
     {
       env: {
         ...process.env,
@@ -80,4 +81,23 @@ test("malformed optional calibration downgrades without evaluator failure; mate 
   );
   assert(mate.includes("info score mate -0"));
   assert(!mate.some((l) => l.includes("score cp")));
+});
+test("calibration fixtures honor CHESS_LAB_BUILD with UCI in a separate directory", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "m7-calibration-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const stagedEngine = join(directory, basename(nativeEngine));
+  await copyFile(nativeEngine, stagedEngine);
+  await promisify(execFile)(process.execPath, [
+    "--test",
+    "--test-isolation=none",
+    "--test-name-pattern=^native frozen v1\\.0 module stays raw-only after minor negotiation fallback$",
+    import.meta.filename,
+  ], {
+    env: {
+      ...process.env,
+      CHESS_LAB_BUILD: process.env.CHESS_LAB_BUILD ?? dirname(nativeEngine),
+      CHESS_LAB_UCI: stagedEngine,
+    },
+    timeout: 15000,
+  });
 });

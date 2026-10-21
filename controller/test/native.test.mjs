@@ -2,8 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
-import {resolve,dirname} from 'node:path';
-const binary=process.env.CHESS_LAB_UCI??resolve(import.meta.dirname,'../../build/native-debug/chess_lab_uci');
+import {nativeEngine as binary,sharedLibrary} from './native-paths.mjs';
 function client(t,env={}){
  const p=spawn(binary,[],{stdio:'pipe',env:{...process.env,...env}}),lines=[],waiters=[];let exit;
  p.on('exit',(code)=>{exit=code;for(const w of waiters.splice(0))w.reject(Error('engine exited '+code));});
@@ -46,7 +45,7 @@ test('claim extension immediately adjacent with legal evaluated PLAY at MultiPV=
 test('evaluator replacement rejects invalid module and preserves healthy selection',async t=>{
  const c=client(t);await handshake(c);let w=c.wait(s=>s.includes('rejected'));c.send('setoption name Evaluator value /no/such/module');await w;
  assert.match(await search(c,'position startpos'),/bestmove/);
- const path=resolve(dirname(binary),'libmaterial_evaluator.so');w=c.wait(s=>s.includes('evaluator artifact_sha256'));
+ const path=sharedLibrary('material_evaluator');w=c.wait(s=>s.includes('evaluator artifact_sha256'));
  c.send('setoption name Evaluator value '+path);await w;
  assert.match(await search(c,'position startpos'),/bestmove/);
 });
@@ -66,14 +65,14 @@ test('intended claim differs from strongest evaluated PLAY fallback',async t=>{
 });
 test('blocking evaluator keeps isready responsive and fast stop fallback is unevaluated',async t=>{
  const c=client(t,{CHESS_LAB_TEST_EVAL_DELAY_MS:'100'});await handshake(c);
- const changed=c.wait(s=>s.includes('evaluator artifact_sha256'));c.send('setoption name Evaluator value '+resolve(dirname(binary),'libm6_test_evaluator.so'));await changed;
+ const changed=c.wait(s=>s.includes('evaluator artifact_sha256'));c.send('setoption name Evaluator value '+sharedLibrary('m6_test_evaluator'));await changed;
  c.send('position startpos');const final=c.wait(s=>s.startsWith('bestmove '));c.send('go infinite');
  const ready=c.wait(s=>s==='readyok',1000);c.send('isready');await ready;c.send('stop');await final;
  assert(c.lines.includes('info string chesslab fallback unevaluated'));
 });
 test('failure after provisional depth exits without bestmove and clears TT after search',async t=>{
  const c=client(t,{CHESS_LAB_TEST_EVAL_FAIL_AT:'21'});await handshake(c);
- const changed=c.wait(s=>s.includes('evaluator artifact_sha256'));c.send('setoption name Evaluator value '+resolve(dirname(binary),'libm6_test_evaluator.so'));await changed;
+ const changed=c.wait(s=>s.includes('evaluator artifact_sha256'));c.send('setoption name Evaluator value '+sharedLibrary('m6_test_evaluator'));await changed;
  const fatal=c.wait(s=>s.includes('chesslab fatal'));c.send('go depth 2');await fatal;
  assert(c.lines.some(s=>s.startsWith('info depth 1 ')));assert(!c.lines.some(s=>s.startsWith('bestmove ')));
 });
