@@ -1,6 +1,6 @@
 # Chess Engine Lab — Codex Kickoff for M7
 
-**Status:** D118–D138 architecture approved; **this kickoff and accompanying M7 implementation specification are pending documentation-PR review/merge**. Do **not** implement until both `docs/m7-gui-spec-v1.0.md` and this file are merged on `main` and the user authorizes M7 implementation.
+**Status:** APPROVED FOR IMPLEMENTATION — architecture D118–D138 approved; both this kickoff and `docs/m7-gui-spec-v1.0.md` were merged to `main` via PR #13 at `b057f5b89dacf6b812e61ccf2e344edfe86e7824`. User subsequently authorized starting M7 implementation. Preserve all mandatory preflight/checkpoint/test/review gates below. **Do not merge the implementation PR without explicit user approval.**
 **Milestone:** M7 local desktop GUI / Node server; React + TypeScript + Vite; controller-authoritative interaction and durable games.
 **Authoritative contracts:** `docs/m7-gui-spec-v1.0.md` (D118–D138), `docs/m6-controller-spec-v1.0.md` (D84–D117), `docs/evaluation-abi-v1.0.md`, M3–M5 specs and current code. More restrictive existing guarantees continue to apply.
 **Delivery boundary:** One reviewed **implementation feature PR**, not merged without explicit instruction. No M8, cloud services, Electron, parallel experiment engine, new chess search features or unrestricted native engine execution.
