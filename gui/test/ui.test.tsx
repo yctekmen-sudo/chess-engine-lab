@@ -12,7 +12,7 @@ vi.mock("react-chessboard", () => ({
   ),
 }));
 import { Board, MoveHistory } from "../src/Board";
-import { Gateway, scoreLabel } from "../src/api";
+import { Gateway, scoreLabel, hasCalibration } from "../src/api";
 describe("board presentation and explicit promotion", () => {
   it("requires a promotion choice and sends only the selected move", () => {
     const onMove = vi.fn();
@@ -143,4 +143,27 @@ it("history navigation emits only a presentation cursor", () => {
   expect(navigate).toHaveBeenLastCalledWith(0);
   fireEvent.click(screen.getByText("Live position"));
   expect(navigate).toHaveBeenLastCalledWith(null);
+});
+
+it("calibration status belongs to the final configured identity, not earlier handshake generations", () => {
+  const calibrated =
+      "info string chesslab evaluator calibration " + "a".repeat(64) + " {}",
+    artifact =
+      "info string chesslab evaluator artifact_sha256 hash fingerprint value",
+    config = "info string chesslab evaluator config {}";
+  expect(hasCalibration([calibrated, artifact, config])).toBe(true);
+  expect(hasCalibration([calibrated, artifact, config, artifact, config])).toBe(
+    false,
+  );
+  expect(
+    hasCalibration([
+      calibrated,
+      artifact,
+      config,
+      "info string chesslab evaluator calibration raw_only: invalid",
+      artifact,
+      config,
+    ]),
+  ).toBe(false);
+  expect(hasCalibration("unknown")).toBe(false);
 });

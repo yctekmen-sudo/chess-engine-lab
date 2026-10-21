@@ -53,7 +53,7 @@ need the session's permitted network-enabled execution profile.
 | Native Release | 11/11 CTest passed | [Release log](m7-evidence/native-release.txt) |
 | Native Profile | 11/11 CTest passed | [Profile log](m7-evidence/native-profile.txt) |
 | Controller | Typecheck/lint and 71/71 full regression tests passed | [Node log](m7-evidence/controller.txt) |
-| UI | Typecheck/lint/build and 9 Vitest/RTL tests passed | [UI log](m7-evidence/ui.txt) |
+| UI | Typecheck/lint/build and 10 Vitest/RTL tests passed | [UI log](m7-evidence/ui.txt) |
 | Browser | 4 Playwright scenarios passed against real server/native engine | [Browser log](m7-evidence/browser.txt), [screenshot](m7-evidence/desktop.png) |
 | WASM | Local SDK download blocked by environment HTTP 403; not claimed locally | Pinned GitHub Actions gate; review PR links exact head results |
 
@@ -108,7 +108,8 @@ M6 evaluator-failure suites run unchanged. See [exact ABI mechanics](m7-calibrat
 
 **Registry/resources/experiments.** Explicit native trust precedes inspection;
 SHA/effective options and evaluator/absolute argv-file artifacts are pinned and
-rechecked. Job provenance records the actual started identity; editing future
+rechecked. Job provenance records the actual started identity; calibration status uses its
+final configuration generation rather than earlier handshake entries. Editing future
 profiles cannot relabel active results. No capability is inferred for ordinary UCI
 engines without MultiPV. Tests change a registered argv artifact and reject launch.
 The scheduler rejects default experiment/interactive competition, records explicit

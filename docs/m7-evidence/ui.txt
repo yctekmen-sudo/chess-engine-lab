@@ -5,13 +5,13 @@
 
  RUN  v4.0.18 /workspace/chess-engine-lab/gui
 
- ✓ test/forms.test.tsx (2 tests) 130ms
- ✓ test/ui.test.tsx (7 tests) 102ms
+ ✓ test/forms.test.tsx (2 tests) 134ms
+ ✓ test/ui.test.tsx (8 tests) 113ms
 
  Test Files  2 passed (2)
-      Tests  9 passed (9)
-   Start at  04:16:56
-   Duration  1.39s (transform 159ms, setup 166ms, import 170ms, tests 232ms, environment 634ms)
+      Tests  10 passed (10)
+   Start at  04:22:43
+   Duration  1.49s (transform 175ms, setup 177ms, import 185ms, tests 247ms, environment 692ms)
 
 npm notice
 npm notice New major version of npm available! 11.9.0 -> 12.2.0

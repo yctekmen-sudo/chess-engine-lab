@@ -196,3 +196,20 @@ export function scoreLabel(
     return `${provenance === "calibrated" ? "Calibrated" : "Engine-reported"} centipawns (side to move) ${cp[1]}`;
   return line;
 }
+
+export function hasCalibration(metadata: unknown): boolean {
+  if (!Array.isArray(metadata)) return false;
+  // Native identity emits optional calibration, then artifact/fingerprint,
+  // then configuration. Earlier option generations remain in the transcript.
+  const current = metadata.findLastIndex(
+    (line) =>
+      typeof line === "string" &&
+      line.startsWith("info string chesslab evaluator artifact_sha256 "),
+  );
+  return (
+    current > 0 &&
+    /^info string chesslab evaluator calibration [a-f0-9]{64} /.test(
+      metadata[current - 1],
+    )
+  );
+}

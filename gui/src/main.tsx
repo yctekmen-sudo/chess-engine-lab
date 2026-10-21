@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
-import { Gateway, scoreLabel, type Snapshot } from "./api";
+import { Gateway, scoreLabel, hasCalibration, type Snapshot } from "./api";
 import { Board, MoveHistory } from "./Board";
 import "./style.css";
 const api = new Gateway();
@@ -736,10 +736,7 @@ export function App() {
                                 <p key={p.sequence}>
                                   {scoreLabel(
                                     p.line,
-                                    j.trusted &&
-                                      String(
-                                        JSON.stringify(j.identity?.m2),
-                                      ).match(/calibration [a-f0-9]{64} /)
+                                    j.trusted && hasCalibration(j.identity?.m2)
                                       ? "calibrated"
                                       : "external",
                                   )}
@@ -1054,8 +1051,7 @@ export function EnginePanel({
               <pre>{JSON.stringify(p.identity, null, 2)}</pre>
             </details>
             <p className="calibration-status">
-              {p.config.kind === "chesslab" &&
-              /calibration [a-f0-9]{64}/.test(JSON.stringify(p.identity.m2))
+              {p.config.kind === "chesslab" && hasCalibration(p.identity.m2)
                 ? "Validated evaluator calibration · descriptor provenance recorded"
                 : p.config.kind === "chesslab"
                   ? "Raw only · no validated calibration"
