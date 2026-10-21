@@ -207,3 +207,36 @@ test("websocket disconnect disables mutations, reconnects, and Quit terminates s
       .checkpoint.paused,
   ).toBe(true);
 });
+
+test("new human-engine games face either human color and preserve manual flip", async ({
+  page,
+}) => {
+  await page.goto(server.launchUrl());
+  await expect(page.getByText("Local controller connected")).toBeVisible();
+  await page.getByRole("button", { name: /Engines/ }).click();
+  await page
+    .getByLabel("Absolute executable path")
+    .fill(resolve("../build/native-debug/chess_lab_uci"));
+  await page.getByLabel("I trust this executable").check();
+  await page.getByRole("button", { name: "Inspect and save profile" }).click();
+  await expect(page.getByText("Generation 1", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Play/ }).first().click();
+  const firstSquare = page.locator("[data-square]").first(),
+    create = page.getByRole("button", { name: "Create game", exact: true }),
+    flip = page.getByRole("button", { name: "Flip board" });
+  await page.getByLabel("White player").selectOption({ label: "Chess Lab" });
+  await create.click();
+  await expect(firstSquare).toHaveAttribute("data-square", "h1");
+  await flip.click();
+  await expect(firstSquare).toHaveAttribute("data-square", "a8");
+  await create.click();
+  await expect(firstSquare).toHaveAttribute("data-square", "h1");
+  await page.getByLabel("White player").selectOption("human");
+  await page.getByLabel("Black player").selectOption({ label: "Chess Lab" });
+  await create.click();
+  await expect(firstSquare).toHaveAttribute("data-square", "a8");
+  await flip.click();
+  await expect(firstSquare).toHaveAttribute("data-square", "h1");
+  await create.click();
+  await expect(firstSquare).toHaveAttribute("data-square", "a8");
+});

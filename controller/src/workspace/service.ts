@@ -387,6 +387,8 @@ export class Workspace extends EventEmitter {
             };
             live.set(gid, r);
             s.activeGameId = gid;
+            if (w === "human" && b !== "human") s.settings.flipped = false;
+            else if (w !== "human" && b === "human") s.settings.flipped = true;
             result = { id: gid };
             break;
           }

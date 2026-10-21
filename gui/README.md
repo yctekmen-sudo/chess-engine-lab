@@ -33,7 +33,8 @@ interrupted, requiring explicit Resume/Start.
 
 - **Play:** human/human or human/engine, standard/FEN positions, untimed or Fischer
   clocks, click/drag and keyboard coordinate moves, explicit promotions, draw
-  claims, resignation and audited takeback. Move-history browsing is read-only.
+  claims, resignation and audited takeback. New human/engine games initially face
+  the human's color; manual flip remains available. Move-history browsing is read-only.
 - **Analyze:** independent persistent variations/comments, PGN/FEN imports,
   depth/time/infinite analysis, MultiPV when advertised, Stop and PV branching.
   Progress remains provisional; raw, calibrated cp, external cp and mate labels

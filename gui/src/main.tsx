@@ -58,10 +58,12 @@ export function App() {
     if (!s) return;
     setTab((s.settings.tab as Tab) || "Play");
     setAnalysis((s.settings.activeAnalysis as string) || "");
-    setFlipped(Boolean(s.settings.flipped));
     setCollapsed(Boolean(s.settings.collapsed));
     setPanelWidth(Number(s.settings.panelWidth ?? 350));
   }, [s?.id]);
+  useEffect(() => {
+    setFlipped(Boolean(s?.settings.flipped));
+  }, [s?.settings.flipped]);
   useEffect(() => {
     if (!displayed) return;
     let active = true;
@@ -1014,7 +1016,7 @@ export function EnginePanel({
         </label>
         <button
           className="primary"
-          disabled={!trust || !path.startsWith("/") || !label}
+          disabled={!trust || !path.trim() || !label}
           onClick={() => {
             try {
               void command(

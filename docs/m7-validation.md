@@ -193,3 +193,35 @@ Workspace command/size limits require a new workspace rather than unsafe ID evic
 Browser X cannot guarantee a custom dialog and intentionally keeps work running.
 WASM is a core/calibration CI correctness target, not a browser engine-process
 implementation. Installer/Electron/mobile/cloud features remain deferred.
+
+
+## PR #14 review follow-up
+
+The review at `b69ceaa` requested Windows static-serving and registration fixes,
+human-facing initial orientation, and native Windows smoke coverage.
+
+- Static confinement now uses native `path.relative`, `path.sep` and
+  `path.isAbsolute` rather than a Unix-only string prefix. Both the lexical
+  candidate and final `realpath` must stay below the canonical asset root.
+- The frontend requires a nonempty executable path and explicit trust; absolute
+  path validation remains in the controller. A `C:\chess-lab\chess_lab_uci.exe`
+  form regression exercises registration without a Unix-only path gate.
+- Creating human/engine games atomically sets orientation toward the human.
+  The GUI follows the committed orientation; manual flip remains available and
+  persists until a new human/engine game chooses its initial orientation.
+- `controller/test/m7-desktop-smoke.test.mjs` tests real HTTP `/` and `/assets/*`,
+  asset paths with spaces and a root junction/symlink, sibling traversal and
+  junction escape rejection, native executable registration with argv, relative
+  path rejection, both human colors, manual flip and launcher IPC reconnect.
+  It optionally serves the actual Vite build via `CHESS_LAB_GUI_ASSETS`.
+- `.github/workflows/gui.yml` adds `windows-2022` / Node 24.10.0 smoke coverage
+  using the same production controller and a real Node executable speaking UCI.
+  This tests Windows process/path/named-pipe behavior without claiming a Windows
+  C++ engine build, automatic browser opening, or full Windows browser E2E.
+
+Local review results: 2/2 desktop smoke tests, 11/11 Vitest/RTL tests, 5/5 real
+Chromium scenarios, controller and GUI static checks/build passed. Retained logs:
+[desktop smoke](m7-evidence/review-smoke.txt), [UI](m7-evidence/review-ui.txt),
+[browser](m7-evidence/review-browser.txt). Native/controller/WASM/GUI workflows
+rerun on the pushed review commit; exact-head results and Windows status are
+recorded in PR #14. Keep the PR unmerged for re-review.

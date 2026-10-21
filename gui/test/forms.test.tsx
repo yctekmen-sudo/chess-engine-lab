@@ -42,3 +42,28 @@ it("directs engine versus engine away from casual play", () => {
     time: { kind: "untimed" },
   });
 });
+
+it("accepts a trusted Windows executable path and delegates absolute-path validation to the controller", () => {
+  const command = vi.fn();
+  render(<EnginePanel snapshot={null} command={command} />);
+  const path = "C:\\chess-lab\\chess_lab_uci.exe";
+  fireEvent.change(screen.getByLabelText("Absolute executable path"), {
+    target: { value: path },
+  });
+  fireEvent.click(
+    screen.getByLabelText(
+      "I trust this executable and configured native modules.",
+    ),
+  );
+  const save = screen.getByRole("button", { name: "Inspect and save profile" });
+  expect(save).toBeEnabled();
+  fireEvent.click(save);
+  expect(command).toHaveBeenCalledWith(
+    "engine.register",
+    expect.objectContaining({
+      trust: true,
+      config: expect.objectContaining({ path }),
+    }),
+    undefined,
+  );
+});

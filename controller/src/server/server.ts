@@ -6,11 +6,20 @@ import {
 import { createServer as ipcServer } from "node:net";
 import { randomBytes } from "node:crypto";
 import { readFile, realpath, chmod, unlink } from "node:fs/promises";
-import { resolve, join, extname } from "node:path";
+import { resolve, join, extname, relative, isAbsolute, sep } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { Workspace } from "../workspace/service.js";
 import { Fault, object, text, type Event } from "../workspace/protocol.js";
 import { writeRecord, digest } from "../store.js";
+function inside(root: string, path: string): boolean {
+  const child = relative(root, path);
+  return (
+    child !== "" &&
+    child !== ".." &&
+    !child.startsWith(".." + sep) &&
+    !isAbsolute(child)
+  );
+}
 export async function startServer(options: {
   directory: string;
   assets: string;
@@ -173,10 +182,10 @@ export async function startServer(options: {
         root,
         "." + (path === "/" ? "/index.html" : path),
       );
-      if (!candidate.startsWith(root + "/"))
+      if (!inside(root, candidate))
         throw new Fault("AUTH", "Static path outside GUI");
       const actual = await realpath(candidate);
-      if (!actual.startsWith(root + "/"))
+      if (!inside(root, actual))
         throw new Fault("AUTH", "Static symlink outside GUI");
       const content = await readFile(actual);
       res.setHeader(
