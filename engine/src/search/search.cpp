@@ -7,6 +7,8 @@
 
 namespace chess_lab {
 static_assert(std::is_trivially_copyable_v<SearchScore>);
+// Native adapter identification; synthetic adapters retain custom status and clock semantics.
+bool native_chess_core(const ChessCore &) noexcept;
 SearchScore SearchScore::finite(double v) {
   if (!std::isfinite(v))
     throw std::invalid_argument("nonfinite search score");
@@ -58,16 +60,36 @@ namespace {
 struct OrderedMove {
   std::string text;
   std::unique_ptr<Move> move;
+  bool pawn_move = false;
+  bool capture = false;
+  bool legal_ep = false;
+  bool claim_threefold = false;
+  bool claim_fifty = false;
 };
 std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
-                                       const CancellationToken *token = nullptr) {
+                                       const CancellationToken *token = nullptr,
+                                       const PositionSnapshot *snapshot = nullptr) {
   std::vector<OrderedMove> result;
   for (auto &m : c.legal_moves(p)) {
     if (token) detail::tt_poll(*token);
     result.push_back({c.encode_move(p, *m), std::move(m)});
   }
+    // Legal en-passant captures are already members of this list.
+  if (snapshot) {
+    const auto squares = snapshot->squares();
+    for (auto &m : result) {
+      const unsigned from = unsigned(m.text[0] - 'a') + 8U * unsigned(m.text[1] - '1');
+      const unsigned to = unsigned(m.text[2] - 'a') + 8U * unsigned(m.text[3] - '1');
+      const auto piece = squares[from];
+      m.pawn_move = piece == PieceCode::white_pawn || piece == PieceCode::black_pawn;
+      m.legal_ep = m.pawn_move && m.text[0] != m.text[2] &&
+          squares[to] == PieceCode::empty &&
+          snapshot->en_passant_square() == std::optional<std::uint8_t>(static_cast<std::uint8_t>(to));
+      m.capture = squares[to] != PieceCode::empty || m.legal_ep;
+    }
+  }
   std::sort(result.begin(), result.end(),
-            [](const auto &a, const auto &b) { return a.text < b.text; });
+             [](const auto &a, const auto &b) { return a.text < b.text; });
   for (std::size_t i = 0; i < result.size(); ++i) {
     const auto &s = result[i].text;
     auto square = [&](int n) {
@@ -171,6 +193,30 @@ GameHistory GameHistory::replay(const ChessCore &c, const Position &start,
   return h;
 }
 namespace {
+// A prepared node owns one legal list and its position-specific facts.
+struct PreparedNode {
+  std::unique_ptr<const PositionSnapshot> snapshot;
+  std::vector<OrderedMove> legal;
+  RepetitionSignature repetition;
+  bool claims_ready = false;
+};
+PreparedNode prepare_node(const ChessCore &c, const Position &p,
+                          const CancellationToken *token = nullptr) {
+  PreparedNode node;
+  node.snapshot = c.snapshot(p);
+  node.legal = ordered_moves(c, p, token, node.snapshot.get());
+  auto &r = node.repetition;
+  std::copy(node.snapshot->squares().begin(), node.snapshot->squares().end(), r.pieces.begin());
+  r.side = node.snapshot->side_to_move();
+  r.castling = {node.snapshot->can_castle_kingside(Side::white),
+                node.snapshot->can_castle_queenside(Side::white),
+                node.snapshot->can_castle_kingside(Side::black),
+                node.snapshot->can_castle_queenside(Side::black)};
+  if (auto ep = node.snapshot->en_passant_square())
+    for (const auto &move : node.legal)
+      if (move.legal_ep) { r.legal_ep = ep; break; }
+  return node;
+}
 // All recursive values AND bounds use root-relative mate distances: a terminal
 // at ply P is Mate(P). This is the order-preserving coordinate transform of
 // node-relative Mate(0), avoiding lossy inverse bound transforms at Mate(0).
@@ -203,12 +249,13 @@ struct Traversal {
   void poll() const {
     detail::tt_poll(cancellation);
   }
-  std::vector<OrderedMove> moves(bool hints) {
+  std::vector<OrderedMove> &moves(PreparedNode &prepared, bool hints) {
     poll();
-    auto result = ordered_moves(core, position, &cancellation);
-    poll();
-    if (hints)
-      prefer_previous(result);
+    auto &result = prepared.legal;
+    // Iterative-deepening root preparation is reused with canonical reset.
+    std::sort(result.begin(), result.end(),
+              [](const auto &a, const auto &b) { return a.text < b.text; });
+    if (hints) prefer_previous(result);
     return result;
   }
   void prefer_previous(std::vector<OrderedMove> &result) {
@@ -246,15 +293,15 @@ struct Traversal {
     }
     return n;
   }
-  template <class F> auto child(const Move &m, F f) {
+  template <class F> auto child(const OrderedMove &m, F f) {
     poll();
-    bool track_path = previous != nullptr;
-    auto text = track_path ? core.encode_move(position, m) : std::string{};
-    return with_move(core, position, m, [&] {
-      if (track_path)
-        path.push_back(std::move(text));
+    const bool track_path = previous != nullptr;
+    return with_move(core, position, *m.move, [&] {
+      if (track_path) path.push_back(m.text); // Already encoded.
+      std::optional<PreparedNode> prepared;
       try {
-        history.push_back(repetition_signature(core, position));
+        prepared.emplace(prepare_node(core, position, &cancellation));
+        history.push_back(prepared->repetition);
       } catch (...) {
         if (track_path) path.pop_back();
         throw;
@@ -267,10 +314,10 @@ struct Traversal {
         if (track_path) path.pop_back();
         throw;
       }
-      using T = decltype(f());
+      using T = decltype(f(*prepared));
       std::optional<T> result;
       try {
-        result.emplace(f());
+        result.emplace(f(*prepared));
       } catch (...) {
         if (cache) cache->pop(history.back(), old_tail);
         history.pop_back();
