@@ -46,7 +46,7 @@ The Node.js 24 controller is authoritative for actual moves, clock rules, and ad
 
 ## 4. Approved M7.3 design principles
 
-See the approved [M7.3 design on its feature branch](https://github.com/yctekmen-sudo/chess-engine-lab/blob/feature/m7.3-prepared-search-nodes/docs/m7.3-search-node-design.md). Consult `CURRENT_STATUS.md` for its exact revision and merge state. These principles describe the approved design; they do not certify that every proposed implementation step or follow-up optimization is complete.
+See the approved [prepared-node design](m7.3-search-node-design.md). Consult `CURRENT_STATUS.md` for its exact revision and implementation checkpoint. These principles describe the approved design; they do not certify that every proposed implementation step or follow-up optimization is complete.
 
 1. **One full legal-move set per search-node encounter.** Generate the set once, use it for terminal detection, encoding, canonical ordering, search, and all rule consumers for that position. Reordering the list must not change its membership or per-move metadata.
 2. **En passant belongs to the legal list.** If an EP capture is legal it appears there. A raw EP target square alone does not affect repetition identity; normalize the repetition EP field by examining the existing list, without independently regenerating all moves. Executing EP still has its special board-update semantics.

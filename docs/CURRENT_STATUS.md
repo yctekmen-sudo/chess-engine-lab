@@ -1,6 +1,6 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-**Verified:** M7.3 repository/CI/evidence checked 2026-10-22, 18:33 UTC; documentation PR created 18:39 UTC (14:39 America/New_York). This is a dated snapshot, not live data.
+**Verified:** M7.3 merge and documentation-branch update checked 2026-10-22, 18:47 UTC (14:47 America/New_York). Profiling evidence was checked at the earlier source revision recorded below and remains unchanged. This is a dated snapshot, not live data.
 
 **Repository:** private [yctekmen-sudo/chess-engine-lab](https://github.com/yctekmen-sudo/chess-engine-lab).
 
@@ -10,21 +10,21 @@
 
 | Item | Verified state |
 | --- | --- |
-| Local and remote `main` | `17edf1e438370d8fc1dc17db66982b3fd0d5cf85`, merge of [PR #18](https://github.com/yctekmen-sudo/chess-engine-lab/pull/18) |
+| GitHub `main` / fetched `origin/main` | `f0a5affee25a333ff23df2343277e052a2c2ae81`, merge of [PR #19](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19); incorporated into `docs/project-handoff` by a normal merge, without rewriting history |
 | M7.2 | Merged; single-PV PLAY-only root search and controller root draw arbitration, including fixed-depth cancellation validation |
-| M7.3 implementation | On `feature/m7.3-prepared-search-nodes`; **not merged** |
-| M7.3 PR | [#19: M7.3 (draft): Reuse prepared legal moves and annotate draw claims](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19), open and **draft** |
-| M7.3 local/remote head | `54ec7d93c759e9ac7f6b8115fb5ef1985972863f` |
+| M7.3 implementation | **Merged into `main`** at `f0a5affee25a333ff23df2343277e052a2c2ae81` |
+| M7.3 PR | [#19: M7.3 (draft): Reuse prepared legal moves and annotate draw claims](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19), **closed and merged**; “draft” remains in its historical title |
+| Profiled M7.3 source / merged PR head | `54ec7d93c759e9ac7f6b8115fb5ef1985972863f`; measurements below remain attributed to this revision, not newly measured at the merge commit |
 | PR #19 scope | Six files: `CMakeLists.txt`, `engine/src/chess_core.cpp`, `engine/src/search/search.cpp`, `docs/m7.3-search-node-design.md`, `tests/search/search_performance.cpp`, `tests/search/run_performance.mjs` |
 | M7.3 PR-head CI | Native Debug/Release/Profile, WebAssembly correctness, M6 controller, and M7 GUI including Windows smoke: completed successfully; links below |
 | Local M7.3 validation | Existing profiling-handoff log records native Release CTest **12/12 passed**, 0 failed, 4.68 s; this documentation task checked the log and did not rerun the suites |
-| Profiling investigation | **Complete locally** at the M7.3 head above; report, nonempty counter/sample CSVs and raw evidence checked |
-| Architecture and next optimizations | **Pending review with ChatGPT**; profiling completion is not implementation approval or merge approval |
+| Profiling investigation | **Completed and reviewed**; accepted with M7.3 per the user's handoff and PR #19's recorded correctness/performance acceptance notes; raw artifacts remain local |
+| Next milestone | **M7.4 planned investigation**: lazy depth-zero move preparation, reduced move-allocation/encoding overhead, then TT bookkeeping; these are future proposals, not implemented improvements or measured speedups |
 | Documentation handoff | [PR #20](https://github.com/yctekmen-sudo/chess-engine-lab/pull/20), open and **draft**, branch `docs/project-handoff` targeting `main`; **not merged** |
 
-The successful CI results below belong to M7.3 PR #19, not to the new documentation PR #20. No PR #20 CI pass is claimed by this snapshot.
+The successful PR-head CI results below belong to M7.3 PR #19 at `54ec7d9`; they are not proof of a pass at the merge commit or an updated PR #20 head. Check CI for the actual revision under review.
 
-The approved [M7.3 design at the verified head](https://github.com/yctekmen-sudo/chess-engine-lab/blob/54ec7d93c759e9ac7f6b8115fb5ef1985972863f/docs/m7.3-search-node-design.md) is on the feature branch, not `main`. PR #19's description still says validation is pending; the actual completed CI runs and local evidence below are more recent evidence. The description has not been edited by this documentation task.
+The approved [M7.3 design](m7.3-search-node-design.md) and implementation are now on `main`. Its original draft-era header is historical; the verified merge and PR #19's acceptance notes establish the completed milestone state. The preceding merged baseline was `17edf1e438370d8fc1dc17db66982b3fd0d5cf85` (PR #18 / M7.2).
 
 Verified successful PR-head workflows:
 
@@ -37,13 +37,13 @@ The push-triggered native workflow [39823909737](https://github.com/yctekmen-sud
 
 ### Protect existing local work
 
-The implementation checkout remains on the M7.3 branch. The handoff was prepared separately on `docs/project-handoff`, based on the verified `main`, in the ignored worktree `work/project-handoff/`; it does not contain M7.3 production changes.
+The original implementation checkout remains on the historical M7.3 branch at `54ec7d9`; its local `main` bookmark has not been advanced by this documentation task. The separate `docs/project-handoff` worktree at `work/project-handoff/` now incorporates `origin/main` at `f0a5aff` through a normal merge. Inherited M7.3 production files match `main`; the PR diff contains documentation only. Do not switch or reset the original checkout to update this PR.
 
 At inspection, one stash existed: `stash@{0}`, object `3669920a80ede34c7943adfdcfc7c3dcd807b7fe`, message `On investigation/m7.2-search-performance: Local M7.3 work before branch switch`. Nine other untracked M7.2 investigation files remain under `docs/search-performance-*` and `tests/search/` (the old performance harness, counters, preparation/report scripts and Windows sampler). The two supplied handoff documents were also untracked. Do not infer that any of these files were committed or that the stash should be applied/dropped.
 
 All 178 pre-existing tracked/untracked files outside the two handoff documents, and all 257 files under `work/m7.3/profiling/`, were hashed before documentation edits. Preserve their content, the stash and the implementation checkout. Inspect current status again before starting work; this inventory is a snapshot.
 
-## 2. What M7.3 implements under review
+## 2. What merged M7.3 implements
 
 Source inspection at `54ec7d9` confirms:
 
@@ -54,7 +54,7 @@ Source inspection at `54ec7d9` confirms:
 - Claim-aware nodes retain immediate and intended-claim metadata. A sound repeated-history-target filter avoids most speculative children. Intended fifty-move claims use halfmove/pawn/capture facts.
 - M7.2 root PLAY-only policy, terminal precedence, canonical score/PV behavior, evaluator ABI and exact TT context requirements are preserved in the existing tests.
 
-**Remaining design/review items:** rare intended-threefold candidates still prepare and discard speculative children; there is no general retained prepared-child cache. Historical repeated-target scanning remains pairwise, and ABI conversion is repeated for TT probe/store. These are observed implementation details, not newly approved optimization designs. Passing the tested matrices does not prove all untested histories or positions equivalent.
+**Known follow-up costs:** rare intended-threefold candidates still prepare and discard speculative children; there is no general retained prepared-child cache. Historical repeated-target scanning remains pairwise, and ABI conversion is repeated for TT probe/store. These are observed details of the accepted M7.3 baseline, not implementations of M7.4 proposals. Passing the tested matrices does not prove all untested histories or positions equivalent.
 
 ## 3. Completed profiling: provenance and performance
 
@@ -132,13 +132,15 @@ Notable self-sample groups (off/cold): heap allocation/free exports **21.8% / 18
 
 The historical M7.2 `Traversal::claim` share of about 84.7% was **inclusive**, overlapping and measured before M7.3. It is not a present-day hotspot share.
 
-## 4. Pending review and next actions
+## 4. M7.4 direction and next actions
 
-1. **Review the completed report with ChatGPT.** Architectural conclusions, optimization priority and any new implementation scope remain pending. Local profiling completion is evidence, not approval to implement its recommendations.
-2. Proposed candidates, **not implemented or newly approved**: defer horizon canonical text/order work and duplicate sorting; reduce move-list allocation/coordinate conversion; reduce repeated TT history hashing or validated snapshot conversions. Review exact-score/PV, claim/terminal, EP, certificate lifetime, cancellation/error and TT-history correctness gates before authorizing any change. The report lists detailed risks and regression requirements.
-3. Review PR #19 against the approved M7.3 design, including rare intended-threefold cases, legal/pinned/raw EP, clock 99/100 boundaries, synthetic-adapter behavior and exact PV/TT policy isolation. Interpret tested equivalence within the tested scope.
+M7.3's architectural optimization and completed profiling investigation have been reviewed and accepted, followed by PR #19's merge. M7.4 is the next investigation direction; its concrete implementation design, correctness proof and expected benefit still require review. No M7.4 code or new speedup is established by this documentation update.
+
+1. **Investigate lazy depth-zero move preparation first.** Determine which move text, canonical ordering, hint rotation or metadata work can safely be deferred at the horizon. Full legal availability, mate/stalemate and automatic-terminal precedence, legal EP identity, optional draw actions and exact TT/PV obligations remain required. The measured leaf work motivates this proposal; its saving has not been measured.
+2. **Investigate reduced move-allocation and encoding overhead.** Assess compact internal move/fact/text representation, appropriate vector reservation and avoiding repeated coordinate conversion. Preserve adapter/public interfaces, certificates and make/undo restoration. The measured allocation/encoding/sorting costs identify an opportunity, not a validated replacement design.
+3. **Subsequently investigate TT bookkeeping.** After measuring the earlier changes independently, review repeated signature hashing, occurrence counts, persistent-history operations and ABI conversions. Retain bounded storage, exact collision/history verification, evaluator/depth/policy isolation and cancellation behavior; do not attribute the whole cold-TT penalty to the small exact-verification path.
 4. If raw evidence is needed outside this machine, explicitly arrange a separate handoff or authorize publication. Do not commit ignored profiling artifacts or the existing untracked M7.2 work as part of documentation maintenance.
-5. Merge PR #19 **only after separate explicit approval**. Update this file when its head, CI state or merge status changes; update the `main` SHA only after checking the actual remote.
+5. Agree the M7.4 design and scoped implementation request with ChatGPT before coding. Review exact-score/PV, claim/terminal, EP, clock 99/100, synthetic-adapter, certificate lifetime, cancellation/error and TT-history regression gates. Preserve the M7.3 evidence and benchmark each proposed change against the same uninstrumented baseline. PR #20 remains draft and unmerged; merging it requires separate explicit approval.
 
 ## 5. Recovery and reproduction
 
@@ -160,10 +162,10 @@ ctest --preset native-release --output-on-failure
 node tests/search/run_performance.mjs build/native-release work/m7.3/recheck-YYYYMMDD 4,5,6 3 1
 ```
 
-`search_performance` and this runner exist on the M7.3 branch; they are absent from the recorded `main` and the documentation branch. Do not run search benchmarks from the documentation worktree or overwrite `work/m7.3/benchmark` / `profiling` without preserving existing results. No production benchmarks or suites were rerun for this documentation-only update.
+`search_performance` and this runner are now available on `main` and on the updated documentation branch through the M7.3 merge. For comparable runs, explicitly choose and record the intended source revision, build directory and evaluator artifact. Use a dedicated implementation/benchmark worktree rather than running benchmarks as part of documentation maintenance, and do not overwrite `work/m7.3/benchmark` / `profiling` without preserving existing results. No production benchmarks or local suites were rerun for this documentation-only update.
 
 ## 6. New-session handoff and maintenance
 
-> Read `AGENTS.md`, `docs/PROJECT_CONTEXT.md` and `docs/CURRENT_STATUS.md`. Verify actual GitHub/main/PR/CI and local worktree/stash state. M7.3 profiling is complete locally; review its final report and raw evidence before proposing the next optimization. Architectural conclusions and follow-up implementation are pending ChatGPT review. Preserve exact scores/PVs, rule/history semantics, evaluator ABI and the M7.2 root policy. Do not publish or merge without authorization for that action and scope.
+> Read `AGENTS.md`, `docs/PROJECT_CONTEXT.md` and `docs/CURRENT_STATUS.md`. Verify actual GitHub/main/PR/CI and local worktree/stash state. M7.3 is merged at `f0a5affee25a333ff23df2343277e052a2c2ae81`; its completed profiling has been reviewed. M7.4 will investigate lazy depth-zero preparation and lower move-allocation/encoding overhead, then TT bookkeeping. These directions are proposals, not implemented behavior or measured gains. Review the concrete design before coding. Preserve exact scores/PVs, rule/history semantics, evaluator ABI and the M7.2 root policy. Do not publish or merge without authorization for that action and scope.
 
 Update this file when milestones conclude, profiling becomes available, or PR/CI states change. Include verification date/SHA, distinguish executed results from checked logs, user reports and CI, and label local-only evidence. Modify `PROJECT_CONTEXT.md` only for enduring architecture/workflow decisions. Documentation maintenance is not standing permission to commit, push, create PRs or merge.
