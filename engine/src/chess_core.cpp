@@ -228,4 +228,7 @@ public:
 };
 }
 std::unique_ptr<ChessCore> create_chess_core() { return std::make_unique<Core>(); }
+// Search-internal adapter dispatch; synthetic ChessCore fixtures retain their
+// existing status and clock-transition semantics.
+bool native_chess_core(const ChessCore& c) noexcept { return dynamic_cast<const Core*>(&c)!=nullptr; }
 }
