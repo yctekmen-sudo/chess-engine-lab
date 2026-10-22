@@ -1,6 +1,6 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-**Verified:** 2026-10-22, 18:33 UTC (14:33 America/New_York). This is a dated snapshot, not live data.
+**Verified:** M7.3 repository/CI/evidence checked 2026-10-22, 18:33 UTC; documentation PR created 18:39 UTC (14:39 America/New_York). This is a dated snapshot, not live data.
 
 **Repository:** private [yctekmen-sudo/chess-engine-lab](https://github.com/yctekmen-sudo/chess-engine-lab).
 
@@ -16,10 +16,13 @@
 | M7.3 PR | [#19: M7.3 (draft): Reuse prepared legal moves and annotate draw claims](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19), open and **draft** |
 | M7.3 local/remote head | `54ec7d93c759e9ac7f6b8115fb5ef1985972863f` |
 | PR #19 scope | Six files: `CMakeLists.txt`, `engine/src/chess_core.cpp`, `engine/src/search/search.cpp`, `docs/m7.3-search-node-design.md`, `tests/search/search_performance.cpp`, `tests/search/run_performance.mjs` |
-| PR-head CI | Native Debug/Release/Profile, WebAssembly correctness, M6 controller, and M7 GUI including Windows smoke: completed successfully; links below |
+| M7.3 PR-head CI | Native Debug/Release/Profile, WebAssembly correctness, M6 controller, and M7 GUI including Windows smoke: completed successfully; links below |
 | Local M7.3 validation | Existing profiling-handoff log records native Release CTest **12/12 passed**, 0 failed, 4.68 s; this documentation task checked the log and did not rerun the suites |
 | Profiling investigation | **Complete locally** at the M7.3 head above; report, nonempty counter/sample CSVs and raw evidence checked |
 | Architecture and next optimizations | **Pending review with ChatGPT**; profiling completion is not implementation approval or merge approval |
+| Documentation handoff | [PR #20](https://github.com/yctekmen-sudo/chess-engine-lab/pull/20), open and **draft**, branch `docs/project-handoff` targeting `main`; **not merged** |
+
+The successful CI results below belong to M7.3 PR #19, not to the new documentation PR #20. No PR #20 CI pass is claimed by this snapshot.
 
 The approved [M7.3 design at the verified head](https://github.com/yctekmen-sudo/chess-engine-lab/blob/54ec7d93c759e9ac7f6b8115fb5ef1985972863f/docs/m7.3-search-node-design.md) is on the feature branch, not `main`. PR #19's description still says validation is pending; the actual completed CI runs and local evidence below are more recent evidence. The description has not been edited by this documentation task.
 
