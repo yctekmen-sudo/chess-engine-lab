@@ -6,6 +6,21 @@ approved milestone specifications before changing behavior. The
 [architecture baseline](docs/architecture-v1.0.md) includes planned features;
 check implementation and current contracts before treating a feature as present.
 
+## Project handoff
+
+- Read [PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) for enduring architectural
+  decisions and [CURRENT_STATUS.md](docs/CURRENT_STATUS.md) for the last verified
+  milestone, PR, validation and profiling state. Recheck dated claims against
+  the relevant source revision, local evidence and current GitHub state.
+- Update `docs/CURRENT_STATUS.md` when implementation milestones conclude,
+  profiling results become available, or PR/CI states change during authorized
+  work. Record the date, SHA and evidence provenance; distinguish implemented
+  behavior from approved designs and proposed optimizations. Label ignored,
+  local-only results so a fresh session does not assume they were published.
+- Modify `docs/PROJECT_CONTEXT.md` only when enduring architecture or workflow
+  decisions change. Handoff maintenance does not grant permission to commit,
+  push, create a PR or merge; the authorization rules below still apply.
+
 ## Development workflow
 
 - ChatGPT supports architecture, planning, and design review. Codex in VS Code

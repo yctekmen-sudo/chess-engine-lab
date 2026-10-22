@@ -1,0 +1,171 @@
+# Chess Engine Lab — Current Status and Next Actions
+
+**Verified:** M7.3 merge and documentation-branch update checked 2026-10-22, 18:47 UTC (14:47 America/New_York). Profiling evidence was checked at the earlier source revision recorded below and remains unchanged. This is a dated snapshot, not live data.
+
+**Repository:** private [yctekmen-sudo/chess-engine-lab](https://github.com/yctekmen-sudo/chess-engine-lab).
+
+**Stable context:** [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Read the root [AGENTS.md](../AGENTS.md) before implementation. ChatGPT supports architecture/design review; Codex implements only within the user's authorized scope.
+
+## 1. Verified repository and PR checkpoint
+
+| Item | Verified state |
+| --- | --- |
+| GitHub `main` / fetched `origin/main` | `f0a5affee25a333ff23df2343277e052a2c2ae81`, merge of [PR #19](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19); incorporated into `docs/project-handoff` by a normal merge, without rewriting history |
+| M7.2 | Merged; single-PV PLAY-only root search and controller root draw arbitration, including fixed-depth cancellation validation |
+| M7.3 implementation | **Merged into `main`** at `f0a5affee25a333ff23df2343277e052a2c2ae81` |
+| M7.3 PR | [#19: M7.3 (draft): Reuse prepared legal moves and annotate draw claims](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19), **closed and merged**; “draft” remains in its historical title |
+| Profiled M7.3 source / merged PR head | `54ec7d93c759e9ac7f6b8115fb5ef1985972863f`; measurements below remain attributed to this revision, not newly measured at the merge commit |
+| PR #19 scope | Six files: `CMakeLists.txt`, `engine/src/chess_core.cpp`, `engine/src/search/search.cpp`, `docs/m7.3-search-node-design.md`, `tests/search/search_performance.cpp`, `tests/search/run_performance.mjs` |
+| M7.3 PR-head CI | Native Debug/Release/Profile, WebAssembly correctness, M6 controller, and M7 GUI including Windows smoke: completed successfully; links below |
+| Local M7.3 validation | Existing profiling-handoff log records native Release CTest **12/12 passed**, 0 failed, 4.68 s; this documentation task checked the log and did not rerun the suites |
+| Profiling investigation | **Completed and reviewed**; accepted with M7.3 per the user's handoff and PR #19's recorded correctness/performance acceptance notes; raw artifacts remain local |
+| Next milestone | **M7.4 planned investigation**: lazy depth-zero move preparation, reduced move-allocation/encoding overhead, then TT bookkeeping; these are future proposals, not implemented improvements or measured speedups |
+| Documentation handoff | [PR #20](https://github.com/yctekmen-sudo/chess-engine-lab/pull/20), open and **draft**, branch `docs/project-handoff` targeting `main`; **not merged** |
+
+The successful PR-head CI results below belong to M7.3 PR #19 at `54ec7d9`; they are not proof of a pass at the merge commit or an updated PR #20 head. Check CI for the actual revision under review.
+
+The approved [M7.3 design](m7.3-search-node-design.md) and implementation are now on `main`. Its original draft-era header is historical; the verified merge and PR #19's acceptance notes establish the completed milestone state. The preceding merged baseline was `17edf1e438370d8fc1dc17db66982b3fd0d5cf85` (PR #18 / M7.2).
+
+Verified successful PR-head workflows:
+
+- [Native Debug/Release/Profile, run 39823918573](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39823918573).
+- [WebAssembly correctness, run 39823918638](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39823918638).
+- [M6 headless controller, run 39823918536](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39823918536).
+- [M7 GUI and Windows smoke, run 39823918527](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39823918527).
+
+The push-triggered native workflow [39823909737](https://github.com/yctekmen-sudo/chess-engine-lab/actions/runs/39823909737) also completed successfully on attempt 2. Its earlier stale/in-progress display is historical, not a current failing check. Success applies to the recorded M7.3 SHA; recheck after any new commit. The Windows smoke job does not build the native C++ engine or establish Windows browser-gameplay coverage; local native results are separate.
+
+### Protect existing local work
+
+The original implementation checkout remains on the historical M7.3 branch at `54ec7d9`; its local `main` bookmark has not been advanced by this documentation task. The separate `docs/project-handoff` worktree at `work/project-handoff/` now incorporates `origin/main` at `f0a5aff` through a normal merge. Inherited M7.3 production files match `main`; the PR diff contains documentation only. Do not switch or reset the original checkout to update this PR.
+
+At inspection, one stash existed: `stash@{0}`, object `3669920a80ede34c7943adfdcfc7c3dcd807b7fe`, message `On investigation/m7.2-search-performance: Local M7.3 work before branch switch`. Nine other untracked M7.2 investigation files remain under `docs/search-performance-*` and `tests/search/` (the old performance harness, counters, preparation/report scripts and Windows sampler). The two supplied handoff documents were also untracked. Do not infer that any of these files were committed or that the stash should be applied/dropped.
+
+All 178 pre-existing tracked/untracked files outside the two handoff documents, and all 257 files under `work/m7.3/profiling/`, were hashed before documentation edits. Preserve their content, the stash and the implementation checkout. Inspect current status again before starting work; this inventory is a snapshot.
+
+## 2. What merged M7.3 implements
+
+Source inspection at `54ec7d9` confirms:
+
+- `PreparedNode` owns a snapshot, legal-move list and repetition identity for one position encounter; iterative root preparation is reused.
+- Legal EP is obtained from that prepared list rather than generating another list for repetition normalization. Evaluator snapshots retain raw EP.
+- Native generated moves carry position/undo-frame certificates; encode/make avoid redundant legality generation when the certificate matches. External/foreign/stale inputs retain validation, and strict undo restores the matching parent frame.
+- Native mate/stalemate classification uses the prepared list, consulting check state when empty. Synthetic adapters retain their independent status/clock semantics.
+- Claim-aware nodes retain immediate and intended-claim metadata. A sound repeated-history-target filter avoids most speculative children. Intended fifty-move claims use halfmove/pawn/capture facts.
+- M7.2 root PLAY-only policy, terminal precedence, canonical score/PV behavior, evaluator ABI and exact TT context requirements are preserved in the existing tests.
+
+**Known follow-up costs:** rare intended-threefold candidates still prepare and discard speculative children; there is no general retained prepared-child cache. Historical repeated-target scanning remains pairwise, and ABI conversion is repeated for TT probe/store. These are observed details of the accepted M7.3 baseline, not implementations of M7.4 proposals. Passing the tested matrices does not prove all untested histories or positions equivalent.
+
+## 3. Completed profiling: provenance and performance
+
+The investigation changed diagnostic infrastructure only. Canonical runs use uninstrumented native **Release**; copied sources supply separate operation counters; separate optimized Profile binaries/PDBs supply samples. Runs were sequential, with no competing benchmark/build/test. All artifacts are retained locally under `work/m7.3/profiling/`, which Git ignores; **they are not included in this documentation PR or in PR #19**. A fresh clone or ChatGPT session needs those artifacts supplied separately to inspect raw data.
+
+Evidence locations, relative to the implementation checkout:
+
+| Local artifact | Contents checked |
+| --- | --- |
+| `work/m7.3/profiling/performance-investigation.md` | Final interpretation, methodology, limitations, future candidates and correctness gates |
+| `work/m7.3/profiling/results.csv` | 54 measured Release/Profile rows; elapsed/CPU time, nodes, evaluations, TT statistics, exact result checksums and final PVs |
+| `work/m7.3/profiling/counters.csv` | Actual counters for 12 diagnostic invocations, including warm-table population and ordinary/speculative preparation attribution; not header-only |
+| `work/m7.3/profiling/sampling.csv` | Exclusive/self, overlapping inclusive and exclusive owner-category samples; primary 20 ms sampling pass |
+| `work/m7.3/profiling/cpu-breakdown.json` | TT-off/cold category percentages, estimated Profile CPU ms/search, nominal sampling uncertainty and batch ranges |
+| `work/m7.3/profiling/environment.json` | Toolchain, OS/CPU, compiler flags and artifact/PDB SHA-256 identities |
+| `work/m7.3/profiling/diagnostics/results.json`, `samples-lowoverhead/results.json`, `samples/results.json` | Raw diagnostic/sample result attribution and checks; original higher-rate sampling retained separately |
+| `work/m7.3/profiling/tool-validation.json`, `ctest-release.log` | 145 validation checks, including 13 negative cases; local native Release 12/12 pass |
+| `work/m7.3/profiling/reproduce.ps1`, diagnostic sources and scripts | Serial reproduction commands, checked instrumentation anchors, source hashes and sampling policy |
+
+Workload: initial FEN with complete starting history, iterative depths 4/5/6, MultiPV=1 PLAY-only root, previous-PV ordering and alpha-beta enabled, default material evaluator, requested numeric TT budget 8 MiB. Actual table allocation is 4,522,172 bytes / 4,096 entries. Canonical M7.3 runs use one warmup plus three measured repetitions; warm mode also explicitly populates the table. Historical M7.2 depth-six timings used zero additional warmups. Table modes are independent; cold clears outside timing.
+
+Windows x64 10.0.26200, Intel Core i7-14700F, MSVC 19.44.35229.0, CMake 4.4.4, Ninja 1.13.2, Node 24.22.0. The desktop was not isolated or pinned to a CPU/frequency. Release and Profile have different inlining/link settings; sampled Profile milliseconds are not canonical Release timings.
+
+| Depth | M7.2 Release off, historical | Earlier M7.3 Release off | Repeated M7.3 Release off | Repeated cold | Repeated warm |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 4 | 99.330 ms | 9.366 ms | **9.060 ms** | 11.140 ms | 1.113 ms |
+| 5 | 1,580.016 ms | 145.757 ms | **151.720 ms** | 150.702 ms | 151.096 ms |
+| 6 | 17,862.088 ms | 1,944.673 ms | **1,953.221 ms** | 2,295.142 ms | 2,288.014 ms |
+
+These are medians of three runs. Repeated M7.3 medians differ from the supplied M7.3 baseline by -3.28% to +5.56% across workloads. Earlier cold/warm depth-six medians were 2,174.328 / 2,182.477 ms. The new TT-off speedup over historical M7.2 is about **9.14x**; cold/warm are approximately **17.5% / 17.1% slower than current TT off** in this opening/material workload, not universally.
+
+Depth-six off visits **381,938** nodes and evaluates **328,475** times in both M7.2 and M7.3. Cold visits **355,879** nodes and evaluates **301,184** times. All completed-depth checksum/PV comparisons match across canonical, counter and sampled runs. Checksums for depths 4/5/6 are `14153966329163974846`, `12170758485630949694`, `6361699534327624292`; they include exact structured scores, decisions, PV endings/intended claims and complete PVs. The depth-six PV remains `a2a3 b7b6 a1a2 c8a6 a2a1 a6e2`.
+
+Release executable SHA-256: `263e83ff39451a8a5fe87e762402740653a30fa35fbc766d5162a8339b9e95f7`.
+
+Release material SHA-256: `4b9c491bb12441fcc450a21d4437466ecb3024273df032d41201438d89dfabd8`.
+
+These match the supplied M7.3 baseline. Baseline evidence is local `work/m7.3/benchmark/results.json` / `results.csv`; historical M7.2 evidence is in the preserved, untracked `docs/search-performance-*` files. Source/artifact SHA-256 identity and result consistency checksums serve different purposes.
+
+### Significant observed operation reductions
+
+| Depth-six operation | M7.2 off, historical | M7.3 off | M7.2 cold, historical | M7.3 cold |
+| --- | ---: | ---: | ---: | ---: |
+| Full underlying legal generations | 88,751,792 | **385,132** | 82,963,166 | **356,926** |
+| `require_legal` validations | 85,734,948 | **0** | 80,142,285 | **0** |
+| Move encodings | 75,912,579 | 9,507,358 | 71,006,204 | 8,802,266 |
+| Speculative intended-claim children | 9,440,437 | **3,199** | 8,780,208 | **1,052** |
+| Snapshot allocations | 19,644,748 | 385,135 | 18,272,172 | 356,929 |
+| TT history push/pop, each | 0 | 0 | 9,136,081 | 355,873 |
+| Evaluator ABI conversions | 328,477 | 328,477 | 1,012,932 | 1,012,932 |
+
+Every actual full generation is attributed to one preparation. Generations per visited node are **1.008362614 off** / **1.002942011 cold**: ordinary children plus exceptional speculative children plus one prepared root, with that root reused across six iterations. No extra generation comes from status, encode/make legality checks or independent EP normalization in this measured search. No eligible intended claim was found by these exceptional opening probes; that is not a rule that intended claims never occur.
+
+**Depth zero remains significant.** Off has 328,475 leaf entries; cold has 302,740, of which 301,184 evaluate. Preparation, legal-list encoding/sorting and required rule metadata occur before recursive TT probing or leaf evaluation. Leaf preparation encodes 8,210,720 / 7,558,366 moves. This is measured work and inspected control flow; the benefit and correctness of deferring it have not yet been established.
+
+### Measured CPU breakdown and limits
+
+Primary sampling used two batches of 20 depth-six searches per TT state at a nominal 20 ms wait: **4,459 off / 4,983 cold samples**, zero unwalkable stacks, about 4.6–4.7% suspended wall time. All 80 primary sampled searches, 40 retained higher-rate searches and 12 counter invocations were independently checked against uninstrumented results. Existing tool-validation evidence records **145 passing checks**, including 13 intentional failure cases; this documentation task read the evidence and did not rerun profiling.
+
+Each owner sample is assigned once to the nearest recognized operation on its ordered stack. These exclusive categories sum to 100%; inclusive paths overlap and must not be added. CPU milliseconds below are estimates from the sampled Profile main-thread CPU, **not Release elapsed time**.
+
+| Exclusive owner category | TT off | Estimated Profile CPU ms/search | Cold TT | Estimated Profile CPU ms/search |
+| --- | ---: | ---: | ---: | ---: |
+| Legal generation and move-list construction | **68.27%** | 1,489.9 | **58.58%** | 1,398.3 |
+| Make/undo | 1.86% | 40.6 | 1.87% | 44.6 |
+| Snapshots/conversion | 3.41% | 74.4 | 5.56% | 132.7 |
+| Repetition/claim preparation | 7.29% | 159.1 | 4.27% | 102.0 |
+| TT/history | 0% | 0 | **14.69%** | 350.7 |
+| Evaluation | 1.95% | 42.6 | 0.96% | 23.0 |
+| Other/unattributed | **17.22%** | 375.9 | **14.07%** | 335.8 |
+
+The largest legal-list category has nominal sampling uncertainty about +/-1.37 percentage points; systematic error from inlining, scheduling and attribution is not captured by that estimate. Full batch ranges and uncertainty are in `cpu-breakdown.json` and the report. Unknown subcomponents remain unmeasured. An earlier 3 ms sampling pass paused the target for roughly 24–25% of wall time; it is retained for sensitivity comparison, not pooled into the primary breakdown.
+
+Notable self-sample groups (off/cold): heap allocation/free exports **21.8% / 18.9%**, coordinate-string conversion **8.2% / 6.9%**, move sorting **8.2% / 6.6%**, `ordered_moves` body **4.8% / 3.8%**, and cold TT hashing plus history tuple comparison **7.8%**. These are components of the categories above, not additional time. OS export-only symbol attribution is approximate. Underlying movegen stack unions are only about **2.56% / 2.83%**, versus much larger list materialization/encoding/sorting paths. Exact TT history verification is about 1.4 ms in the canonical cold run; broader history/hash bookkeeping is the larger observed TT cost.
+
+The historical M7.2 `Traversal::claim` share of about 84.7% was **inclusive**, overlapping and measured before M7.3. It is not a present-day hotspot share.
+
+## 4. M7.4 direction and next actions
+
+M7.3's architectural optimization and completed profiling investigation have been reviewed and accepted, followed by PR #19's merge. M7.4 is the next investigation direction; its concrete implementation design, correctness proof and expected benefit still require review. No M7.4 code or new speedup is established by this documentation update.
+
+1. **Investigate lazy depth-zero move preparation first.** Determine which move text, canonical ordering, hint rotation or metadata work can safely be deferred at the horizon. Full legal availability, mate/stalemate and automatic-terminal precedence, legal EP identity, optional draw actions and exact TT/PV obligations remain required. The measured leaf work motivates this proposal; its saving has not been measured.
+2. **Investigate reduced move-allocation and encoding overhead.** Assess compact internal move/fact/text representation, appropriate vector reservation and avoiding repeated coordinate conversion. Preserve adapter/public interfaces, certificates and make/undo restoration. The measured allocation/encoding/sorting costs identify an opportunity, not a validated replacement design.
+3. **Subsequently investigate TT bookkeeping.** After measuring the earlier changes independently, review repeated signature hashing, occurrence counts, persistent-history operations and ABI conversions. Retain bounded storage, exact collision/history verification, evaluator/depth/policy isolation and cancellation behavior; do not attribute the whole cold-TT penalty to the small exact-verification path.
+4. If raw evidence is needed outside this machine, explicitly arrange a separate handoff or authorize publication. Do not commit ignored profiling artifacts or the existing untracked M7.2 work as part of documentation maintenance.
+5. Agree the M7.4 design and scoped implementation request with ChatGPT before coding. Review exact-score/PV, claim/terminal, EP, clock 99/100, synthetic-adapter, certificate lifetime, cancellation/error and TT-history regression gates. Preserve the M7.3 evidence and benchmark each proposed change against the same uninstrumented baseline. PR #20 remains draft and unmerged; merging it requires separate explicit approval.
+
+## 5. Recovery and reproduction
+
+From the implementation checkout, inspect before acting:
+
+```powershell
+git status --short --branch
+git branch -vv
+git worktree list
+git stash list
+```
+
+For reproduction, read `work/m7.3/profiling/reproduce.ps1` and the report first. Its generated outputs overwrite files in that profiling directory; preserve the current evidence before rerunning. Use a fresh output directory for an independent canonical comparison, after building the intended M7.3 revision:
+
+```powershell
+cmake --preset native-release
+cmake --build --preset native-release
+ctest --preset native-release --output-on-failure
+node tests/search/run_performance.mjs build/native-release work/m7.3/recheck-YYYYMMDD 4,5,6 3 1
+```
+
+`search_performance` and this runner are now available on `main` and on the updated documentation branch through the M7.3 merge. For comparable runs, explicitly choose and record the intended source revision, build directory and evaluator artifact. Use a dedicated implementation/benchmark worktree rather than running benchmarks as part of documentation maintenance, and do not overwrite `work/m7.3/benchmark` / `profiling` without preserving existing results. No production benchmarks or local suites were rerun for this documentation-only update.
+
+## 6. New-session handoff and maintenance
+
+> Read `AGENTS.md`, `docs/PROJECT_CONTEXT.md` and `docs/CURRENT_STATUS.md`. Verify actual GitHub/main/PR/CI and local worktree/stash state. M7.3 is merged at `f0a5affee25a333ff23df2343277e052a2c2ae81`; its completed profiling has been reviewed. M7.4 will investigate lazy depth-zero preparation and lower move-allocation/encoding overhead, then TT bookkeeping. These directions are proposals, not implemented behavior or measured gains. Review the concrete design before coding. Preserve exact scores/PVs, rule/history semantics, evaluator ABI and the M7.2 root policy. Do not publish or merge without authorization for that action and scope.
+
+Update this file when milestones conclude, profiling becomes available, or PR/CI states change. Include verification date/SHA, distinguish executed results from checked logs, user reports and CI, and label local-only evidence. Modify `PROJECT_CONTEXT.md` only for enduring architecture/workflow decisions. Documentation maintenance is not standing permission to commit, push, create PRs or merge.
