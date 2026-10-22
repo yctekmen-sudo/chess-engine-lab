@@ -38,7 +38,7 @@ jobs:
         run: |
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
           cmake --build --preset wasm-debug
-      - name: Run M0–M5 and M7 calibration/ABI tests under Node
+      - name: Run M0–M5, bounded M7.2 and M7 calibration/ABI tests under Node
         id: correctness
         run: |
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
@@ -56,11 +56,13 @@ jobs:
             echo "- SDK installation: $SDK_RESULT"
             echo "- Configure: $CONFIGURE_RESULT"
             echo "- Build: $BUILD_RESULT"
-            echo "- Node M0–M5 and M7 calibration/ABI tests: $TEST_RESULT"
+            echo "- Node M0–M5, bounded M7.2 and M7 calibration/ABI tests: $TEST_RESULT"
             if [[ "$TEST_RESULT" == success ]]; then
-              echo "All M0–M5 chess, legacy/extended ABI, evaluator calibration and error tests passed."
+              echo "All M0–M5 chess, bounded M7.2 single-PV, legacy/extended ABI, evaluator calibration and error tests passed."
             else
               echo "WebAssembly validation has NOT passed. Inspect the failing step logs."
             fi
             echo "Verbose CTest logs include every golden perft count and the M1 correctness result."
+            echo "M7.2 logs include flushed fixture/configuration checkpoints, group timings and search counts; its 300-second timeout remains a failure."
+            echo "The full M7.2 WASM matrix is opt-in; see docs/development.md. Native CTest retains the full matrix."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -6,6 +6,6 @@ const runner = process.argv[2];
 const artifact = runner.replace(/\.js$/, '.wasm');
 const digest = crypto.createHash('sha256').update(fs.readFileSync(artifact)).digest('hex');
 console.log(`Bundled evaluator encompassing WASM SHA-256: ${digest}`);
-const result = child.spawnSync(process.execPath, [runner, digest], {stdio: 'inherit'});
+const result = child.spawnSync(process.execPath, [runner, digest, ...process.argv.slice(3)], {stdio: 'inherit'});
 if (result.error) throw result.error;
 process.exit(result.status === null ? 1 : result.status);

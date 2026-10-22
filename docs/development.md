@@ -113,6 +113,48 @@ This runner can download the SDK independently of the local cloud environment's
 HTTP policy. CI results, rather than the presence of this workflow, determine
 whether the WASM acceptance gate has passed.
 
+### M7.2 test runtime and full WebAssembly matrix
+
+Native CTest runs the full `m72_search` matrix by default. WASM CTest selects
+`--matrix=ci`: all 13 real-board fixtures at depth two with a zero evaluator,
+both previous-PV ordering modes, the actual-history checkpoints at plies 7/8/16,
+six deterministic generated trees, all four mate races, explicit root TT policy
+isolation, cancellation and evaluator-error tests. Small real/generated fixtures
+also check TT off, hint-only and certified numeric modes with fresh-table cold,
+warm and both cross-policy directions. Every completed depth still compares its
+exact decision, score, canonical PV and termination against the exhaustive legacy
+reference. The native full matrix retains all three real-board evaluator values,
+30 generated trees and the original ordering/cache/pass Cartesian product.
+
+The bounded matrix performs 242 searches; the full matrix performs 2,208. Neither
+changes production code or treats timeout as success. Both print flushed start/end
+checkpoints with monotonic elapsed seconds and search counts at group, fixture,
+reference and configuration boundaries. Only successful completion prints an end
+checkpoint. CTest's existing M7.2 timeout remains 300 seconds.
+
+With the pinned SDK activated, run the bounded WASM gate and retain its timings:
+
+```sh
+cmake --preset wasm-debug -DCHESS_LAB_NODE_EXECUTABLE="$EMSDK_NODE"
+cmake --build --preset wasm-debug
+ctest --preset wasm-debug --verbose
+```
+
+For the **full** WASM matrix, explicitly invoke the same artifact through the
+digest-supplying runner outside the bounded CTest gate (allow longer than five
+minutes; it still returns a nonzero exit code on any assertion/error):
+
+```sh
+"$EMSDK_NODE" tests/evaluation/run_wasm.cjs build/wasm-debug/m72_search.js --matrix=full
+```
+
+`run_wasm.cjs` supplies the artifact SHA-256 first and forwards additional test
+arguments unchanged. Native executables accept the same `--matrix=ci` and
+`--matrix=full` switches, allowing both schedules to be verified without the SDK.
+Omitting the switch selects the full matrix; unknown arguments fail. Local Windows
+users with the SDK activated in PowerShell can use `& $env:EMSDK_NODE` for Node
+and `"-DCHESS_LAB_NODE_EXECUTABLE=$env:EMSDK_NODE"` for the configure argument.
+
 
 Emscripten builds enable `-fexceptions` at compilation and linking, propagated
 through the core target to consumers, because ChessCore's source contract throws

@@ -167,20 +167,21 @@ if(NOT EMSCRIPTEN)
   target_compile_definitions(m5_benchmark PRIVATE CHESS_LAB_BENCH_BUILD="$<CONFIG>" CHESS_LAB_BENCH_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}" CHESS_LAB_BENCH_PLATFORM="${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
-# M6 adapters are native-only; no threads or process dependencies reach WASM.
+# M7.2: bounded WASM CI coverage; native keeps the complete regression matrix.
 if(BUILD_TESTING)
   add_executable(m72_search tests/search/m72_search.cpp)
   target_link_libraries(m72_search PRIVATE chess_search evaluation_support material_provider)
   if(EMSCRIPTEN)
     set_target_properties(m72_search PROPERTIES SUFFIX ".js")
     target_link_options(m72_search PRIVATE -sENVIRONMENT=node -sEXIT_RUNTIME=1)
-    add_test(NAME m72_search COMMAND "${CHESS_LAB_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/evaluation/run_wasm.cjs" "$<TARGET_FILE:m72_search>")
+    add_test(NAME m72_search COMMAND "${CHESS_LAB_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/evaluation/run_wasm.cjs" "$<TARGET_FILE:m72_search>" --matrix=ci)
   else()
     add_test(NAME m72_search COMMAND m72_search)
   endif()
   set_tests_properties(m72_search PROPERTIES TIMEOUT 300)
 endif()
 
+# M6 adapters are native-only; no threads or process dependencies reach WASM.
 if(NOT EMSCRIPTEN)
   find_package(Threads REQUIRED)
   add_executable(chess_lab_uci engine/src/uci/main.cpp)
