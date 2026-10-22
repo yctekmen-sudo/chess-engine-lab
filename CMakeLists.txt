@@ -167,6 +167,15 @@ if(NOT EMSCRIPTEN)
   target_compile_definitions(m5_benchmark PRIVATE CHESS_LAB_BENCH_BUILD="$<CONFIG>" CHESS_LAB_BENCH_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}" CHESS_LAB_BENCH_PLATFORM="${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
+# M7.3 headless iterative benchmark: no expensive fixed-depth M3 reference.
+if(NOT EMSCRIPTEN)
+  add_executable(search_performance tests/search/search_performance.cpp)
+  target_link_libraries(search_performance PRIVATE chess_search)
+  target_compile_definitions(search_performance PRIVATE
+    CHESS_LAB_BENCH_BUILD="$<CONFIG>"
+    CHESS_LAB_BENCH_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+endif()
+
 # M7.2: bounded WASM CI coverage; native keeps the complete regression matrix.
 if(BUILD_TESTING)
   add_executable(m72_search tests/search/m72_search.cpp)

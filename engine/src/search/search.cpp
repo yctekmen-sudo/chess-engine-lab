@@ -7,6 +7,8 @@
 
 namespace chess_lab {
 static_assert(std::is_trivially_copyable_v<SearchScore>);
+// Native adapter identification; synthetic adapters retain custom status and clock semantics.
+bool native_chess_core(const ChessCore &) noexcept;
 SearchScore SearchScore::finite(double v) {
   if (!std::isfinite(v))
     throw std::invalid_argument("nonfinite search score");
@@ -58,16 +60,36 @@ namespace {
 struct OrderedMove {
   std::string text;
   std::unique_ptr<Move> move;
+  bool pawn_move = false;
+  bool capture = false;
+  bool legal_ep = false;
+  bool claim_threefold = false;
+  bool claim_fifty = false;
 };
 std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
-                                       const CancellationToken *token = nullptr) {
+                                       const CancellationToken *token = nullptr,
+                                       const PositionSnapshot *snapshot = nullptr) {
   std::vector<OrderedMove> result;
   for (auto &m : c.legal_moves(p)) {
     if (token) detail::tt_poll(*token);
     result.push_back({c.encode_move(p, *m), std::move(m)});
   }
+    // Legal en-passant captures are already members of this list.
+  if (snapshot) {
+    const auto squares = snapshot->squares();
+    for (auto &m : result) {
+      const unsigned from = unsigned(m.text[0] - 'a') + 8U * unsigned(m.text[1] - '1');
+      const unsigned to = unsigned(m.text[2] - 'a') + 8U * unsigned(m.text[3] - '1');
+      const auto piece = squares[from];
+      m.pawn_move = piece == PieceCode::white_pawn || piece == PieceCode::black_pawn;
+      m.legal_ep = m.pawn_move && m.text[0] != m.text[2] &&
+          squares[to] == PieceCode::empty &&
+          snapshot->en_passant_square() == std::optional<std::uint8_t>(static_cast<std::uint8_t>(to));
+      m.capture = squares[to] != PieceCode::empty || m.legal_ep;
+    }
+  }
   std::sort(result.begin(), result.end(),
-            [](const auto &a, const auto &b) { return a.text < b.text; });
+             [](const auto &a, const auto &b) { return a.text < b.text; });
   for (std::size_t i = 0; i < result.size(); ++i) {
     const auto &s = result[i].text;
     auto square = [&](int n) {
@@ -171,6 +193,32 @@ GameHistory GameHistory::replay(const ChessCore &c, const Position &start,
   return h;
 }
 namespace {
+// A prepared node owns one legal list and its position-specific facts.
+struct PreparedNode {
+  std::unique_ptr<const PositionSnapshot> snapshot;
+  std::vector<OrderedMove> legal;
+  RepetitionSignature repetition;
+  bool claims_ready = false;
+  bool claim_now_threefold = false;
+  bool claim_now_fifty = false;
+};
+PreparedNode prepare_node(const ChessCore &c, const Position &p,
+                          const CancellationToken *token = nullptr) {
+  PreparedNode node;
+  node.snapshot = c.snapshot(p);
+  node.legal = ordered_moves(c, p, token, node.snapshot.get());
+  auto &r = node.repetition;
+  std::copy(node.snapshot->squares().begin(), node.snapshot->squares().end(), r.pieces.begin());
+  r.side = node.snapshot->side_to_move();
+  r.castling = {node.snapshot->can_castle_kingside(Side::white),
+                node.snapshot->can_castle_queenside(Side::white),
+                node.snapshot->can_castle_kingside(Side::black),
+                node.snapshot->can_castle_queenside(Side::black)};
+  if (auto ep = node.snapshot->en_passant_square())
+    for (const auto &move : node.legal)
+      if (move.legal_ep) { r.legal_ep = ep; break; }
+  return node;
+}
 // All recursive values AND bounds use root-relative mate distances: a terminal
 // at ply P is Mate(P). This is the order-preserving coordinate transform of
 // node-relative Mate(0), avoiding lossy inverse bound transforms at Mate(0).
@@ -203,12 +251,13 @@ struct Traversal {
   void poll() const {
     detail::tt_poll(cancellation);
   }
-  std::vector<OrderedMove> moves(bool hints) {
+  std::vector<OrderedMove> &moves(PreparedNode &prepared, bool hints) {
     poll();
-    auto result = ordered_moves(core, position, &cancellation);
-    poll();
-    if (hints)
-      prefer_previous(result);
+    auto &result = prepared.legal;
+    // Iterative-deepening root preparation is reused with canonical reset.
+    std::sort(result.begin(), result.end(),
+              [](const auto &a, const auto &b) { return a.text < b.text; });
+    if (hints) prefer_previous(result);
     return result;
   }
   void prefer_previous(std::vector<OrderedMove> &result) {
@@ -246,15 +295,15 @@ struct Traversal {
     }
     return n;
   }
-  template <class F> auto child(const Move &m, F f) {
+  template <class F> auto child(const OrderedMove &m, F f) {
     poll();
-    bool track_path = previous != nullptr;
-    auto text = track_path ? core.encode_move(position, m) : std::string{};
-    return with_move(core, position, m, [&] {
-      if (track_path)
-        path.push_back(std::move(text));
+    const bool track_path = previous != nullptr;
+    return with_move(core, position, *m.move, [&] {
+      if (track_path) path.push_back(m.text); // Already encoded.
+      std::optional<PreparedNode> prepared;
       try {
-        history.push_back(repetition_signature(core, position));
+        prepared.emplace(prepare_node(core, position, &cancellation));
+        history.push_back(prepared->repetition);
       } catch (...) {
         if (track_path) path.pop_back();
         throw;
@@ -267,10 +316,10 @@ struct Traversal {
         if (track_path) path.pop_back();
         throw;
       }
-      using T = decltype(f());
+      using T = decltype(f(*prepared));
       std::optional<T> result;
       try {
-        result.emplace(f());
+        result.emplace(f(*prepared));
       } catch (...) {
         if (cache) cache->pop(history.back(), old_tail);
         history.pop_back();
@@ -283,8 +332,16 @@ struct Traversal {
       return std::move(*result);
     });
   }
-  std::optional<Line> terminal(std::uint64_t ply, const PositionSnapshot &s) {
-    auto status = core.status(position);
+  std::optional<Line> terminal(std::uint64_t ply, const PreparedNode &prepared) {
+    const auto &s = *prepared.snapshot;
+    // This adapter's legal list has already established terminal move
+    // availability. Synthetic test adapters retain their independent status.
+    auto status = native_chess_core(core)
+        ? (prepared.legal.empty()
+              ? (core.in_check(position) ? PositionStatus::checkmate
+                                         : PositionStatus::stalemate)
+              : PositionStatus::ongoing)
+        : core.status(position);
     bool white = s.side_to_move() == Side::white;
     auto terminal = [](SearchScore score, TerminalOutcome outcome) {
       return Line{score,
@@ -305,12 +362,42 @@ struct Traversal {
       return terminal(SearchScore::finite(0), TerminalOutcome::draw);
     return {};
   }
-  std::optional<Line> claim(const PositionSnapshot &s,
-                            const std::vector<OrderedMove> &canonical_moves) {
+  void annotate_claims(PreparedNode &prepared) {
+    if (prepared.claims_ready || !native_chess_core(core)) return;
+    prepared.claims_ready = true;
+    const auto &s = *prepared.snapshot;
+    prepared.claim_now_threefold = count(history.back()) >= 3;
+    prepared.claim_now_fifty = s.halfmove_clock() >= 100;
+    if (prepared.claim_now_threefold || prepared.claim_now_fifty) return;
+    // For an intended threefold claim, the destination must already occur
+    // twice. Avoid all hypothetical child work when this is impossible.
+    bool repeated_target = false;
+    for (std::size_t i = 0; i < history.size() && !repeated_target; ++i)
+      for (std::size_t j = 0; j < i; ++j)
+        if (history[i] == history[j]) { repeated_target = true; break; }
+    for (auto &m : prepared.legal) {
+      poll();
+      m.claim_fifty = s.halfmove_clock() == 99 && !m.pawn_move && !m.capture;
+      if (repeated_target) {
+        // Read-only lookahead. Never insert a hypothetical occurrence into
+        // the actual history or the table's history-interning structure.
+        m.claim_threefold = with_move(core, position, *m.move, [&] {
+          auto next = prepare_node(core, position, &cancellation);
+          return count(next.repetition) >= 2;
+        });
+      }
+    }
+  }
+  std::optional<Line> claim(const PreparedNode &prepared) {
     poll();
-    auto occurrences = count(history.back());
+    const auto &s = *prepared.snapshot;
+    const auto &canonical_moves = prepared.legal;
+    auto occurrences = native_chess_core(core)
+        ? (prepared.claim_now_threefold ? 3U : 0U) : count(history.back());
     std::optional<Line> best;
-    if (occurrences >= 3 || s.halfmove_clock() >= 100)
+    if (occurrences >= 3 || (native_chess_core(core)
+                                 ? prepared.claim_now_fifty
+                                 : s.halfmove_clock() >= 100))
       best = Line{SearchScore::finite(0),
                   {DecisionKind::claim_draw, {}},
                   {},
@@ -319,10 +406,14 @@ struct Traversal {
     else
       for (const auto &m : canonical_moves) {
         poll();
-        bool eligible = child(*m.move, [&] {
-          return count(history.back()) >= 3 ||
-                 core.snapshot(position)->halfmove_clock() >= 100;
-        });
+        // Preserve synthetic-adapter custom clock behavior: only the native
+        // rules adapter derives intended claims from prepared metadata.
+        bool eligible = native_chess_core(core)
+            ? (m.claim_threefold || m.claim_fifty)
+            : child(m, [&](PreparedNode &next) {
+                return count(history.back()) >= 3 ||
+                       next.snapshot->halfmove_clock() >= 100;
+              });
         if (eligible) {
           best = Line{SearchScore::finite(0),
                       {DecisionKind::claim_draw_with_intended_move, m.text},
@@ -337,8 +428,9 @@ struct Traversal {
   // exact=true is used only with an unbounded window. An ordered child can
   // return a bound on equality. Re-search promising/canonically earlier ties
   // with a full window and exact PV before letting them become publishable.
-  Line node(int depth, std::uint64_t ply, std::optional<SearchScore> alpha,
-            std::optional<SearchScore> beta, bool exact = false,
+  Line node(int depth, std::uint64_t ply, PreparedNode &prepared,
+            std::optional<SearchScore> alpha, std::optional<SearchScore> beta,
+            bool exact = false,
             bool root_play_only = false) {
     poll();
     // Outside the previous-PV prefix all descendants retain M3's canonical
@@ -351,7 +443,7 @@ struct Traversal {
     }
     ++stats.visited_nodes;
     const auto original_alpha = alpha, original_beta = beta;
-    auto s = core.snapshot(position);
+    const auto &s = prepared.snapshot;
     auto finish = [&](Line line) {
       if (cache && !root_play_only) {
         poll();
@@ -360,22 +452,22 @@ struct Traversal {
       }
       return line;
     };
-    if (auto end = terminal(ply, *s))
+    auto &moves_here = moves(prepared, false);
+    if (auto end = terminal(ply, prepared))
       return finish(std::move(*end));
-    auto canonical_moves = moves(false);
-    if (canonical_moves.empty())
+    if (moves_here.empty())
       throw std::runtime_error("ongoing node has no legal moves");
-    auto best = root_play_only ? std::optional<Line>{} : claim(*s, canonical_moves);
-    auto moves = std::move(canonical_moves);
-    prefer_previous(moves);
+    if (!root_play_only) annotate_claims(prepared);
+    auto best = root_play_only ? std::optional<Line>{} : claim(prepared);
+    prefer_previous(moves_here);
     if (cache && !root_play_only) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
       auto hit = cache->probe(evaluation_snapshot(*s), history.back(), depth, ply);
       if (!hit.hint.empty()) {
-        auto found = std::find_if(moves.begin(), moves.end(), [&](const auto &m) { return m.text == hit.hint; });
-        if (found != moves.end()) {
-          std::rotate(moves.begin(), found, found + 1);
+        auto found = std::find_if(moves_here.begin(), moves_here.end(), [&](const auto &m) { return m.text == hit.hint; });
+        if (found != moves_here.end()) {
+          std::rotate(moves_here.begin(), found, found + 1);
           ++stats.transposition.hint_hits;
         }
       }
@@ -425,12 +517,12 @@ struct Traversal {
       ++stats.alpha_beta_cutoffs;
       return finish(*best);
     }
-    for (std::size_t i = 0; i < moves.size(); ++i) {
-      const auto &m = moves[i];
+    for (std::size_t i = 0; i < moves_here.size(); ++i) {
+      const auto &m = moves_here[i];
       poll();
       bool direct_exact = exact && (!options.alpha_beta_enabled || (!alpha && !beta));
-      auto line = child(*m.move, [&] {
-        return node(depth - 1, ply + 1, alpha, beta, direct_exact);
+      auto line = child(m, [&](PreparedNode &next) {
+        return node(depth - 1, ply + 1, next, alpha, beta, direct_exact);
       });
       ChessDecision action{DecisionKind::play, m.text};
       auto competitive = [&] {
@@ -439,8 +531,8 @@ struct Traversal {
       };
       if (competitive()) {
         if (exact && !direct_exact)
-          line = child(*m.move, [&] {
-            return node(depth - 1, ply + 1, {}, {}, true);
+          line = child(m, [&](PreparedNode &next) {
+            return node(depth - 1, ply + 1, next, {}, {}, true);
           });
         if (competitive()) {
           line.action = std::move(action);
@@ -448,7 +540,7 @@ struct Traversal {
           best = std::move(line);
         }
       }
-      if (update() && i + 1 < moves.size()) {
+      if (update() && i + 1 < moves_here.size()) {
         ++stats.alpha_beta_cutoffs;
         break;
       }
@@ -473,7 +565,8 @@ SearchResult search(const ChessCore &c, const Position &root,
       throw EvaluationError("evaluator is quarantined");
     auto p = c.clone(root);
     Traversal t{c, *p, e, options, r.statistics, h.occurrences()};
-    auto line = t.node(options.nominal_depth, 0, {}, {});
+    auto prepared = prepare_node(c, *p);
+    auto line = t.node(options.nominal_depth, 0, prepared, {}, {});
     if (t.history != h.occurrences())
       throw std::runtime_error("unbalanced search history");
     r.status = line.action.kind == DecisionKind::terminal
@@ -546,14 +639,15 @@ IterativeSearchResult iterative_search(
                 h.occurrences()};
     // Validation/terminal detection and safe fallback enumeration precede
     // attaching the observer: a cancelled terminal never becomes a fallback.
-    auto snapshot = c.snapshot(*p);
-    if (auto line = t.terminal(0, *snapshot)) {
+    auto root_prepared = prepare_node(c, *p);
+    const auto &snapshot = root_prepared.snapshot;
+    if (auto line = t.terminal(0, root_prepared)) {
       ++r.statistics.visited_nodes;
       r.status = IterativeSearchStatus::terminal;
       r.terminal_decision = line->action;
       r.terminal_score = line->score;
     } else {
-      auto legal = ordered_moves(c, *p);
+      auto &legal = root_prepared.legal;
       if (legal.empty())
         throw std::runtime_error("ongoing root has no legal moves");
       fallback = ChessDecision{DecisionKind::play, legal.front().text};
@@ -577,17 +671,19 @@ IterativeSearchResult iterative_search(
           // Reuse exact traversal/tie refinement, sharing the incumbent window
           // across root candidates. Never probe/store this root: its optional
           // claim policy differs from ordinary (including cached) descendants.
-          ranking.push_back(variation(t.node(depth, 0, {}, {}, true, true)));
+          ranking.push_back(variation(t.node(depth, 0, root_prepared, {}, {}, true, true)));
         } else {
         ++r.statistics.visited_nodes; // legacy independent exact root ranking
-        if (auto claim = t.claim(*snapshot, legal))
+        t.moves(root_prepared, false); // canonical intended claim order
+        t.annotate_claims(root_prepared);
+        if (auto claim = t.claim(root_prepared))
           ranking.push_back(variation(std::move(*claim)));
-        for (const auto &m : t.moves(true)) {
+        for (const auto &m : t.moves(root_prepared, true)) {
           t.poll();
           // Independent full-window search: every candidate is exact. The
           // shared traversal refines internal ordering ties before publishing.
-          auto line = t.child(*m.move, [&] {
-            return t.node(depth - 1, 1, {}, {}, true);
+          auto line = t.child(m, [&](PreparedNode &next) {
+            return t.node(depth - 1, 1, next, {}, {}, true);
           });
           line.action = {DecisionKind::play, m.text};
           line.pv.insert(line.pv.begin(), m.text);
