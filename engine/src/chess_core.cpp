@@ -33,8 +33,16 @@ struct Pos final : Position {
 };
 struct Mv final : Move {
     chess::Move value;
+    // A legal generator-issued certificate is valid only for this position
+    // lifetime and undo-stack frame. A strict undo restores that exact board.
+    std::shared_ptr<const int> owner;
+    std::uint64_t top = 0;
     explicit Mv(chess::Move m) : value(m) {}
+    Mv(chess::Move m, const Pos& p) : value(m), owner(p.identity), top(p.top) {}
 };
+bool certified(const Pos& p, const Mv& m) {
+    return m.owner && m.owner == p.identity && m.top == p.top;
+}
 struct Undo final : UndoToken {
     std::shared_ptr<const int> identity;
     chess::Move move;
@@ -147,12 +155,14 @@ public:
     }
     std::vector<std::unique_ptr<Move>> legal_moves(const Position& position) const override {
         std::vector<std::unique_ptr<Move>> result;
-        for (auto m:moves(cast<Pos>(position))) result.push_back(std::make_unique<Mv>(m));
+        const auto& p=cast<Pos>(position);
+        auto list=moves(p);
+        for (auto m:list) result.push_back(std::make_unique<Mv>(m, p));
         return result;
     }
     std::unique_ptr<UndoToken> make_move(Position& position,const Move& move) const override {
         auto& p=cast<Pos>(position); auto m=cast<Mv>(move).value;
-        require_legal(p,m);
+        if (!certified(p,cast<Mv>(move))) require_legal(p,m);
         bool pawn=p.board.at<chess::PieceType>(m.from())==chess::PieceType::PAWN;
         bool zero=pawn||p.board.isCapture(m);
         bool black=p.board.sideToMove()==chess::Color::BLACK;
@@ -175,8 +185,9 @@ public:
         p.board.unmakeMove(u.move); p.meta=u.meta; p.top=u.parent; u.consumed=true;
     }
     std::string encode_move(const Position& position,const Move& move) const override {
-        const auto& p=cast<Pos>(position); auto m=cast<Mv>(move).value; require_legal(p,m);
-        return chess::uci::moveToUci(m);
+        const auto& p=cast<Pos>(position); const auto& supplied=cast<Mv>(move);
+        if (!certified(p,supplied)) require_legal(p,supplied.value);
+        return chess::uci::moveToUci(supplied.value);
     }
     std::unique_ptr<Move> decode_move(const Position& position,std::string_view coordinate) const override {
         for (auto m:moves(cast<Pos>(position)))
@@ -209,4 +220,7 @@ public:
 };
 }
 std::unique_ptr<ChessCore> create_chess_core() { return std::make_unique<Core>(); }
+// Search-internal adapter dispatch; synthetic ChessCore fixtures retain their
+// existing status and clock-transition semantics.
+bool native_chess_core(const ChessCore& c) noexcept { return dynamic_cast<const Core*>(&c)!=nullptr; }
 }
