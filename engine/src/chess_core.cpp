@@ -30,11 +30,22 @@ struct Pos final : Position {
     // Unique lifetime identity prevents pointer reuse accepting old tokens.
     std::shared_ptr<const int> identity = std::make_shared<const int>(0);
     std::uint64_t serial = 0, top = 0;
+    // Only a count cache: identity/top are restored only by exact LIFO undo.
+    // The native search prepares the legal list before asking for status.
+    mutable std::optional<std::pair<std::uint64_t, std::size_t>> legal_count;
 };
 struct Mv final : Move {
     chess::Move value;
+    // A legal generator-issued certificate is valid only for this position
+    // lifetime and undo-stack frame. A strict undo restores that exact board.
+    std::shared_ptr<const int> owner;
+    std::uint64_t top = 0;
     explicit Mv(chess::Move m) : value(m) {}
+    Mv(chess::Move m, const Pos& p) : value(m), owner(p.identity), top(p.top) {}
 };
+bool certified(const Pos& p, const Mv& m) {
+    return m.owner && m.owner == p.identity && m.top == p.top;
+}
 struct Undo final : UndoToken {
     std::shared_ptr<const int> identity;
     chess::Move move;
@@ -144,15 +155,19 @@ public:
         auto& p=cast<Pos>(position); auto fresh=parse(fen);
         p.board=std::move(fresh->board); p.meta=fresh->meta;
         p.identity=std::move(fresh->identity); p.serial=0; p.top=0;
+        p.legal_count.reset();
     }
     std::vector<std::unique_ptr<Move>> legal_moves(const Position& position) const override {
         std::vector<std::unique_ptr<Move>> result;
-        for (auto m:moves(cast<Pos>(position))) result.push_back(std::make_unique<Mv>(m));
+        const auto& p=cast<Pos>(position);
+        auto list=moves(p);
+        p.legal_count=std::make_pair(p.top, list.size());
+        for (auto m:list) result.push_back(std::make_unique<Mv>(m, p));
         return result;
     }
     std::unique_ptr<UndoToken> make_move(Position& position,const Move& move) const override {
         auto& p=cast<Pos>(position); auto m=cast<Mv>(move).value;
-        require_legal(p,m);
+        if (!certified(p,cast<Mv>(move))) require_legal(p,m);
         bool pawn=p.board.at<chess::PieceType>(m.from())==chess::PieceType::PAWN;
         bool zero=pawn||p.board.isCapture(m);
         bool black=p.board.sideToMove()==chess::Color::BLACK;
@@ -166,17 +181,19 @@ public:
             p.meta.ep=static_cast<std::uint8_t>((m.from().index()+m.to().index())/2);
         p.meta.half=zero?0:p.meta.half+1;
         p.meta.full+=black;
-        p.serial=u->id; p.top=u->id;
+        p.serial=u->id; p.top=u->id; p.legal_count.reset();
         return u;
     }
     void undo_move(Position& position,UndoToken& token) const override {
         auto& p=cast<Pos>(position); auto& u=cast<Undo>(token);
         if (u.consumed || u.identity!=p.identity || p.top!=u.id) invalid();
         p.board.unmakeMove(u.move); p.meta=u.meta; p.top=u.parent; u.consumed=true;
+        p.legal_count.reset();
     }
     std::string encode_move(const Position& position,const Move& move) const override {
-        const auto& p=cast<Pos>(position); auto m=cast<Mv>(move).value; require_legal(p,m);
-        return chess::uci::moveToUci(m);
+        const auto& p=cast<Pos>(position); const auto& supplied=cast<Mv>(move);
+        if (!certified(p,supplied)) require_legal(p,supplied.value);
+        return chess::uci::moveToUci(supplied.value);
     }
     std::unique_ptr<Move> decode_move(const Position& position,std::string_view coordinate) const override {
         for (auto m:moves(cast<Pos>(position)))
@@ -186,7 +203,9 @@ public:
     bool in_check(const Position& p) const override { return cast<Pos>(p).board.inCheck(); }
     PositionStatus status(const Position& position) const override {
         const auto& p=cast<Pos>(position);
-        if (!moves(p).empty()) return PositionStatus::ongoing;
+        if (p.legal_count && p.legal_count->first == p.top) {
+            if (p.legal_count->second) return PositionStatus::ongoing;
+        } else if (!moves(p).empty()) return PositionStatus::ongoing;
         return p.board.inCheck()?PositionStatus::checkmate:PositionStatus::stalemate;
     }
     bool known_dead_position(const Position& p) const override { return cast<Pos>(p).board.isInsufficientMaterial(); }
