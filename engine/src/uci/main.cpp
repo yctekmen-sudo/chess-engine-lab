@@ -48,6 +48,7 @@ class Adapter {
   std::size_t multipv=1;
   bool certified=false;
   std::uint64_t policy=1;
+  std::uint64_t search_sequence=0;
   std::thread worker;
   std::atomic<bool> active=false;
   CancellationSource cancellation;
@@ -117,10 +118,12 @@ class Adapter {
     idle();auto m=mode(v);
     auto p=core->clone(*root);auto h=history;
     if(core->legal_moves(*p).size()+1>256)throw std::runtime_error("root ranking exceeds exact capacity");
+    if(search_sequence==UINT64_MAX)throw std::runtime_error("search sequence exhausted");
+    const auto sequence=++search_sequence;
     cancellation=CancellationSource{};
     if(m.budget && m.budget->count()==0)cancellation.request();
     active=true;
-    worker=std::thread([this,m,p=std::move(p),h=std::move(h)] {
+    worker=std::thread([this,m,sequence,p=std::move(p),h=std::move(h)] {
       bool timer_done=false;std::thread timer;
       if(m.budget)timer=std::thread([&] {
         std::unique_lock lock(signal_mutex);
@@ -130,7 +133,7 @@ class Adapter {
       try {
         bool white=core->snapshot(*p)->side_to_move()==Side::white;
         TranspositionTableUse use{&table,certified?EvaluatorCacheCompatibility::deterministic_position:EvaluatorCacheCompatibility::not_certified,policy};
-        auto r=iterative_search(*core,*p,h,evaluation.active(),{m.depth,true,256,true},cancellation.token(),[&](CompletedDepth d){
+        auto r=iterative_search(*core,*p,h,evaluation.active(),{m.depth,true,multipv==1?1U:256U,true},cancellation.token(),[&](CompletedDepth d){
           std::ostringstream o;
           for(std::size_t i=0;i<std::min(multipv,d.multipv.size());++i) {
             const auto &v=d.multipv[i];
@@ -161,7 +164,15 @@ class Adapter {
           if(play==d.multipv.end())throw std::runtime_error("no evaluated PLAY in complete ranking");
           const auto &tt=r.statistics.transposition;
           o << "info string chesslab metrics evaluator_calls " << r.statistics.evaluator_calls << " tt_lookups " << tt.lookups << " tt_exact_hits " << tt.exact_hits << '\n';
-          if(d.best.decision.kind==DecisionKind::claim_draw)o << "info string chesslab decision claim_draw\n";
+          if(multipv==1) {
+            o << std::setprecision(17) << "info string chesslab final_score v1 search " << sequence << " depth " << d.depth
+              << " status " << (r.status==IterativeSearchStatus::cancelled?"cancelled":"completed")
+              << " bestmove " << play->decision.move << " score ";
+            if(play->score.kind()==SearchScore::Kind::finite)o << "finite " << play->score.value();
+            else o << (play->score.kind()==SearchScore::Kind::white_mate?"white_mate ":"black_mate ") << play->score.distance();
+            o << '\n';
+          }
+          else if(d.best.decision.kind==DecisionKind::claim_draw)o << "info string chesslab decision claim_draw\n";
           else if(d.best.decision.kind==DecisionKind::claim_draw_with_intended_move)o << "info string chesslab decision claim_draw_with_intended_move " << d.best.decision.move << '\n';
           o << "bestmove " << play->decision.move << '\n';
         } else if(r.unevaluated_fallback && r.unevaluated_fallback->kind==DecisionKind::play) {

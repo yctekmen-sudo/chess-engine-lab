@@ -6,14 +6,15 @@ import { StringDecoder } from 'node:string_decoder';
 import { monotonic, type Binding, type MonotonicClock, type Proposal } from './game.js';
 import { DEFAULT_POSITION, type Decision, type RecordState } from './rules.js';
 import { reportedStats, type ProtocolLine, type SearchEvidence } from './diagnostics.js';
+import { parseFinalSearch, arbitrateRootClaim } from './final-score.js';
 export type EngineConfig={path:string;args?:string[];kind?:'uci'|'chesslab';sha256?:string;options?:Record<string,string>;handshakeMs?:number;stopGraceMs?:number};
 export type EngineState='STARTING'|'UCI_HANDSHAKE'|'READY'|'SEARCHING'|'STOPPING'|'FAILED'|'CLOSED';
 export type SearchLimit={kind:'depth';depth:number}|{kind:'movetime';ms:number}|{kind:'clock';wtime:number;btime:number;winc:number;binc:number}|{kind:'infinite'};
 export type Option={type:string;default:string;min?:number;max?:number;choices?:string[]};
 export type EngineIdentity={path:string;sha256:string;args:string[];id:string[];options:Record<string,Option>;effective:Record<string,string>;m2:string[]|'unknown'};
-export type SearchRequest={session:string;binding:Binding;record:RecordState;limit:SearchLimit;stopAfterMs?:number;onProgress?:(p:{session:string;line:string;receivedAt:number;provisional:true})=>void};
+export type SearchRequest={session:string;binding:Binding;record:RecordState;limit:SearchLimit;claimPolicy?:'controller'|'none';stopAfterMs?:number;onProgress?:(p:{session:string;line:string;receivedAt:number;provisional:true})=>void};
 type Waiter={line:string;resolve:()=>void;reject:(e:Error)=>void;timer:NodeJS.Timeout};
-type Active={request:SearchRequest;resolve:(p:Proposal)=>void;reject:(e:Error)=>void;last:string;claims:number;bytes:number;evidence:SearchEvidence;timer?:NodeJS.Timeout;grace?:NodeJS.Timeout};
+type Active={request:SearchRequest;resolve:(p:Proposal)=>void;reject:(e:Error)=>void;last:string;claims:number;finalScores:number;sequence:number;bytes:number;evidence:SearchEvidence;timer?:NodeJS.Timeout;grace?:NodeJS.Timeout};
 export async function executableIdentity(config:EngineConfig):Promise<{path:string;sha256:string}> {
   if(!isAbsolute(config.path)||/[\r\n\0]/.test(config.path))throw Error('executable must be an absolute local path');
   if(config.args?.some(x=>typeof x!=='string'||/[\r\n\0]/.test(x)))throw Error('invalid argv');
@@ -36,6 +37,7 @@ export class ManagedEngine implements EngineTransport {
   get protocolObserverFailures():number {return this.observerFailures;}
   private stdoutEnded=false;private forcedClose=false;
   private protocolSequence=0;private protocolSession:string|undefined;
+  private searchSequence=0;
   private process:ChildProcessWithoutNullStreams|undefined;
   private active:Active|undefined; private waits=new Set<Waiter>(); private failure:Error|undefined;
   private buffer=''; private decoder=new StringDecoder('utf8'); private handshakeBytes=0;
@@ -108,6 +110,18 @@ export class ManagedEngine implements EngineTransport {
       const m=/^bestmove (0000|[a-h][1-8][a-h][1-8][qrbn]?)(?: ponder [a-h][1-8][a-h][1-8][qrbn]?)?$/.exec(line);
       if(!m){this.fail(Error('malformed bestmove'));return;}
       let decision:Decision={kind:'play',move:m[1]!};
+      let finalSearch:Proposal['finalSearch'];
+      if(this.config.kind==='chesslab'&&a.finalScores>0) {
+        try {
+          if(a.finalScores!==1||a.claims!==0)throw Error('conflicting final-score evidence');
+          finalSearch=parseFinalSearch(a.last,m[1]!,a.request.limit.kind==='depth'?a.request.limit.depth:64,a.sequence);
+          if(a.request.limit.kind==='depth') {
+            if(finalSearch.status==='completed'&&finalSearch.depth!==a.request.limit.depth)throw Error('incomplete completed-depth score');
+            if(finalSearch.status==='cancelled'&&!a.evidence.stopRequested)throw Error('unexpected fixed-depth cancellation without controller stop');
+          }
+          if(a.request.claimPolicy!=='none')decision=arbitrateRootClaim(a.request.record,m[1]!,finalSearch);
+        }catch(e){this.fail(Error('final-score contract: '+String(e)));return;}
+      }
       if(this.config.kind==='chesslab'&&a.claims>0) {
         const c=/^info string chesslab decision (claim_draw|claim_draw_with_intended_move ([a-h][1-8][a-h][1-8][qrbn]?))$/.exec(a.last);
         if(a.claims!==1||!c){this.fail(Error('conflicting, nonadjacent or malformed claim extension'));return;}
@@ -116,7 +130,7 @@ export class ManagedEngine implements EngineTransport {
       if(a.timer)clearTimeout(a.timer);if(a.grace)clearTimeout(a.grace);
       this.finishEvidence(a,a.evidence.stopRequested?'interrupted':'completed',at,m[1]!);
       this.active=undefined;this.state='STOPPING';
-      const proposal:Proposal={session:a.request.session,binding:a.request.binding,receivedAt:at,decision,bestmove:m[1]!};
+      const proposal:Proposal={session:a.request.session,binding:a.request.binding,receivedAt:at,decision,bestmove:m[1]!,...(finalSearch?{finalSearch}:{})};
       this.wait('readyok','isready').then(()=>{
         if(this.failure||this.state==='CLOSED'){if(this.lastSearchEvidence)this.lastSearchEvidence.status='failed';a.reject(this.failure??Error('engine disposed'));return;}this.state='READY';this.protocolSession=undefined;a.resolve(proposal);
       },e=>{if(this.lastSearchEvidence)this.lastSearchEvidence.status='failed';a.reject(e);});return;
@@ -124,6 +138,7 @@ export class ManagedEngine implements EngineTransport {
     if(a) {
       a.bytes+=Buffer.byteLength(line);if(a.bytes>8*1024*1024){this.fail(Error('search output limit'));return;}
       if(line.startsWith('info string chesslab decision'))a.claims++;a.last=line;
+      if(line.startsWith('info string chesslab final_score'))a.finalScores++;
       const reported=reportedStats(line,a.evidence.reported);
       if(reported){
         a.evidence.reported=reported;
@@ -191,7 +206,7 @@ export class ManagedEngine implements EngineTransport {
     const position=request.record.complete&&request.record.initialFen===DEFAULT_POSITION?'startpos':'fen '+request.record.initialFen;
     return new Promise((resolve,reject)=>{
       const at=this.clock.now();this.lastSearchEvidence=undefined;this.protocolSession=request.session;
-      const a:Active={request,resolve,reject,last:'',claims:0,bytes:0,evidence:{session:request.session,requested:request.limit,startedAt:at,finishedAt:at,measuredElapsedMs:0,status:'failed',stopRequested:false,reported:{},info:[],infoDropped:0}};this.active=a;this.state='SEARCHING';
+      const a:Active={request,resolve,reject,last:'',claims:0,finalScores:0,sequence:++this.searchSequence,bytes:0,evidence:{session:request.session,requested:request.limit,startedAt:at,finishedAt:at,measuredElapsedMs:0,status:'failed',stopRequested:false,reported:{},info:[],infoDropped:0}};this.active=a;this.state='SEARCHING';
       try {
         this.send('position '+position+(request.record.moves.length?' moves '+request.record.moves.join(' '):''));this.send(go);
         const limit=request.stopAfterMs??(request.limit.kind==='movetime'?request.limit.ms:undefined);

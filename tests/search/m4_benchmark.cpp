@@ -33,13 +33,14 @@ std::uint64_t checksum(const std::vector<CompletedDepth> &events,
 }
 }
 int main(int argc, char **argv) try {
-  if (argc < 2 || argc > 9)
-    throw std::invalid_argument("usage: m4_benchmark MODULE [depth=3] [iterations=3] [warmup=1] [FEN] [replay-comma-moves] [MultiPV=3] [alpha-beta=1]");
+  if (argc < 2 || argc > 10)
+    throw std::invalid_argument("usage: m4_benchmark MODULE [depth=3] [iterations=3] [warmup=1] [FEN] [replay-comma-moves] [MultiPV=3] [alpha-beta=1] [single-PV-play-only=1]");
   const int depth = argc > 2 ? std::stoi(argv[2]) : 3;
   const int iterations = argc > 3 ? std::stoi(argv[3]) : 3;
   const int warmup = argc > 4 ? std::stoi(argv[4]) : 1;
   const size_t n = argc > 7 ? std::stoull(argv[7]) : 3;
   const bool ab = argc > 8 ? std::stoi(argv[8]) != 0 : true;
+  const bool play_only = argc > 9 ? std::stoi(argv[9]) != 0 : true;
   if (iterations < 1 || warmup < 0) throw std::invalid_argument("bad repetition counts");
   const std::string fen = argc > 5 ? argv[5] : "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   const std::string replay = argc > 6 ? argv[6] : "";
@@ -69,7 +70,7 @@ int main(int argc, char **argv) try {
   for (bool order : {false, true})
     for (int i = -warmup; i < iterations; ++i) {
       std::vector<CompletedDepth> events;
-      auto r = iterative_search(*c, *p, h, *e, {depth, ab, n, order}, {},
+      auto r = iterative_search(*c, *p, h, *e, {depth, ab, n, order, play_only}, {},
                                [&](CompletedDepth d) { events.push_back(std::move(d)); });
       if (r.status != IterativeSearchStatus::depth_reached && r.status != IterativeSearchStatus::terminal)
         throw std::runtime_error(r.diagnostic);
@@ -92,7 +93,14 @@ int main(int argc, char **argv) try {
         << " nodes=" << r.statistics.visited_nodes << " evaluations=" << r.statistics.evaluator_calls
         << " cutoffs=" << r.statistics.alpha_beta_cutoffs
         << " ms=" << r.statistics.elapsed.count()/1e6 << " checksum=" << hash;
-      if (r.completed) std::cout << " decision=" << int(r.completed->best.decision.kind) << ':' << r.completed->best.decision.move;
+      if (r.completed) {
+        const auto &v=r.completed->best;
+        std::cout << " decision=" << int(v.decision.kind) << ':' << v.decision.move
+          << " score_kind=" << int(v.score.kind()) << " score_value=";
+        if(v.score.kind()==SearchScore::Kind::finite)std::cout << v.score.value();else std::cout << v.score.distance();
+        std::cout << " pv_end=" << int(v.pv_end) << " pv=";
+        for(const auto &move:v.principal_variation)std::cout << move << ',';
+      }
       std::cout << '\n';
     }
   auto fixed = search(*c, *p, h, *e, {depth, ab});

@@ -338,7 +338,8 @@ struct Traversal {
   // return a bound on equality. Re-search promising/canonically earlier ties
   // with a full window and exact PV before letting them become publishable.
   Line node(int depth, std::uint64_t ply, std::optional<SearchScore> alpha,
-            std::optional<SearchScore> beta, bool exact = false) {
+            std::optional<SearchScore> beta, bool exact = false,
+            bool root_play_only = false) {
     poll();
     // Outside the previous-PV prefix all descendants retain M3's canonical
     // order, so a full-window traversal already supplies its canonical PV.
@@ -352,7 +353,7 @@ struct Traversal {
     const auto original_alpha = alpha, original_beta = beta;
     auto s = core.snapshot(position);
     auto finish = [&](Line line) {
-      if (cache) {
+      if (cache && !root_play_only) {
         poll();
         cache->store(evaluation_snapshot(*s), history.back(), depth, line.score,
           detail::classify_bound(line.score, original_alpha, original_beta), line.action, ply);
@@ -364,10 +365,10 @@ struct Traversal {
     auto canonical_moves = moves(false);
     if (canonical_moves.empty())
       throw std::runtime_error("ongoing node has no legal moves");
-    auto best = claim(*s, canonical_moves);
+    auto best = root_play_only ? std::optional<Line>{} : claim(*s, canonical_moves);
     auto moves = std::move(canonical_moves);
     prefer_previous(moves);
-    if (cache) {
+    if (cache && !root_play_only) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
       auto hit = cache->probe(evaluation_snapshot(*s), history.back(), depth, ply);
@@ -568,11 +569,17 @@ IterativeSearchResult iterative_search(
       };
       for (int depth = 1; depth <= options.max_depth.value_or(64); ++depth) {
         t.poll();
-        ++r.statistics.visited_nodes; // one root node per started iteration
         t.options.nominal_depth = depth;
         t.previous = options.previous_pv_ordering_enabled && r.completed
                          ? &*r.completed : nullptr;
         std::vector<SearchVariation> ranking;
+        if (options.multipv_count == 1 && options.single_pv_play_only) {
+          // Reuse exact traversal/tie refinement, sharing the incumbent window
+          // across root candidates. Never probe/store this root: its optional
+          // claim policy differs from ordinary (including cached) descendants.
+          ranking.push_back(variation(t.node(depth, 0, {}, {}, true, true)));
+        } else {
+        ++r.statistics.visited_nodes; // legacy independent exact root ranking
         if (auto claim = t.claim(*snapshot, legal))
           ranking.push_back(variation(std::move(*claim)));
         for (const auto &m : t.moves(true)) {
@@ -585,6 +592,7 @@ IterativeSearchResult iterative_search(
           line.action = {DecisionKind::play, m.text};
           line.pv.insert(line.pv.begin(), m.text);
           ranking.push_back(variation(std::move(line)));
+        }
         }
         bool white = snapshot->side_to_move() == Side::white;
         std::sort(ranking.begin(), ranking.end(), [&](const auto &a, const auto &b) {

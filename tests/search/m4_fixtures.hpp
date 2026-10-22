@@ -10,6 +10,15 @@
 #include <iostream>
 #include <limits>
 using namespace chess_lab;
+// Keep M4/M5's full historical root-claim/ranking assertions intact. M7.2 tests
+// exercise the new default against these exact references independently.
+inline IterativeSearchResult legacy_iterative_search(
+    const ChessCore &c, const Position &p, const GameHistory &h, Evaluator &e,
+    IterativeSearchOptions options = {}, CancellationToken token = {},
+    SearchProgress progress = {}, TranspositionTableUse use = {}) {
+  options.single_pv_play_only = false;
+  return iterative_search(c, p, h, e, options, token, progress, use);
+}
 void check(bool b, const char *m) {
   if (!b)
     throw std::runtime_error(m);

@@ -874,6 +874,7 @@ export class Workspace extends EventEmitter {
           binding: new Game(record).binding(),
           record,
           limit,
+          claimPolicy: "none",
           ...(limit.kind === "infinite"
             ? {}
             : { stopAfterMs: limit.kind === "movetime" ? limit.ms : 60000 }),

@@ -99,7 +99,7 @@ test('native analysis never plays; trusted claims validated independently',async
  const hash=createHash('sha256').update(await readFile(native)).digest('hex');
  const r=record('7k/8/8/8/8/8/q7/4K3 w - - 100 1');
  const out=await analyze({path:native,kind:'chesslab',sha256:hash},r,{kind:'depth',depth:1});
- assert.equal(out.result.decision.kind,'claim_draw');assert.equal(out.record.moves.length,0);assert.equal(out.identity.effective.MultiPV,'1');
+ assert.equal(out.result.decision.kind,'play');assert.equal(out.result.finalSearch.contract,'chesslab-final-score-v1');assert.equal(out.record.moves.length,0);assert.equal(out.identity.effective.MultiPV,'1');
 });
 test('invalid FENs and counter exhaustion match ChessCore validation boundaries',()=>{
  const invalid=[
