@@ -332,8 +332,16 @@ struct Traversal {
       return std::move(*result);
     });
   }
-  std::optional<Line> terminal(std::uint64_t ply, const PositionSnapshot &s) {
-    auto status = core.status(position);
+  std::optional<Line> terminal(std::uint64_t ply, const PreparedNode &prepared) {
+    const auto &s = *prepared.snapshot;
+    // This adapter's legal list has already established terminal move
+    // availability. Synthetic test adapters retain their independent status.
+    auto status = native_chess_core(core)
+        ? (prepared.legal.empty()
+              ? (core.in_check(position) ? PositionStatus::checkmate
+                                         : PositionStatus::stalemate)
+              : PositionStatus::ongoing)
+        : core.status(position);
     bool white = s.side_to_move() == Side::white;
     auto terminal = [](SearchScore score, TerminalOutcome outcome) {
       return Line{score,
@@ -445,7 +453,7 @@ struct Traversal {
       return line;
     };
     auto &moves_here = moves(prepared, false);
-    if (auto end = terminal(ply, *s))
+    if (auto end = terminal(ply, prepared))
       return finish(std::move(*end));
     if (moves_here.empty())
       throw std::runtime_error("ongoing node has no legal moves");
@@ -633,7 +641,7 @@ IterativeSearchResult iterative_search(
     // attaching the observer: a cancelled terminal never becomes a fallback.
     auto root_prepared = prepare_node(c, *p);
     const auto &snapshot = root_prepared.snapshot;
-    if (auto line = t.terminal(0, *snapshot)) {
+    if (auto line = t.terminal(0, root_prepared)) {
       ++r.statistics.visited_nodes;
       r.status = IterativeSearchStatus::terminal;
       r.terminal_decision = line->action;
