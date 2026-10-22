@@ -199,6 +199,8 @@ struct PreparedNode {
   std::vector<OrderedMove> legal;
   RepetitionSignature repetition;
   bool claims_ready = false;
+  bool claim_now_threefold = false;
+  bool claim_now_fifty = false;
 };
 PreparedNode prepare_node(const ChessCore &c, const Position &p,
                           const CancellationToken *token = nullptr) {
@@ -356,7 +358,9 @@ struct Traversal {
     if (prepared.claims_ready || !native_chess_core(core)) return;
     prepared.claims_ready = true;
     const auto &s = *prepared.snapshot;
-    if (count(history.back()) >= 3 || s.halfmove_clock() >= 100) return;
+    prepared.claim_now_threefold = count(history.back()) >= 3;
+    prepared.claim_now_fifty = s.halfmove_clock() >= 100;
+    if (prepared.claim_now_threefold || prepared.claim_now_fifty) return;
     // For an intended threefold claim, the destination must already occur
     // twice. Avoid all hypothetical child work when this is impossible.
     bool repeated_target = false;
@@ -376,12 +380,16 @@ struct Traversal {
       }
     }
   }
-  std::optional<Line> claim(const PositionSnapshot &s,
-                            const std::vector<OrderedMove> &canonical_moves) {
+  std::optional<Line> claim(const PreparedNode &prepared) {
     poll();
-    auto occurrences = count(history.back());
+    const auto &s = *prepared.snapshot;
+    const auto &canonical_moves = prepared.legal;
+    auto occurrences = native_chess_core(core)
+        ? (prepared.claim_now_threefold ? 3U : 0U) : count(history.back());
     std::optional<Line> best;
-    if (occurrences >= 3 || s.halfmove_clock() >= 100)
+    if (occurrences >= 3 || (native_chess_core(core)
+                                 ? prepared.claim_now_fifty
+                                 : s.halfmove_clock() >= 100))
       best = Line{SearchScore::finite(0),
                   {DecisionKind::claim_draw, {}},
                   {},
@@ -442,7 +450,7 @@ struct Traversal {
     if (moves_here.empty())
       throw std::runtime_error("ongoing node has no legal moves");
     if (!root_play_only) annotate_claims(prepared);
-    auto best = root_play_only ? std::optional<Line>{} : claim(*s, moves_here);
+    auto best = root_play_only ? std::optional<Line>{} : claim(prepared);
     prefer_previous(moves_here);
     if (cache && !root_play_only) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
@@ -660,7 +668,7 @@ IterativeSearchResult iterative_search(
         ++r.statistics.visited_nodes; // legacy independent exact root ranking
         t.moves(root_prepared, false); // canonical intended claim order
         t.annotate_claims(root_prepared);
-        if (auto claim = t.claim(*snapshot, legal))
+        if (auto claim = t.claim(root_prepared))
           ranking.push_back(variation(std::move(*claim)));
         for (const auto &m : t.moves(root_prepared, true)) {
           t.poll();
