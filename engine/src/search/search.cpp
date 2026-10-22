@@ -549,7 +549,8 @@ SearchResult search(const ChessCore &c, const Position &root,
       throw EvaluationError("evaluator is quarantined");
     auto p = c.clone(root);
     Traversal t{c, *p, e, options, r.statistics, h.occurrences()};
-    auto line = t.node(options.nominal_depth, 0, {}, {});
+    auto prepared = prepare_node(c, *p);
+    auto line = t.node(options.nominal_depth, 0, prepared, {}, {});
     if (t.history != h.occurrences())
       throw std::runtime_error("unbalanced search history");
     r.status = line.action.kind == DecisionKind::terminal
