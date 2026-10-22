@@ -20,7 +20,7 @@ export async function analyze(engine:EngineConfig,record:RecordState,limit:Searc
     const identity=await process.start(),session=randomUUID();
     if(options.signal?.aborted)throw cancelled();
     const stopAfterMs=limit.kind==='infinite'?undefined:Math.min(cap,limit.kind==='movetime'?limit.ms:cap);
-    const result=await process.search({session,binding:game.binding(),record,limit,...(stopAfterMs!==undefined?{stopAfterMs}:{}),onProgress:p=>{
+    const result=await process.search({session,binding:game.binding(),record,limit,claimPolicy:'none',...(stopAfterMs!==undefined?{stopAfterMs}:{}),onProgress:p=>{
       progress.push(p);if(progress.length>128)progress.shift();options.onProgress?.(p);
     }});
     if(options.signal?.aborted)throw cancelled();

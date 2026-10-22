@@ -30,16 +30,19 @@ test('transactional bad position/options and semantic go rejection',async t=>{
 test('terminal 0000, mate polarity and bounded zero-time fallback',async t=>{
  const c=client(t);await handshake(c);
  assert.equal(await search(c,'position fen 7k/6Q1/5K2/8/8/8/8/8 b - - 0 1'),'bestmove 0000');assert(c.lines.includes('info score mate -0'));
+ assert(!c.lines.some(s=>s.startsWith('info string chesslab final_score ')));
  const start=c.lines.length;assert.match(await search(c,'position startpos','go movetime 0'),/bestmove [a-h]/);
  assert(c.lines.slice(start).some(s=>s.includes('fallback unevaluated')||s.startsWith('info depth ')));
+ if(c.lines.slice(start).includes('info string chesslab fallback unevaluated'))assert(!c.lines.slice(start).some(s=>s.startsWith('info string chesslab final_score ')));
 });
-test('claim extension immediately adjacent with legal evaluated PLAY at MultiPV=1',async t=>{
+test('single-PV final score is adjacent and recommends PLAY without root claims',async t=>{
  const c=client(t);await handshake(c);
  await search(c,'position fen 7k/8/8/8/8/8/q7/4K3 w - - 100 1');
- let i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));assert.equal(c.lines[i-1],'info string chesslab decision claim_draw');
+ let i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));assert.match(c.lines[i-1],/^info string chesslab final_score v1 search 1 depth 1 status completed bestmove .* score finite -9$/);
  const before=c.lines.length;
  await search(c,'position fen 7k/8/8/8/8/8/q7/4K3 w - - 99 1');
- i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));assert.match(c.lines[i-1],/^info string chesslab decision claim_draw_with_intended_move /);
+ i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));assert.match(c.lines[i-1],/^info string chesslab final_score v1 /);
+ assert(!c.lines.some(s=>s.startsWith('info string chesslab decision ')));
  assert(c.lines.slice(before).filter(s=>s.startsWith('info depth ')).every(s=>s.includes('multipv 1 ')));
 });
 test('evaluator replacement rejects invalid module and preserves healthy selection',async t=>{
@@ -58,6 +61,7 @@ test('infinite retains depth-64 result until stop, including ready responsivenes
 });
 test('intended claim differs from strongest evaluated PLAY fallback',async t=>{
  const c=client(t);await handshake(c);
+ c.send('setoption name MultiPV value 2'); // Preserve the legacy exact-ranking contract.
  const best=await search(c,'position fen 7k/8/8/8/8/8/q7/4Kn2 w - - 99 1');
  const i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));
  assert.equal(c.lines[i-1],'info string chesslab decision claim_draw_with_intended_move e1d1');

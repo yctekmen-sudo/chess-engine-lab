@@ -76,7 +76,7 @@ void generated() {
       for (size_t n : {1, 2, 3, 8}) {
         auto e = evaluator();
         std::vector<CompletedDepth> events;
-        auto r = iterative_search(t, *p, h, *e, {3, ab, n, order}, {}, [&](CompletedDepth s) {
+        auto r = legacy_iterative_search(t, *p, h, *e, {3, ab, n, order}, {}, [&](CompletedDepth s) {
           auto expected = tree_ranking(t, s.depth);
           check(s.multipv.size() == std::min(n, expected.size()), "exact distinct candidate count");
           equal(s.best, expected[0]);
@@ -118,7 +118,7 @@ void tie_trap() {
   for (double hidden : {0.0,4.0}) for (bool order : {false,true}) {
     values[12]=hidden; // a tied bound can hide a worse exact value for Black
     auto e=evaluator();
-    auto r=iterative_search(t,*p,h,*e,{3,true,8,order},{},[&](CompletedDepth d) {
+    auto r=legacy_iterative_search(t,*p,h,*e,{3,true,8,order},{},[&](CompletedDepth d) {
       auto expected=tree_ranking(t,d.depth);
       for(size_t i=0;i<expected.size();++i) equal(d.multipv[i],expected[i]);
     });
@@ -140,7 +140,7 @@ void mate_distances() {
     auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p);
     for(bool ab:{false,true})for(bool order:{false,true}) {
       auto e=evaluator();
-      auto r=iterative_search(t,*p,h,*e,{4,ab,3,order},{},[&](CompletedDepth d){
+      auto r=legacy_iterative_search(t,*p,h,*e,{4,ab,3,order},{},[&](CompletedDepth d){
         auto expected=tree_ranking(t,d.depth);
         for(size_t i=0;i<expected.size();++i)equal(d.multipv[i],expected[i]);
       });
@@ -198,7 +198,7 @@ void real_case(const ChessCore &c,const Position&p,const GameHistory&h,int max=2
   for(bool ab:{false,true}) for(bool order:{false,true}) {
     auto e=evaluator();
     std::vector<CompletedDepth> snapshots;
-    auto r=iterative_search(c,p,h,*e,{max,ab,256,order},{},[&](CompletedDepth d){
+    auto r=legacy_iterative_search(c,p,h,*e,{max,ab,256,order},{},[&](CompletedDepth d){
       auto expected=real_candidates(c,p,h,d.depth);
       check(d.multipv.size()==expected.size(),"all exact real root decisions");
       for(size_t i=0;i<expected.size();++i) {equal(d.multipv[i],expected[i]);verify_pv(c,p,legacy_line(d.multipv[i]));}
@@ -208,7 +208,7 @@ void real_case(const ChessCore &c,const Position&p,const GameHistory&h,int max=2
     for(auto &d:snapshots){auto ref=evaluator();equal(d.best,search(c,p,h,*ref,{d.depth,ab}));}
     // N=1, ordering off, same final and all intermediate depths as M3.
     snapshots.clear();
-    auto one=iterative_search(c,p,h,*e,{max,ab,1,false},{},[&](CompletedDepth d){snapshots.push_back(std::move(d));});
+    auto one=legacy_iterative_search(c,p,h,*e,{max,ab,1,false},{},[&](CompletedDepth d){snapshots.push_back(std::move(d));});
     for(auto &d:snapshots){auto ref=evaluator();equal(d.best,search(c,p,h,*ref,{d.depth,ab}));}
     equal(one.completed->best,legacy_line(r.completed->best));
     check(c.export_fen(p)==fen && h.occurrences()==occurrences,"real immutable root/history");
@@ -236,7 +236,7 @@ void real_rules_m4() {
     if(i==6 || i==7) real_case(*c,*p,h,1);
   }
   auto e=evaluator(); CancellationSource source;source.request();
-  auto five=iterative_search(*c,*p,h,*e,{2,true,3,true},source.token());
+  auto five=legacy_iterative_search(*c,*p,h,*e,{2,true,3,true},source.token());
   check(five.status==IterativeSearchStatus::terminal && five.terminal_decision->terminal_outcome==TerminalOutcome::draw &&
         !five.completed && !five.unevaluated_fallback,"actual fivefold terminal precedes cancellation");
   for(auto fen:{"7k/6Q1/5K2/8/8/8/8/8 b - - 150 1","7K/6q1/5k2/8/8/8/8/8 w - - 150 1",
@@ -244,7 +244,7 @@ void real_rules_m4() {
                "4k3/8/8/8/8/8/8/R3K3 w - - 150 1"}) {
     auto q=c->load_fen(fen);auto hist=GameHistory::starting_at(*c,*q);
     auto ref=real_reference(*c,*q,hist,0);
-    auto r=iterative_search(*c,*q,hist,*e,{},source.token(),[](CompletedDepth){throw std::runtime_error("terminal must not publish");});
+    auto r=legacy_iterative_search(*c,*q,hist,*e,{},source.token(),[](CompletedDepth){throw std::runtime_error("terminal must not publish");});
     check(r.status==IterativeSearchStatus::terminal && r.terminal_decision==ref.action && r.terminal_score==ref.score &&
           !r.completed && !r.unevaluated_fallback,"terminal score/outcome depth zero");
   }
@@ -252,7 +252,7 @@ void real_rules_m4() {
   auto real=c->initial_position();auto hist=GameHistory::starting_at(*c,*real,true);
   auto hypothetical=c->clone(*real);auto next=hist.after_move(*c,*real,"e2e4");
   auto m=c->decode_move(*hypothetical,"e2e4");auto u=c->make_move(*hypothetical,*m);
-  auto r=iterative_search(*c,*hypothetical,next,*e,{1,true,2,true});
+  auto r=legacy_iterative_search(*c,*hypothetical,next,*e,{1,true,2,true});
   check(r.provenance.root.side_to_move==1 && c->snapshot(*real)->side_to_move()==Side::white &&
         next.matches_root(*c,*hypothetical) && hist.matches_root(*c,*real),"hypothetical provenance without turn override");
   std::cout<<"real chess MultiPV, mate/clock precedence, intended/current claims, exact history and hypothetical root passed\n";
@@ -296,21 +296,21 @@ void cancellation_failures() {
   auto e=evaluator();
   CancellationToken expired;
   {CancellationSource source;expired=source.token();source.request();}
-  fallback_check(iterative_search(t,*p,h,*e,{},expired));
+  fallback_check(legacy_iterative_search(t,*p,h,*e,{},expired));
   // Fresh/default tokens do not inherit a previous invocation's cancellation.
-  check(iterative_search(t,*p,h,*e,{1,true,1,true}).status==IterativeSearchStatus::depth_reached,"token isolation");
+  check(legacy_iterative_search(t,*p,h,*e,{1,true,1,true}).status==IterativeSearchStatus::depth_reached,"token isolation");
   CancellationSource probe;
   t.on_make=[&](size_t){probe.request();};
   auto before=calls;
-  fallback_check(iterative_search(t,*p,h,*e,{},probe.token()));
+  fallback_check(legacy_iterative_search(t,*p,h,*e,{},probe.token()));
   check(calls==before && t.balance==0,"cancellation in prospective claim probe restores LIFO");
   t.on_make={};
   CancellationSource recursive;
   eval_hook=[&]{recursive.request();};
-  fallback_check(iterative_search(t,*p,h,*e,{3,true,3,true},recursive.token()));
+  fallback_check(legacy_iterative_search(t,*p,h,*e,{3,true,3,true},recursive.token()));
   check(t.balance==0,"recursive abort restoration");eval_hook={};
   CancellationSource late;std::vector<CompletedDepth> events;
-  auto r=iterative_search(t,*p,h,*e,{3,true,3,true},late.token(),[&](CompletedDepth d){
+  auto r=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},late.token(),[&](CompletedDepth d){
     events.push_back(std::move(d));eval_hook=[&]{late.request();};
   });
   eval_hook={};
@@ -318,29 +318,29 @@ void cancellation_failures() {
         !r.unevaluated_fallback && r.statistics.evaluator_calls>r.completed->statistics.evaluator_calls && t.balance==0,"later partial iteration discarded, cumulative abandoned work");
   equal(events[0].best,legacy_line(r.completed->best));
   CancellationSource callback;
-  r=iterative_search(t,*p,h,*e,{1,true,3,true},callback.token(),[&](CompletedDepth d){
+  r=legacy_iterative_search(t,*p,h,*e,{1,true,3,true},callback.token(),[&](CompletedDepth d){
     d.best.principal_variation.clear();d.multipv.clear();callback.request();
   });
   check(r.status==IterativeSearchStatus::cancelled && r.completed->depth==1 && !r.completed->multipv.empty() &&
         !r.completed->best.principal_variation.empty(),"callback cancel after commit and detached copy");
   // Count a dry depth-one traversal, then signal on the final undo just before
   // publication. This depth must be discarded despite all candidates finishing.
-  t.undos=0;r=iterative_search(t,*p,h,*e,{1,true,3,false});size_t last=t.undos;
+  t.undos=0;r=legacy_iterative_search(t,*p,h,*e,{1,true,3,false});size_t last=t.undos;
   CancellationSource boundary;t.undos=0;t.on_undo=[&](size_t n){if(n==last)boundary.request();};
   int published=0;
-  fallback_check(iterative_search(t,*p,h,*e,{1,true,3,false},boundary.token(),[&](CompletedDepth){++published;}));
+  fallback_check(legacy_iterative_search(t,*p,h,*e,{1,true,3,false},boundary.token(),[&](CompletedDepth){++published;}));
   check(!published && t.balance==0,"precommit cancellation discards entire ranking");t.on_undo={};
   // Late ABI failure invalidates earlier provisional depths and quarantines.
   int progress=0;
-  r=iterative_search(t,*p,h,*e,{3,true,3,true},{},[&](CompletedDepth){++progress;fail_at=calls+1;});
+  r=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},[&](CompletedDepth){++progress;fail_at=calls+1;});
   empty_error(r,IterativeSearchStatus::evaluator_failed);
   check(progress==1 && !e->usable() && t.balance==0,"late failure quarantine and restoration");
   before=calls;
-  empty_error(iterative_search(t,*p,h,*e),IterativeSearchStatus::evaluator_failed);
+  empty_error(legacy_iterative_search(t,*p,h,*e),IterativeSearchStatus::evaluator_failed);
   check(calls==before,"quarantined provider never dispatched again");
   fail_at=0;e=evaluator();
   for(int kind:{0,1,2}) {
-    r=iterative_search(t,*p,h,*e,{3,true,3,true},{},[&](CompletedDepth){
+    r=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},[&](CompletedDepth){
       if(kind==0)throw std::runtime_error("callback failure");
       if(kind==1)throw EvaluationError("callback-owned error, not provider failure");
       throw 5;
@@ -348,17 +348,17 @@ void cancellation_failures() {
     empty_error(r,IterativeSearchStatus::search_error);
     check(e->usable() && t.balance==0,"callback error distinct from evaluator quarantine");
   }
-  r=iterative_search(t,*p,h,*e,{2,true,3,true},{},[&](CompletedDepth){t.throw_at=2;});
+  r=legacy_iterative_search(t,*p,h,*e,{2,true,3,true},{},[&](CompletedDepth){t.throw_at=2;});
   empty_error(r,IterativeSearchStatus::search_error);check(t.balance==0 && e->usable(),"late core traversal failure unwinds");t.throw_at=-1;
-  t.unknown_error=true;empty_error(iterative_search(t,*p,h,*e),IterativeSearchStatus::search_error);t.unknown_error=false;
-  t.broken_undo=true;empty_error(iterative_search(t,*p,h,*e),IterativeSearchStatus::search_error);t.broken_undo=false;
+  t.unknown_error=true;empty_error(legacy_iterative_search(t,*p,h,*e),IterativeSearchStatus::search_error);t.unknown_error=false;
+  t.broken_undo=true;empty_error(legacy_iterative_search(t,*p,h,*e),IterativeSearchStatus::search_error);t.broken_undo=false;
   check(t.id(*p)==0 && h.matches_root(t,*p) && e->usable(),"undo failure discards private clone, preserves caller root/history");
   // Account for the deliberately failed private-clone undo before next tests.
   t.balance=0;
-  for(int d:{0,65,-1})empty_error(iterative_search(t,*p,h,*e,{d,true,1,true}),IterativeSearchStatus::search_error);
-  for(size_t n:std::array<size_t,3>{0,257,size_t(-1)})empty_error(iterative_search(t,*p,h,*e,{1,true,n,true}),IterativeSearchStatus::search_error);
+  for(int d:{0,65,-1})empty_error(legacy_iterative_search(t,*p,h,*e,{d,true,1,true}),IterativeSearchStatus::search_error);
+  for(size_t n:std::array<size_t,3>{0,257,size_t(-1)})empty_error(legacy_iterative_search(t,*p,h,*e,{1,true,n,true}),IterativeSearchStatus::search_error);
   auto other=t.clone(*p);auto m=t.decode_move(*other,"a1a2");auto u=t.make_move(*other,*m);
-  auto mismatch=iterative_search(t,*other,h,*e);empty_error(mismatch,IterativeSearchStatus::search_error);
+  auto mismatch=legacy_iterative_search(t,*other,h,*e);empty_error(mismatch,IterativeSearchStatus::search_error);
   check(mismatch.diagnostic.find("history/root mismatch")!=std::string::npos,"explicit mismatch diagnostic");t.undo_move(*other,*u);
   std::cout<<"deterministic cancellation/progress boundaries, late errors, quarantine, lifetime and cleanup passed\n";
 }
@@ -367,9 +367,9 @@ void limit() {
   for(int i=0;i<66;++i)t.nodes.push_back({i%2?Side::black:Side::white,{std::min(i+1,65)}});
   auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p);auto e=evaluator();
   int count=0;
-  auto r=iterative_search(t,*p,h,*e,{}, {},[&](CompletedDepth d){check(d.depth==++count,"consecutive depth commits to cap");});
+  auto r=legacy_iterative_search(t,*p,h,*e,{}, {},[&](CompletedDepth d){check(d.depth==++count,"consecutive depth commits to cap");});
   check(r.status==IterativeSearchStatus::depth_limit_reached && count==64 && r.completed->depth==64 && t.balance==0,"cheap generated 64-ply safety cap");
-  auto bounded=iterative_search(t,*p,h,*e,{64,true,1,true});
+  auto bounded=legacy_iterative_search(t,*p,h,*e,{64,true,1,true});
   check(bounded.status==IterativeSearchStatus::depth_reached && bounded.completed->depth==64,"explicit depth 64 termination distinct");
 }
 #ifndef __EMSCRIPTEN__
@@ -387,11 +387,11 @@ void native_thread() {
     entered.store(true,std::memory_order_release);
     while(!source.token().requested() && std::chrono::steady_clock::now()<deadline)std::this_thread::yield();
   };
-  auto r=iterative_search(t,*p,h,*e,{3,true,3,true},source.token());
+  auto r=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},source.token());
   canceller.join();eval_hook={};fallback_check(r);
   check(!timed_out && entered && t.balance==0,"real second thread requests cancellation during evaluation");
   const auto caller=std::this_thread::get_id();
-  r=iterative_search(t,*p,h,*e,{1,true,1,true},{},[&](CompletedDepth){check(std::this_thread::get_id()==caller,"callback thread affinity");});
+  r=legacy_iterative_search(t,*p,h,*e,{1,true,1,true},{},[&](CompletedDepth){check(std::this_thread::get_id()==caller,"callback thread affinity");});
   check(r.completed.has_value(),"synchronous callback");
   std::cout<<"native cross-thread atomic cancellation and callback affinity passed\n";
 }

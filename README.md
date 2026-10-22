@@ -14,6 +14,10 @@ M7.1 adds independent engine search limits, optional bounded UCI experiment
 capture and per-move search statistics. See the [configuration example](controller/README.md#m71-independent-experiment-limits-and-diagnostics)
 and [local validation](docs/m7.1-validation.md).
 
+M7.2 optimizes single-PV root search and moves actual-game root draw-claim
+selection to the controller using trusted final scores. See the
+[compatibility and measured results](docs/m7.2-validation.md).
+
 ## Build and test
 
 Prerequisites: C++20 compiler, CMake 3.21+, and Ninja. From the repository root:

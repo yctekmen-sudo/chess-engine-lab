@@ -220,6 +220,13 @@ pinned CI evidence and the initial WASM stack-budget failure/correction.
 
 ## M5 optional transposition tables
 
+M7.2 changes iterative `MultiPV=1` to PLAY-only root selection with shared bounds.
+The appended `IterativeSearchOptions::single_pv_play_only` flag defaults to true;
+false selects the historical exact root-ranking/claim semantics for reference
+callers. MultiPV greater than one and fixed-depth `search()` are unchanged.
+See [M7.2 validation](m7.2-validation.md) for final-score/controller handling,
+TT root-policy separation, tests and reproducible Release measurements.
+
 Existing calls remain TT-free. An owning controller can attach bounded storage
 across sequential searches/games without changing the evaluator ABI:
 

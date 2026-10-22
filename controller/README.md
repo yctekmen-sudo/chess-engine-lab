@@ -227,3 +227,62 @@ Old manifests/results resume and export without fabricated historical statistics
 summary coverage counts distinguish attempts lacking search evidence. Corrupt
 evidence fails integrity checks. Resume still verifies identities/artifacts and
 never rewrites completed attempts, manifests or schedules.
+
+## M7.2 single-PV final scores and controller claims
+
+Chess Lab's default `MultiPV=1` now searches the strongest PLAY at the actual
+root, without competing with an optional root draw claim. Hypothetical descendant
+claims and automatic draws retain their normal search semantics. `MultiPV>1`
+keeps exact legacy root ranking, including legacy claim recommendations.
+
+For single-PV completed depths, the native adapter emits exactly one final envelope
+immediately before the corresponding `bestmove`, in one serialized output block:
+
+```text
+info string chesslab final_score v1 search 1 depth 3 status completed bestmove e2e4 score finite 0
+bestmove e2e4
+```
+
+The `search` counter starts at 1 per process and advances for every accepted `go`,
+including searches with unevaluated fallbacks. `depth` is the last fully completed
+depth (1..64); `status` is `completed` or `cancelled`. Score is `finite VALUE`
+(finite White-perspective evaluator units), `white_mate PLIES` or `black_mate PLIES`
+(positive root-relative mate distance, at most completed depth). This envelope
+does not calibrate raw values to centipawns. Progress `info depth`, `score cp`,
+raw-score diagnostics and MultiPV scores remain provisional.
+
+Only a SHA-verified engine explicitly registered/configured as `kind: "chesslab"`
+grants this contract authority. `ManagedEngine` verifies the active search counter,
+unique adjacent envelope, identical bestmove, depth/status/value constraints and
+existing readiness barrier. A completed fixed-depth envelope must reach the
+requested depth. A cancelled fixed-depth envelope requires a controller stop
+request for that same search; only then may it retain an earlier completed depth.
+An unsolicited fixed-depth cancellation fails the protocol before claim arbitration,
+even if its depth equals the target. Movetime, clock and infinite searches retain
+their existing engine-local cancellation/completion semantics.
+Malformed, duplicate, conflicting, stale or nonadjacent trusted envelopes fail
+the session. Generic engines' extensions remain nonauthoritative. An absent final
+envelope confers no score-based claim authority; older trusted adjacent draw-claim
+extensions retain their original interpretation and independent validation.
+
+In play/experiments, the controller uses `FideRules` and the recorded history:
+when the final PLAY score is unfavorable or exactly zero for the mover, take an
+available claim. Prefer an immediate claim, otherwise the lexicographically first
+eligible UCI intended move. A favorable score plays the engine's selected move.
+`Game.accept()` still independently validates the final session/root binding,
+bestmove legality, claim and monotonic receipt deadline. Claims do not play their
+intended move or earn an increment. No playing-time/stop-grace policy changes.
+
+`Proposal.finalSearch` optionally preserves the structured score, counter, depth,
+status and contract. Library and GUI analysis set `claimPolicy: "none"`, returning
+the strongest PLAY and score without automatic root-claim arbitration or playing
+any move. Other `ManagedEngine.search` calls default to controller arbitration
+when a trusted final envelope is available. Legacy claim extensions remain
+visible in older-engine analysis as before. Terminal roots emit `bestmove 0000`
+without a new envelope; independent terminal validation applies. Cancellation
+before depth one emits an explicitly unevaluated fallback with no final score
+and cannot trigger automatic score-based claims. Cancellation after a committed
+depth can use that final committed score. Later evaluator/search failures emit
+no final score or successful bestmove and invalidate earlier progress.
+
+See [M7.2 validation and benchmarks](../docs/m7.2-validation.md).

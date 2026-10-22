@@ -4,7 +4,9 @@ export const monotonic:MonotonicClock={now:()=>performance.now()};
 export type TimeControl={kind:'untimed'}|{kind:'fischer';initialMs:number;incrementMs:number};
 export type Outcome=ChessOutcome|{kind:'adjudication_required';reason:string;proof:MateProof}|{kind:'technical_forfeit';reason:string;loser:Side}|{kind:'invalid';reason:string;loser?:Side};
 export type Binding={game:string;generation:number;fen:string;history:string;side:Side};
-export type Proposal={session:string;binding:Binding;receivedAt:number;decision:Decision;bestmove:string};
+export type FinalSearchScore={kind:'finite';value:number}|{kind:'white_mate'|'black_mate';distance:number};
+export type FinalSearch={contract:'chesslab-final-score-v1';search:number;depth:number;status:'completed'|'cancelled';score:FinalSearchScore};
+export type Proposal={session:string;binding:Binding;receivedAt:number;decision:Decision;bestmove:string;finalSearch?:FinalSearch};
 export class Game {
   private identity=globalThis.crypto.randomUUID();
   get id(){return this.identity;}

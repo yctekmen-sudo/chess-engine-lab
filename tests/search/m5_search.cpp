@@ -69,13 +69,13 @@ void generated() {
         for(size_t i=0;i<d.multipv.size();++i){equal_line(d.multipv[i],expected[i]);replay_line(t,*p,d.multipv[i]);}
         snapshots.push_back(std::move(d));
       };
-      auto cold=iterative_search(t,*p,h,*e,{3,true,n,order},{},observe,certified(table));
+      auto cold=legacy_iterative_search(t,*p,h,*e,{3,true,n,order},{},observe,certified(table));
       check(cold.status==IterativeSearchStatus::depth_reached && snapshots.size()==3,"cold iterative depths");
-      auto warm=iterative_search(t,*p,h,*e,{3,true,n,order},{},observe,certified(table));equal_result(cold,warm);
+      auto warm=legacy_iterative_search(t,*p,h,*e,{3,true,n,order},{},observe,certified(table));equal_result(cold,warm);
       hits+=warm.statistics.transposition.exact_hits;bounds+=warm.statistics.transposition.bound_hits;closures+=warm.statistics.transposition.bound_cutoffs;
-      auto off=iterative_search(t,*p,h,*e,{3,true,n,order});equal_result(off,warm);
+      auto off=legacy_iterative_search(t,*p,h,*e,{3,true,n,order});equal_result(off,warm);
       auto count=table.entry_count();
-      auto ref=iterative_search(t,*p,h,*e,{3,false,n,order},{},{},certified(table));equal_result(ref,warm);
+      auto ref=legacy_iterative_search(t,*p,h,*e,{3,false,n,order},{},{},certified(table));equal_result(ref,warm);
       check(ref.statistics.transposition.lookups==0 && ref.statistics.transposition.stores==0 && ref.statistics.transposition.hint_hits==0 && table.entry_count()==count,"exhaustive bypasses populated table entirely");
       for(auto&d:snapshots){auto expected=ranking(t,d.depth);for(size_t i=0;i<d.multipv.size();++i)equal_line(d.multipv[i],expected[i]);}
       check(t.balance==0 && t.id(*p)==0 && h.occurrences().size()==1,"TT make/undo/context restoration");
@@ -138,9 +138,9 @@ void mate_races() {
     if(winning)t.nodes={{side,{1,2}},{other,{},PositionStatus::checkmate},{other,{3}},{side,{4}},{other,{},PositionStatus::checkmate}};
     else t.nodes={{side,{1,3}},{other,{2}},{side,{},PositionStatus::checkmate},{other,{4}},{side,{5}},{other,{6}},{side,{},PositionStatus::checkmate}};
     values.assign(t.nodes.size(),0);auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p);auto e=evaluator();
-    TranspositionTable table(256*1024);auto ref=iterative_search(t,*p,h,*e,{4,false,3,false});
+    TranspositionTable table(256*1024);auto ref=legacy_iterative_search(t,*p,h,*e,{4,false,3,false});
     for(bool order:{false,true})for(int pass=0;pass<2;++pass) {
-      auto r=iterative_search(t,*p,h,*e,{4,true,3,order},{},{},certified(table));equal_result(r,ref);
+      auto r=legacy_iterative_search(t,*p,h,*e,{4,true,3,order},{},{},certified(table));equal_result(r,ref);
       check(r.completed->best.decision.move==(winning?"a1a2":"b1a2"),"warm mate race faster win/slower defeat");
     }
   }
@@ -157,9 +157,9 @@ void real_rules() {
     for(double v:{-1e300,-0.0,1e300}) {
       constant=v;auto e=evaluator();TranspositionTable table(1024*1024);
       for(bool order:{false,true}) {
-        auto ref=iterative_search(*c,*p,h,*e,{2,false,256,order});
+        auto ref=legacy_iterative_search(*c,*p,h,*e,{2,false,256,order});
         for(int warm=0;warm<2;++warm) {
-          auto r=iterative_search(*c,*p,h,*e,{2,true,256,order},{},{},certified(table));equal_result(r,ref);
+          auto r=legacy_iterative_search(*c,*p,h,*e,{2,true,256,order},{},{},certified(table));equal_result(r,ref);
           if(r.completed)for(auto&line:r.completed->multipv)replay_line(*c,*p,line);
         }
       }
@@ -170,17 +170,17 @@ void real_rules() {
   for(int i=0;i<16;++i) {
     auto text=cycle[i%4];h=h.after_move(*c,*p,text);auto m=c->decode_move(*p,text);auto u=c->make_move(*p,*m);
     if(i==6 || i==7 || i==15) {
-      auto ref=iterative_search(*c,*p,h,*e,{1,false,256,false});
-      auto r=iterative_search(*c,*p,h,*e,{1,true,256,true},{},{},certified(table));equal_result(r,ref);
+      auto ref=legacy_iterative_search(*c,*p,h,*e,{1,false,256,false});
+      auto r=legacy_iterative_search(*c,*p,h,*e,{1,true,256,true},{},{},certified(table));equal_result(r,ref);
       auto imported=GameHistory::starting_at(*c,*p);
-      r=iterative_search(*c,*p,imported,*e,{1,true,256,true},{},{},certified(table));
-      equal_result(r,iterative_search(*c,*p,imported,*e,{1,false,256,false}));
+      r=legacy_iterative_search(*c,*p,imported,*e,{1,true,256,true},{},{},certified(table));
+      equal_result(r,legacy_iterative_search(*c,*p,imported,*e,{1,false,256,false}));
     }
   }
   // Same board, changed raw EP/fullmove/clock fields are separate evaluator inputs.
   for(auto fen:{"4k3/8/8/3p4/8/8/8/R3K3 w - d6 0 2","4k3/8/8/3p4/8/8/8/R3K3 w - - 0 3","4k3/8/8/3p4/8/8/8/R3K3 w - - 99 3"}) {
     auto q=c->load_fen(fen);auto history=GameHistory::starting_at(*c,*q);
-    equal_result(iterative_search(*c,*q,history,*e,{1,true,3,true},{},{},certified(table)),iterative_search(*c,*q,history,*e,{1,false,3,false}));
+    equal_result(legacy_iterative_search(*c,*q,history,*e,{1,true,3,true},{},{},certified(table)),legacy_iterative_search(*c,*q,history,*e,{1,false,3,false}));
   }
   std::cout<<"genuine chess all-line TT/oracle equivalence, rule/claim/history/evaluator-visible distinctions passed\n";
 }
@@ -192,14 +192,14 @@ void small(Tree&t) {
 }
 void memory_and_lifetime() {
   Tree t;small(t);auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p,true);auto e=evaluator();
-  auto ref=iterative_search(t,*p,h,*e,{3,false,3,false});
+  auto ref=legacy_iterative_search(t,*p,h,*e,{3,false,3,false});
   for(size_t bytes:std::array<size_t,6>{0,1,64,4096,16384,131072}) {
     TranspositionTable table(bytes);check(table.capacity_bytes()<=bytes,"strict total owned allocation cap");
-    auto cold=iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(table));equal_result(cold,ref);
-    auto warm=iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(table));equal_result(warm,ref);
+    auto cold=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(table));equal_result(cold,ref);
+    auto warm=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(table));equal_result(warm,ref);
     if(!table.capacity_bytes())check(!warm.statistics.transposition.lookups && !table.entry_count(),"zero/tiny allocation is disabled");
     table.clear();check(!table.entry_count(),"clear is reusable");table.resize(8192);check(table.capacity_bytes()<=8192,"resize accounting");
-    equal_result(iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(table)),ref);
+    equal_result(legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(table)),ref);
   }
   // Fixed pool pressure: exact evidence exceeds capacity, so only hints are
   // retained. No per-entry history allocation is allowed to escape the budget.
@@ -210,17 +210,17 @@ void memory_and_lifetime() {
    check(!session.probe(snap,sig,1,0).score,"oversized evidence declines numeric storage");}
   check(limited.capacity_bytes()<=16384 && stats.skipped_stores>0,"variable history cannot exceed pool");
   TranspositionTable first(32768),second(32768);TTAccess::force_collisions(first,true);TTAccess::force_collisions(second,true);
-  auto a=iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(first));
-  auto b=iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(second));equal_result(a,b);
+  auto a=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(first));
+  auto b=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(second));equal_result(a,b);
   check(a.statistics.transposition.evictions==b.statistics.transposition.evictions && a.statistics.visited_nodes==b.statistics.visited_nodes &&
         first.entry_count()==second.entry_count() && a.statistics.transposition.evictions>0,"deterministic recency/depth replacement under collisions");
   auto e2=evaluator();bool rejected=false;
-  auto outer=iterative_search(t,*p,h,*e,{1,true,1,true},{},[&](CompletedDepth){
+  auto outer=legacy_iterative_search(t,*p,h,*e,{1,true,1,true},{},[&](CompletedDepth){
     rejects([&]{first.clear();});rejects([&]{first.resize(32768);});
-    auto inner=iterative_search(t,*p,h,*e2,{1,true,1,true},{},{},certified(first));
+    auto inner=legacy_iterative_search(t,*p,h,*e2,{1,true,1,true},{},{},certified(first));
     rejected=inner.status==IterativeSearchStatus::search_error && inner.diagnostic.find("already active")!=std::string::npos;
     // Exhaustive reference still ignores even an actively attached table.
-    auto oracle_result=iterative_search(t,*p,h,*e2,{1,false,1,false},{},{},certified(first));
+    auto oracle_result=legacy_iterative_search(t,*p,h,*e2,{1,false,1,false},{},{},certified(first));
     check(oracle_result.completed && oracle_result.statistics.transposition.lookups==0,"exhaustive bypass includes exclusive guard");
   },certified(first));
   check(rejected && outer.completed && first.entry_count()>0,"second active search rejected without touching owner table");first.clear();
@@ -235,7 +235,7 @@ struct Owner {
   TranspositionTable table{256*1024};bool cleared=false;size_t retained_before_clear=0;
   IterativeSearchResult run(const ChessCore&c,const Position&p,const GameHistory&h,Evaluator&e,
                            IterativeSearchOptions o, CancellationToken token={},SearchProgress callback={}) {
-    auto r=iterative_search(c,p,h,e,o,token,std::move(callback),certified(table));
+    auto r=legacy_iterative_search(c,p,h,e,o,token,std::move(callback),certified(table));
     if(r.status==IterativeSearchStatus::evaluator_failed || r.status==IterativeSearchStatus::search_error) {
       retained_before_clear=table.entry_count();table.clear();cleared=true;
     }
@@ -261,8 +261,8 @@ void cancellation_inside_tt_verification() {
   }
   const auto balance=t.balance;auto e=evaluator();Owner owner;
   owner.table.resize(1024*1024);
-  auto reference=iterative_search(t,*p,h,*e,{2,false,3,false});
-  auto depth_one=iterative_search(t,*p,h,*e,{1,false,3,false});
+  auto reference=legacy_iterative_search(t,*p,h,*e,{2,false,3,false});
+  auto depth_one=legacy_iterative_search(t,*p,h,*e,{1,false,3,false});
   equal_result(owner.run(t,*p,h,*e,{2,true,3,false}),reference);
   const auto retained=owner.table.entry_count();check(retained>0,"prime completed TT entries");
   for (bool after_commit:{false,true}) {
@@ -298,7 +298,7 @@ void cancellation_inside_tt_verification() {
 }
 void cancellation_and_errors() {
   Tree t;small(t);auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p,true);auto e=evaluator();Owner owner,unrelated;
-  auto reference=iterative_search(t,*p,h,*e,{2,false,3,false});
+  auto reference=legacy_iterative_search(t,*p,h,*e,{2,false,3,false});
   check(unrelated.run(t,*p,h,*e,{1,true,3,true}).completed.has_value(),"independent owner primed");auto untouched=unrelated.table.entry_count();
   CancellationSource before;before.request();
   auto r=owner.run(t,*p,h,*e,{2,true,3,true},before.token());
@@ -336,22 +336,22 @@ void ordered_trap_and_certification() {
   auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p);
   for(double hidden:{0.0,4.0}) {
     values[12]=hidden;TranspositionTable table(16384);auto e=evaluator();
-    auto ref=iterative_search(t,*p,h,*e,{3,false,8,false});
-    for(int pass=0;pass<4;++pass)equal_result(iterative_search(t,*p,h,*e,{3,true,8,bool(pass%2)},{},{},certified(table)),ref);
+    auto ref=legacy_iterative_search(t,*p,h,*e,{3,false,8,false});
+    for(int pass=0;pass<4;++pass)equal_result(legacy_iterative_search(t,*p,h,*e,{3,true,8,bool(pass%2)},{},{},certified(table)),ref);
     // Force missing/evicted links and repeated noncanonical hints.
     table.resize(16384);TTAccess::force_collisions(table,true);
-    for(int pass=0;pass<2;++pass)equal_result(iterative_search(t,*p,h,*e,{3,true,8,true},{},{},certified(table)),ref);
+    for(int pass=0;pass<2;++pass)equal_result(legacy_iterative_search(t,*p,h,*e,{3,true,8,true},{},{},certified(table)),ref);
   }
   tree_values=false;Tree simple;small(simple);auto root=simple.initial_position();auto history=GameHistory::starting_at(simple,*root);
   TranspositionTable table(256*1024);auto e=evaluator();
-  auto r=iterative_search(simple,*root,history,*e,{1,true,3,false},{},{},certified(table));check(r.completed.has_value(),"prime numeric entries");
+  auto r=legacy_iterative_search(simple,*root,history,*e,{1,true,3,false},{},{},certified(table));check(r.completed.has_value(),"prime numeric entries");
   constant=9;calls=0;
-  auto not_certified=iterative_search(simple,*root,history,*e,{1,true,3,false},{},{},{&table});
+  auto not_certified=legacy_iterative_search(simple,*root,history,*e,{1,true,3,false},{},{},{&table});
   check(not_certified.statistics.transposition.exact_hits==0 && not_certified.statistics.transposition.bound_hits==0 && calls>0 &&
         not_certified.completed->best.score==SearchScore::finite(9),"certification off forbids stale numeric reads/writes");
   // An incompatible real M2 identity receives no old score, without a clear.
   auto changed=EvaluatorModule::provider(provider,std::string(64,'b'),"search-fixture-other").create("{}");calls=0;
-  auto new_id=iterative_search(simple,*root,history,*changed,{1,true,3,false},{},{},certified(table));
+  auto new_id=legacy_iterative_search(simple,*root,history,*changed,{1,true,3,false},{},{},certified(table));
   check(calls>0 && new_id.completed->best.score==SearchScore::finite(9),"changed evaluator fingerprint cannot inherit numeric score");
   // Inject a position-matched but illegal hint through the private fixture.
   // No numeric assertion is stored or trusted for an uncertified provider.
@@ -360,8 +360,8 @@ void ordered_trap_and_certification() {
   {TTSession session({&table},changed->identity().fingerprint,false,stats,{});session.start(child_history.occurrences());
    session.store(evaluation_snapshot(*simple.snapshot(*child)),repetition_signature(simple,*child),1,
                  SearchScore::finite(0),TTBound::exact,{DecisionKind::play,"h1h8"},0);}
-  auto expected=iterative_search(simple,*root,history,*changed,{2,false,3,false});
-  auto after=iterative_search(simple,*root,history,*changed,{2,true,3,false},{},{},{&table});equal_result(after,expected);
+  auto expected=legacy_iterative_search(simple,*root,history,*changed,{2,false,3,false});
+  auto after=legacy_iterative_search(simple,*root,history,*changed,{2,true,3,false},{},{},{&table});equal_result(after,expected);
   simple.undo_move(*child,*token);
   std::cout<<"ordered tie/bound traps, evicted PV re-search, certification/fingerprint and legal hints passed\n";
 }

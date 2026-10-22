@@ -151,6 +151,10 @@ struct IterativeSearchOptions {
   // Bounded to [1,256]; returned size also cannot exceed legal decisions.
   std::size_t multipv_count = 1;
   bool previous_pv_ordering_enabled = true;
+  // MultiPV=1 searches PLAY only at the actual root, sharing root bounds.
+  // Descendant claims are unchanged. False retains the M4 exact-ranking path
+  // (including root claims), for legacy/reference callers. MultiPV>1 is exact.
+  bool single_pv_play_only = true;
 };
 enum class IterativeSearchStatus {
   depth_reached, cancelled, depth_limit_reached, terminal,

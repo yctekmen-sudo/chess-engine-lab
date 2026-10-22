@@ -1,9 +1,19 @@
 import {createInterface} from 'node:readline';
 import {Chess} from 'chess.js';
 import {existsSync,readFileSync,writeFileSync,appendFileSync} from 'node:fs';
-const mode=process.argv[2]??'normal';let board=new Chess(),busy=false;
+const mode=process.argv[2]??'normal';let board=new Chess(),busy=false,searchSequence=0,requestedDepth=1;
 function out(s){process.stdout.write(s+'\r\n');}
-function best(){busy=false;out('bestmove '+board.moves({verbose:true}).map(m=>m.from+m.to+(m.promotion??'')).sort()[0]);}
+function best(){
+ busy=false;const move=board.moves({verbose:true}).map(m=>m.from+m.to+(m.promotion??'')).sort()[0];
+ if(mode==='final-stop-fallback')out('info string chesslab fallback unevaluated');
+ if(mode.startsWith('final-')&&mode!=='final-missing'&&mode!=='final-stop-fallback'){
+  let line=`info string chesslab final_score v1 search ${mode==='final-stale'?searchSequence+1:searchSequence} depth ${mode==='final-requested-depth'?requestedDepth:1} status ${mode==='final-cancelled'||mode==='final-stop-cancelled'||mode==='final-stop-once'?'cancelled':'completed'} bestmove ${move} score `;
+  line+=mode==='final-white-mate'?'white_mate 1':mode==='final-black-mate'?'black_mate 1':`finite ${mode==='final-positive'?'3':mode==='final-negative'?'-3':mode==='final-malformed'?'NaN':'0'}`;
+  if(mode==='final-mismatch')line=line.replace(`bestmove ${move}`,'bestmove h1h8');
+  out(line);if(mode==='final-duplicate')out(line);if(mode==='final-nonadjacent')out('info depth 1 nodes 1');
+ }
+ out('bestmove '+move);
+}
 createInterface({input:process.stdin}).on('line',line=>{
   if(mode.startsWith('diagnostics')&&process.argv[3])appendFileSync(process.argv[3],line+'\n');
   if(line==='uci') {
@@ -20,7 +30,9 @@ createInterface({input:process.stdin}).on('line',line=>{
     const parts=line.split(' moves '),root=parts[0].slice(9);board=new Chess(root==='startpos'?undefined:root.slice(4));
     for(const m of parts[1]?.split(' ')??[])board.move({from:m.slice(0,2),to:m.slice(2,4),promotion:m[4]});
   }else if(line.startsWith('go ')) {
-    busy=true;
+    busy=true;searchSequence++;
+    requestedDepth=Number(/^go depth (\d+)$/.exec(line)?.[1]??1);
+    if(mode==='final-stop-cancelled'||mode==='final-stop-fallback'||mode==='final-stop-once'&&searchSequence===1){out('info string fixture waiting for stop');return;}
     if(mode.startsWith('diagnostics')) {
       out('info string received '+line);
       if(mode==='diagnostics-missing')out('info depth 3 nodes malformed time -1');
