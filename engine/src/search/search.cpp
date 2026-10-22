@@ -449,9 +449,9 @@ struct Traversal {
       poll();
       auto hit = cache->probe(evaluation_snapshot(*s), history.back(), depth, ply);
       if (!hit.hint.empty()) {
-        auto found = std::find_if(moves.begin(), moves.end(), [&](const auto &m) { return m.text == hit.hint; });
-        if (found != moves.end()) {
-          std::rotate(moves.begin(), found, found + 1);
+        auto found = std::find_if(moves_here.begin(), moves_here.end(), [&](const auto &m) { return m.text == hit.hint; });
+        if (found != moves_here.end()) {
+          std::rotate(moves_here.begin(), found, found + 1);
           ++stats.transposition.hint_hits;
         }
       }
