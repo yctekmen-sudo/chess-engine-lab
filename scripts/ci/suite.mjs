@@ -12,8 +12,17 @@ const sha=s=>createHash('sha256').update(s).digest('hex');
 // reducing a floor requires an explicit source/documentation review.
 export const testBaselines=Object.freeze({
   'controller-test':107,'gui-test':14,'playwright-e2e':5,
-  'windows-desktop-smoke':2,'harness-tests':50,
+  'windows-desktop-smoke':2,'harness-tests':54,
 });
+// Historical workflow definitions are optional evidence, never execution inputs.
+// Only absence is expected; other read failures must still block the worker.
+export function workflowEvidence(repo){
+  return Object.fromEntries(['native','wasm','controller','gui'].map(name=>{
+    const path=`.github/workflows/${name}.yml`;
+    try{return [name,{path,status:'present',sha256:sha(readFileSync(join(repo,path)))}];}
+    catch(error){if(error.code!=='ENOENT')throw error;return [name,{path,status:'absent'}];}
+  }));
+}
 const git=(repo,args)=>{
   const r=spawnSync('git',['-C',repo,...args],{encoding:'utf8',maxBuffer:32*1024*1024,env:{...process.env,GIT_OPTIONAL_LOCKS:'0'}});
   if(r.error||r.status!==0)throw Error(`git ${args.join(' ')}: ${r.error?.message??r.stderr}`);
@@ -105,6 +114,7 @@ function save(path,value){
 function markdown(report){
   return `# Local CI: ${report.platform??'combined'}\n\n- Started: ${report.startedAt}\n- Finished: ${report.finishedAt??'running'}\n- Mode: ${report.mode}\n- Commit: ${report.sourceBefore?.commit??report.commit??'unavailable'}\n- Verdict: **${report.verdict??report.checksVerdict??'running'}**\n- Authoritative full pass: ${report.authoritative===true}\n\n`+
     (report.reason?report.reason+'\n\n':'')+
+    (report.workflows?'Historical workflow evidence:\n\n'+Object.values(report.workflows).map(w=>`- ${w.path}: ${w.status}${w.sha256?' (SHA-256 '+w.sha256+')':''}`).join('\n')+'\n\n':'')+
     '| Step | Status | Seconds | Command / reason |\n| --- | --- | ---: | --- |\n'+
     (report.steps??[]).map(s=>`| ${s.id} | ${s.status} | ${((s.durationMs??0)/1000).toFixed(3)} | ${JSON.stringify(s.command??s.reason??'').replaceAll('|','\\|')} |`).join('\n')+'\n';
 }
@@ -190,7 +200,7 @@ async function run(options){
     if((os==='windows')!==(process.platform==='win32'))throw Error('Worker platform does not match host');
     r.sourceBefore=snapshot(repo);
     r.harness=Object.fromEntries(['run-all.ps1','run-linux.sh','suite.mjs','suite.test.mjs'].map(p=>[p,sha(readFileSync(join(here,p)))]));
-    r.workflows=Object.fromEntries(['native','wasm','controller','gui'].map(p=>[p,sha(readFileSync(join(repo,'.github/workflows',p+'.yml')))]));
+    r.workflows=workflowEvidence(repo);
     const npmVersionCommand=actualCommand(['npm','--version']);
     r.toolchains={node:process.version,git:tool('git'),npm:tool(npmVersionCommand[0],npmVersionCommand.slice(1)),cmake:tool('cmake'),ctest:tool('ctest'),ninja:tool('ninja'),compiler:os==='windows'?tool('cl',['/?']):tool('g++')};
     const steps=plan(os,mode,options.areas.split(',').filter(Boolean));

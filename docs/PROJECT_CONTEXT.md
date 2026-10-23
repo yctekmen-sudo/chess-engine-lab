@@ -1,7 +1,7 @@
 # Chess Engine Lab — Project Context
 
 **Document role:** Long-lived engineering handoff for ChatGPT, Codex, and collaborators.
-**Updated:** 2026-10-22 (America/New_York).
+**Updated:** 2026-10-23 (America/New_York).
 **Repository:** private `yctekmen-sudo/chess-engine-lab` — <https://github.com/yctekmen-sudo/chess-engine-lab>.
 **Authoritative sources:** the current repository code, approved specifications under `docs/`, and merged tests. This file is an orientation guide, not a substitute for the source or the approved specifications. Read the root [`AGENTS.md`](../AGENTS.md), [`README.md`](../README.md), and [`development.md`](development.md) before implementation. See [`CURRENT_STATUS.md`](CURRENT_STATUS.md) for moving milestones, benchmark results, and pending work.
 
@@ -27,7 +27,7 @@ Priorities, in order:
 | Evaluation | Replaceable current-position-only evaluator with versioned read-only C ABI; raw finite White-perspective score, material baseline | `engine/include/chess_lab/evaluation.hpp`, `engine/src/evaluation/`, `docs/evaluation-abi-v1.0.md` |
 | Native protocol/controller | UCI process; Node.js/TypeScript owns authoritative game state, clocks, adjudication, sessions, experiment records | `engine/src/uci/`, `controller/`, `docs/m6-controller-spec-v1.0.md` |
 | Presentation | React/TypeScript user interface, distinct from engine rules and search | `gui/`, `docs/m7-gui-spec-v1.0.md` |
-| Validation and benchmarking | Native/WASM correctness suites, reference searches, automated benchmarks, release/profile/debug presets | `tests/`, `CMakeLists.txt`, `CMakePresets.json`, `.github/workflows/`, `docs/development.md` |
+| Validation and benchmarking | Native/WASM correctness suites, reference searches, automated benchmarks, release/profile/debug presets | `tests/`, `CMakeLists.txt`, `CMakePresets.json`, `scripts/ci/`, `docs/local-ci.md`, `docs/development.md` |
 
 The Node.js 24 controller is authoritative for actual moves, clock rules, and adjudication; the GUI renders that state. Engine output is a validated proposal. Only a **fully completed iterative-deepening depth** supplies authoritative searched rankings; intermediate callbacks remain provisional until the invocation's final status. Terminal roots return at depth zero without an evaluated move ranking. Cancellation may leave a deterministic but *unevaluated* legal fallback before depth 1 completes; later search/evaluator errors invalidate provisional results. Importing the controller library does not start its authenticated loopback server or GUI.
 
@@ -61,8 +61,10 @@ The local acceptance workflow is documented in [local-ci.md](local-ci.md): one
 Windows PowerShell entrypoint coordinates Windows/MSVC and WSL2 Ubuntu suites,
 checking commit/working-tree identity and keeping application Node separate from
 the pinned WASM SDK Node. Quick or dirty/incomplete runs are not authoritative
-milestone passes. This local workflow does not grant permission to disable GitHub
-workflows or change branch protection; such changes require separate approval.
+milestone passes. Local Windows 11 + WSL2 Ubuntu 24.04 CI is the validation process;
+hosted workflow definitions are retired, with their history retained in Git.
+GitHub hosts source control, PRs and reviews. Changing GitHub settings or branch
+protection still requires separate approval.
 
 For every substantive search optimization:
 

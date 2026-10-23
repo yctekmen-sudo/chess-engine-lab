@@ -20,7 +20,7 @@ Read these files first:
 
 **Important:** Do not assume `main` contains the latest work.
 
-If an active feature branch contains work not yet merged into `main`, inspect that branch and its documentation as well. In particular, check `feature/local-ci-infrastructure` until its PR has been merged.
+If an active feature branch contains work not yet merged into `main`, inspect that branch and its documentation as well. The local CI implementation merged in PR #21; check `chore/retire-github-actions` for the subsequent workflow-retirement cleanup until integrated.
 
 Check current Git history, branches, pull requests, and repository documentation before relying on the historical status below.
 
@@ -44,7 +44,7 @@ We deliberately separate architectural reasoning from implementation.
 
 **GitHub:**
 - Hosts our source repository, branches, pull requests, and project history.
-- Is being retained for source control and review while GitHub-hosted CI is being replaced by local testing.
+- Hosts source control and review; validation uses local Windows 11 + WSL2 Ubuntu 24.04 CI.
 
 **Authorization rules:**
 - Do not modify source code unless I request implementation.
@@ -86,7 +86,21 @@ The repository documentation is authoritative for detailed contracts and impleme
 
 ## 5. Current project status — October 23, 2026
 
-The project is migrating away from GitHub-hosted CI to local validation on my Windows 11 computer using WSL2 Ubuntu 24.04.
+PR #21 merged into `main` at `bae9da7914a769bdffcabe31fc78c1f2e63e8af7`.
+Local Windows 11 + WSL2 Ubuntu 24.04 CI is now the validation process. The user
+reports manually disabling all four hosted workflows; the follow-up cleanup
+retires their definitions and removes the harness's unconditional YAML hashing.
+GitHub settings and branch protection are unchanged by this cleanup and have not
+been reverified here. See `docs/CURRENT_STATUS.md` for cleanup validation evidence.
+
+The later authoritative Full run at `6a0b3848f317c8f16b0f5fdee4878aa039d7b304`
+passed 54/54 gates, exit 0, with both checkouts clean and unchanged. Its local-only
+report is `work/ci/20261023T034049466Z-19715372/`. That is prior validation,
+not proof of a Full pass for the uncommitted retirement cleanup.
+
+### Historical validation snapshot — before PR #21 publication and merge
+
+The following approved snapshot records the original local CI validation.
 
 **Local CI implementation:**
 
@@ -130,14 +144,12 @@ Treat all these statements as historical facts tied to the specified date and co
 
 Our current priorities are:
 
-1. Finalize the local CI documentation and handoff prompts.
-2. Review and commit any remaining documentation changes with explicit authorization.
-3. Run authoritative local CI against the final committed revision.
-4. Push the infrastructure branch and create a PR when authorized.
-5. Review and merge the PR when explicitly approved.
-6. Disable GitHub-hosted CI workflows and reconcile GitHub branch protection requirements.
-7. Update the project documentation to reflect the completed migration.
-8. Return to M7.4.
+1. Review the workflow-retirement cleanup and its non-authoritative Quick evidence.
+2. Commit only with separate explicit authorization, then safely align both checkouts to that clean commit.
+3. Run authoritative Full local CI against the final committed revision.
+4. Push, create a PR and merge only with separate authorization for each action.
+5. Review any remaining GitHub branch-protection requirements separately; do not change settings without authorization.
+6. Maintain current status/provenance and return to M7.4 after review.
 
 ## 7. Planned engineering work
 

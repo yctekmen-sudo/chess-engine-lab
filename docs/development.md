@@ -5,8 +5,9 @@
 Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1`
 for the local full matrix. See [local-ci.md](local-ci.md) for prerequisites,
 coverage, quick selections, source-identity checks and timestamped reports.
-The harness does not synchronize checkouts or disable GitHub workflows. Only a
-clean, unchanged same-commit full run can claim authoritative local acceptance;
+The harness does not synchronize checkouts or change GitHub settings. Hosted
+workflow definitions are retired; GitHub hosts source control, PRs and reviews.
+Only a clean, unchanged same-commit full run can claim authoritative local acceptance;
 quick, dirty, blocked and incomplete runs are qualified explicitly.
 
 ## Native prerequisites and commands
@@ -65,8 +66,11 @@ correctness source with Emscripten. CTest runs the generated `m0_smoke.js` and
 Install the pinned SDK outside the checkout (choose a fresh path if it exists):
 
 ```sh
-git clone --depth 1 --branch 4.0.10 https://github.com/emscripten-core/emsdk.git /workspace/emsdk-m0
+git init /workspace/emsdk-m0
 cd /workspace/emsdk-m0
+git remote add origin https://github.com/emscripten-core/emsdk.git
+git fetch --depth 1 origin 62a853cd3b3134398ce85cde8bb5cbb2ef0194cb
+git checkout --detach FETCH_HEAD
 ./emsdk install 4.0.10
 ./emsdk activate 4.0.10
 . ./emsdk_env.sh
@@ -86,41 +90,37 @@ set by SDK activation before configuring; the preset uses its toolchain file.
 The SDK download requires GitHub and `storage.googleapis.com` access. No TLS or
 artifact verification should be disabled to bypass a download failure.
 
-**Local cloud blocker:** the cloud environment returned HTTP 403 for the SDK's
+**Historical M0/M1 cloud blocker:** the cloud environment returned HTTP 403 for the SDK's
 Node archive at `storage.googleapis.com`. The M1 retry on 2026-10-20 returned the same tunnel HTTP 403. No Emscripten compiler was installed,
 and no local WASM compilation or execution passed. The GitHub-hosted workflow
 subsequently passed both tests; see [M1 results](m1-validation.md). Permit that destination in the
 environment network settings and rerun SDK installation/activation and the
-three WASM commands above. A preset alone is not portability evidence.
+three WASM commands above in that environment. This historical blocker does not
+describe the subsequently validated Windows/WSL2 setup. A preset alone is not
+portability evidence.
 
 ## CI and verified scope
 
-`.github/workflows/native.yml` prepares Ubuntu 24.04 build tools and runs the
-native Debug, Release and Profile configure/build/CTest sequences on pushes and
-pull requests. Observed current native and WASM results are linked in
-[M5 validation](m5-validation.md); earlier milestone reports retain their
-historical environments and results.
+Local Full mode runs native Debug/Release/Profile configure/build/CTest on
+Windows 11/MSVC and WSL2 Ubuntu 24.04/GCC, controller and GUI checks on both,
+Windows desktop smoke, Linux Playwright and WASM correctness. The 54-gate mapping,
+reviewed coverage floors and acceptance rules are in [local-ci.md](local-ci.md).
+Executed results are attributed to their exact revisions in
+[CURRENT_STATUS.md](CURRENT_STATUS.md). Older milestone reports retain their
+historical hosted environments and results. macOS, mobile, browser/Worker WASM
+integration and Windows browser gameplay are not local acceptance gates.
 
-Linux native behavior has been exercised locally, and GitHub-hosted Linux
-CI passes the shared golden tests under Node/WebAssembly. Windows, macOS, mobile
-and browser/Worker integration remain unvalidated. M1 includes the rules adapter
-and shared perft/special-move/round-trip tests.
-See [M1 contracts](m1-contracts.md) and [M1 results](m1-validation.md).
+## Local WebAssembly CI
 
-## GitHub-hosted WebAssembly CI
-
-The separate `.github/workflows/wasm.yml` workflow runs on Ubuntu 24.04 for
-pushes and pull requests, alongside the unchanged native workflow. It installs
-emsdk from immutable commit `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb` and
-SDK version `4.0.10` (explicitly selecting its Node 22.16.0 for CTest), then configures/builds the
-existing `wasm-debug` preset and runs all eight M0–M5 suites with verbose CTest.
-Successful logs include all golden perft counts and the M1 correctness result.
-The job summary reports installation, configure, build and test outcomes;
-any failed command fails the job. No tests are skipped or relaxed.
-
-This runner can download the SDK independently of the local cloud environment's
-HTTP policy. CI results, rather than the presence of this workflow, determine
-whether the WASM acceptance gate has passed.
+`scripts/ci/run-linux.sh` checks emsdk immutable commit
+`62a853cd3b3134398ce85cde8bb5cbb2ef0194cb`, Emscripten **4.0.10** and SDK Node
+**22.16.0**. [local-ci.md](local-ci.md) maintains this configuration independently
+of retired hosted workflows. The activated SDK Node is passed by absolute path to
+CMake; application/native UCI tests retain Node 24. Full mode configures/builds
+`wasm-debug` and executes all **11** WASM CTest suites with verbose output.
+Any missing dependency, disabled suite, reduced inventory or failed command
+prevents acceptance. No tests or timeouts are relaxed. SDK downloads may still
+require network access; execution has no dependency on hosted CI.
 
 ### M7.2 test runtime and full WebAssembly matrix
 
@@ -325,9 +325,11 @@ not load the GUI/server. `chess-lab gui DIRECTORY` lazily starts/reconnects the
 loopback server after both packages are built; other CLI commands retain their
 M6 behavior.
 
-CI preserves all native Debug/Release/Profile, Node controller and pinned
+Local CI preserves all native Debug/Release/Profile, Node controller and pinned
 Emscripten gates. The WASM suite now also executes the legacy72/extended80 C and
-C++ calibration checks. `.github/workflows/gui.yml` adds Node 24.10.0, locked
-Vite/React checks, Vitest/RTL and pinned Playwright Chromium against the real
-server/native engine. Actual results and D118–D138 traceability are in
-[M7 validation](m7-validation.md).
+C++ calibration checks. The local runner uses Linux Node 24.10.0 and installed
+Windows Node 24, locked Vite/React checks and Vitest/RTL on both platforms,
+Linux Playwright Chromium against the real server/native engine, and Windows
+desktop smoke. Historical results and D118–D138 traceability remain in
+[M7 validation](m7-validation.md); current local evidence is in
+[CURRENT_STATUS.md](CURRENT_STATUS.md).

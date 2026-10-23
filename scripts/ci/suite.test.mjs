@@ -4,7 +4,8 @@ import {mkdtempSync,writeFileSync,mkdirSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,dirname,resolve,basename} from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {combinedVerdict as decide,execute,identity,plan,snapshot,testEvidence,testBaselines} from './suite.mjs';
+import {combinedVerdict as decide,execute,identity,plan,snapshot,testEvidence,testBaselines,workflowEvidence} from './suite.mjs';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 
 const source={commit:'same',trackedFingerprint:'tracked',untrackedFingerprint:'untracked',dirtyTracked:[],untracked:[],indexFlags:[]};
@@ -60,6 +61,27 @@ for(const [id,floor] of Object.entries(testBaselines))check(`${id} coverage floo
 check('missing application test counts block authoritative acceptance',()=>{const b=report('linux');delete b.steps.find(s=>s.id==='controller-test').testResults;assert.equal(combinedVerdict('full',[report('windows'),b]),'blocked');});
 const temp=mkdtempSync(join(tmpdir(),'chess-lab-ci-'));
 try{
+  const historical=join(temp,'historical workflow evidence');mkdirSync(historical);
+  const names=['native','wasm','controller','gui'];
+  const absentWorkflows=Object.fromEntries(names.map(name=>[name,{path:`.github/workflows/${name}.yml`,status:'absent'}]));
+  check('retired workflow directory absence is explicit and deterministic',()=>{
+    assert.deepEqual(workflowEvidence(historical),absentWorkflows);
+    assert.equal(JSON.stringify(workflowEvidence(historical)),JSON.stringify(absentWorkflows));
+  });
+  const workflows=join(historical,'.github/workflows');mkdirSync(workflows,{recursive:true});
+  const bytes='historical fixture\n';
+  for(const name of names)writeFileSync(join(workflows,name+'.yml'),bytes);
+  check('present historical definitions retain ordered SHA-256 evidence',()=>{
+    const evidence=workflowEvidence(historical);assert.deepEqual(Object.keys(evidence),names);
+    for(const name of names)assert.deepEqual(evidence[name],{path:`.github/workflows/${name}.yml`,status:'present',sha256:createHash('sha256').update(bytes).digest('hex')});
+  });
+  rmSync(join(workflows,'wasm.yml'));
+  check('partial retirement records absence without losing remaining fingerprints',()=>{
+    const evidence=workflowEvidence(historical);assert.deepEqual(evidence.wasm,absentWorkflows.wasm);
+    for(const name of ['native','controller','gui'])assert.equal(evidence[name].status,'present');
+  });
+  mkdirSync(join(workflows,'wasm.yml'));
+  check('unexpected workflow read errors are not treated as retirement',()=>assert.throws(()=>workflowEvidence(historical),error=>error.code!=='ENOENT'));
   const log=join(temp,'failure.log');
   const bad=await execute([process.execPath,'-e','console.error("intentional failure");process.exit(7)'],{cwd:temp,log});
   check('nonzero child exit preserved',()=>assert.equal(bad.code,7));
