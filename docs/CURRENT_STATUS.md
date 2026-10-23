@@ -1,6 +1,10 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-**Verified:** local CI infrastructure prepared and hardened 2026-10-22 from `main` at `bead04a312180d8ce3ba3c48980659da273487c7` (merged PR #20). The hardening rerun passed all 54 command gates, including 50 harness regressions per platform, with both worker exits zero; uncommitted Windows changes make the combined result non-authoritative. UTC report directories below cross into 2026-10-23. Historical profiling evidence remains attributed to its recorded M7.3 revision. This is a dated snapshot, not live data.
+**Verified migration checkpoint (2026-10-23 UTC):** [PR #21](https://github.com/yctekmen-sudo/chess-engine-lab/pull/21) is closed and merged into `main` at `bae9da7914a769bdffcabe31fc78c1f2e63e8af7`, verified through GitHub and fetched `origin/main`. The user reports manually disabling all four hosted workflows. Local Windows 11 + WSL2 Ubuntu 24.04 CI is the validation process; GitHub retains source control, PRs and reviews. The uncommitted `chore/retire-github-actions` cleanup retires the YAML definitions and makes their absence explicit in harness reports. No GitHub settings or branch-protection changes were made or reverified here.
+
+**Prior authoritative validation:** at `6a0b3848f317c8f16b0f5fdee4878aa039d7b304`, all 54 gates passed, exit 0, with both checkouts clean and unchanged. The merge has the same tracked tree as that revision. This is prior evidence, not a new Full pass for the cleanup; see section 4 for provenance and current Quick validation.
+
+**Earlier verification:** local CI infrastructure prepared and hardened 2026-10-22 from `main` at `bead04a312180d8ce3ba3c48980659da273487c7` (merged PR #20). The hardening rerun passed all 54 command gates, including 50 harness regressions per platform, with both worker exits zero; uncommitted Windows changes made that combined result non-authoritative. UTC report directories below cross into 2026-10-23. Historical profiling evidence remains attributed to its recorded M7.3 revision. This is a dated snapshot, not live data.
 
 **Repository:** private [yctekmen-sudo/chess-engine-lab](https://github.com/yctekmen-sudo/chess-engine-lab).
 
@@ -10,7 +14,7 @@
 
 | Item | Verified state |
 | --- | --- |
-| Local baseline `main` / `origin/main` | `bead04a312180d8ce3ba3c48980659da273487c7`, merge of documentation PR #20; Windows and WSL checkouts both verified at this SHA |
+| Cleanup baseline / fetched Windows `origin/main` | `bae9da7914a769bdffcabe31fc78c1f2e63e8af7`, merge of local CI PR #21; both cleanup branches start here. Existing local `main` refs remain at `bead04a312180d8ce3ba3c48980659da273487c7` (PR #20) |
 | M7.2 | Merged; single-PV PLAY-only root search and controller root draw arbitration, including fixed-depth cancellation validation |
 | M7.3 implementation | **Merged into `main`** at `f0a5affee25a333ff23df2343277e052a2c2ae81` |
 | M7.3 PR | [#19: M7.3 (draft): Reuse prepared legal moves and annotate draw claims](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19), **closed and merged**; “draft” remains in its historical title |
@@ -21,7 +25,8 @@
 | Profiling investigation | **Completed and reviewed**; accepted with M7.3 per the user's handoff and PR #19's recorded correctness/performance acceptance notes; raw artifacts remain local |
 | Next milestone | **M7.4 planned investigation**: lazy depth-zero move preparation, reduced move-allocation/encoding overhead, then TT bookkeeping; these are future proposals, not implemented improvements or measured speedups |
 | Documentation handoff | [PR #20](https://github.com/yctekmen-sudo/chess-engine-lab/pull/20), merged into the local baseline above |
-| Active infrastructure task | `feature/local-ci-infrastructure`: Windows/WSL harness implemented; review hardening adds coverage floors, index-flag detection and required worker exits; full matrix revalidated; uncommitted and pending review; GitHub workflows unchanged |
+| Local CI implementation | [PR #21](https://github.com/yctekmen-sudo/chess-engine-lab/pull/21) merged at `bae9da7`; prior authoritative validation at its head `6a0b384` |
+| Active infrastructure cleanup | `chore/retire-github-actions`: retire four hosted definitions, preserve harness fingerprints/acceptance and document completed local validation migration; uncommitted |
 
 The successful PR-head CI results below belong to M7.3 PR #19 at `54ec7d9`; they are not proof of a pass at the merge commit or an updated PR #20 head. Check CI for the actual revision under review.
 
@@ -38,10 +43,14 @@ The push-triggered native workflow [39823909737](https://github.com/yctekmen-sud
 
 ### Protect existing local work
 
-The Windows checkout now uses `feature/local-ci-infrastructure` from `bead04a`;
-the Linux checkout remains at that same commit on `main`. The earlier
-`work/project-handoff/` documentation worktree is retained unchanged. The harness
-does not switch/reset/synchronize any of these checkouts.
+Both checkouts now use `chore/retire-github-actions` from `bae9da7`. Original
+`feature/local-ci-infrastructure` refs remain at `6a0b384`, with no reset or stash.
+The pre-existing Windows status note was explicitly carried across the branch
+switch and preserved separately under `work/ci/retire-actions-20261023T043737044Z/`.
+Linux was clean before switching; the verified merge was fetched from the Windows
+checkout's existing local remote after a stalled Linux HTTPS fetch was terminated.
+The earlier `work/project-handoff/` documentation worktree is retained unchanged.
+The harness itself never switches/resets/synchronizes checkouts.
 
 Earlier handoff notes recorded stash object `3669920a80ede34c7943adfdcfc7c3dcd807b7fe`
 and untracked M7.2 investigation files. At this infrastructure task's start,
@@ -290,6 +299,70 @@ new files as well as tracked changes. Profiling evidence and prior review/log
 artifacts are preserved; production code, existing test commands/assertions,
 timeouts, the bounded WASM matrix and GitHub Actions are unchanged. Nothing has
 been staged, committed, pushed, published as a PR or merged.
+
+### Historical publication checkpoint: 2026-10-23 UTC, before PR #21 merge
+
+At this earlier checkpoint, two commits were pushed to `origin/feature/local-ci-infrastructure`: the hardened
+runner (`2a1949f`) and approved handoff-document update (`6a0b384`). PR #21 is open
+against `main`; it has not been merged and auto-merge was not enabled.
+
+The approved handoff document was preserved. The WSL feature checkout was safely
+fast-forwarded to `6a0b3848f317c8f16b0f5fdee4878aa039d7b304` before the final full
+run. Both checkouts were clean and unchanged at that same SHA. All 54 gates passed
+in 435.208 s; both workers and the overall process exited 0. The combined report
+records `passed` and authoritative `true`. Evidence remains local-only under
+`work/ci/20261023T034049466Z-19715372/` (`report.md`, `report.json`, and full logs).
+
+This post-publication status update remains local and uncommitted; the published
+PR head is still exactly the validated SHA. Hosted workflow outcomes are separate
+from the verified local result. Disabling GitHub Actions, changing protection
+rules, committing this note, or merging requires separate authorization.
+
+### Workflow retirement: 2026-10-23 UTC
+
+PR #21's merge is verified at `bae9da7`. The user reports that all four hosted
+workflows were manually disabled. This cleanup removes the four YAML definitions;
+their historical contents remain in Git, without duplicate archives. GitHub
+settings and branch protection are outside this cleanup's authorization.
+
+The only runtime dependency found was unconditional workflow hashing in
+`scripts/ci/suite.mjs`. Reports now record deterministic ordered path/status
+evidence for all four historical definitions: `absent`, or `present` with SHA-256.
+Unexpected read failures still block validation. Mandatory harness hashes, source
+identity, coverage floors, worker exits and Full/Quick acceptance remain intact.
+Four added regressions cover complete absence, retained hashes/order, partial
+retirement and unexpected read errors; the reviewed harness floor is now 54.
+
+Executed cleanup validation:
+
+```powershell
+node scripts/ci/suite.test.mjs
+node --check scripts/ci/suite.mjs
+node --check scripts/ci/suite.test.mjs
+wsl.exe -d Ubuntu-24.04 --exec bash -n /mnt/c/cursor/chess-engine-lab/scripts/ci/run-linux.sh
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1 -Mode Quick -Areas infrastructure
+git diff --check
+```
+
+Standalone Windows regressions passed **54/54**, exit 0. Both JavaScript syntax
+checks, Bash syntax and PowerShell AST parsing passed, exit 0. Quick infrastructure
+passed **54/54 regressions on each platform**, with worker exits **0 / 0** and
+overall exit **0**, verdict **`quick_pass`**, authoritative **false**. The two
+selected gates passed; the other 52 gates were explicitly `not_selected`.
+Combined worker duration was **5.010 s** (Windows harness 2.451 s, Linux 0.396 s).
+Local-only evidence: `work/ci/20261023T044451237Z-3aa7e217/report.json` and
+`report.md`, plus platform reports and complete harness logs. Both reports record
+all four historical definitions as `absent` and retain four mandatory harness
+hashes. Both HEADs are `bae9da7`; both working trees are dirty, with exactly the
+four YAML deletions in Linux. Linux ran the revised harness through the Windows
+mount; the other Windows documentation edits were not copied into Linux.
+
+No new authoritative Full pass is claimed: the source tree is uncommitted. After
+a separately authorized commit, align both clean checkouts to that exact commit
+before Full-mode acceptance. Production behavior and profiling data are unchanged;
+the profiling section above and sampled report/results/counter hashes were
+verified unchanged. Final whitespace review passed. No commit, push, PR, merge or
+GitHub-settings change was made.
 
 ### M7.4 investigation directions
 

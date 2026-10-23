@@ -24,8 +24,9 @@ check implementation and current contracts before treating a feature as present.
 ## Development workflow
 
 - ChatGPT supports architecture, planning, and design review. Codex in VS Code
-  implements, tests, and prepares changes. GitHub hosts version control, CI,
-  code review, and integration.
+  implements, tests, and prepares changes. GitHub hosts version control, pull
+  requests, code review, and integration. Validation uses local Windows 11 +
+  WSL2 Ubuntu 24.04 CI; see [docs/local-ci.md](docs/local-ci.md).
 - Inspect Git status and existing changes first. Work on feature branches based
   on `main`, not directly on `main`; preserve unrelated and user-authored changes.
 - Commit, push, create a PR, or merge only with explicit user authorization for
@@ -123,9 +124,9 @@ cmake --build --preset wasm-debug
 ctest --preset wasm-debug
 ```
 
-The pinned setup and SDK Node selection are in `.github/workflows/wasm.yml`;
-the WASM harness may use the SDK's Node rather than the Node 24 required by the
-application packages. Shared rules, ABI,
+The pinned SDK revision and SDK Node selection are documented in
+[docs/local-ci.md](docs/local-ci.md) and checked by `scripts/ci/run-linux.sh`.
+WASM uses SDK Node 22.16.0, separate from application Node 24. Shared rules, ABI,
 evaluation, search, and calibration tests run under Node/WASM. Native dynamic
 plugins and UCI subprocess adapters are excluded; this is not browser/Worker or
 mobile integration coverage. Report SDK/network blockers without claiming a pass.
@@ -135,13 +136,14 @@ Local Windows x64 validation of the controller portability changes recorded
 also confirmed launch, registration of `chess_lab_uci.exe`, and gameplay against
 the engine. These results apply to the validated revisions, not the CI smoke job.
 
-GitHub Actions configures Ubuntu native Debug/Release/Profile, controller, WASM,
-and GUI/browser gates. The Windows Server 2022 job builds the controller and GUI,
-runs frontend tests, and checks desktop static assets, executable registration,
-orientation, and launcher IPC using a Node-based UCI fixture. It does not build
-the C++ engine, run the full controller suite, or validate Windows browser gameplay.
-There is no macOS job. Configured CI is not evidence that a particular commit
-passed. Historical platform limitations in validation documents may be outdated.
+Local Full mode runs 54 command gates: native Debug/Release/Profile, controller
+and GUI on Windows and Linux, plus Windows desktop smoke, Linux Playwright and
+pinned WASM correctness. Hosted workflow definitions are retired; Git history
+preserves them. GitHub remains the source-control and review host. There is no
+macOS or Windows browser-gameplay gate. Only a same-commit, clean, unchanged Full
+run with every required gate passing and both worker exits zero is authoritative.
+Quick runs are never milestone acceptance. Historical platform limitations and
+hosted CI results apply to their recorded revisions, not the current checkout.
 
 ## Portability and validation
 

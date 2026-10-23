@@ -1,7 +1,8 @@
 # Local CI on Windows 11 and WSL2 Ubuntu 24.04
 
-`scripts/ci/run-all.ps1` runs the current GitHub test coverage locally without
-editing or disabling `.github/workflows/`. Run it in Windows PowerShell 5.1 from
+`scripts/ci/run-all.ps1` is the validation entrypoint, retaining the former hosted
+test coverage in a 54-command Full matrix. Hosted workflow definitions are retired;
+their historical definitions remain in Git. Run it in Windows PowerShell 5.1 from
 the Windows checkout; PowerShell 7 was not available for local validation.
 MSVC x64 is initialized through the latest
 Visual Studio Build Tools installation (`vswhere` / `Enter-VsDevShell`) when needed.
@@ -17,7 +18,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1
 
 ## Coverage and prerequisites
 
-| Existing GitHub job | Local full-mode coverage |
+| Coverage retained from former hosted jobs | Local full-mode coverage |
 | --- | --- |
 | Native Ubuntu Debug/Release/Profile | Same configure/build/CTest presets, all 12 native suites in every configuration |
 | WASM correctness | Emscripten 4.0.10, SDK Node 22.16.0, configure/build/verbose CTest; all 11 WASM suites including the existing bounded M7.2 matrix |
@@ -32,7 +33,7 @@ complete execution: skips, cancelled/todo tests, missing summaries and omitted
 CTest inventory entries prevent acceptance even if the process exits zero.
 Application coverage also has reviewed minimum counts in `suite.mjs`:
 controller **107** per platform, GUI **14** per platform, Playwright **5**,
-Windows desktop smoke **2**, and harness regressions **50** per platform.
+Windows desktop smoke **2**, and harness regressions **54** per platform.
 Additional tests are allowed. Reductions block acceptance; changing these floors
 requires an explicit source/documentation review. Reports retain both the floors
 and observed counts, and the coordinator rechecks successful worker reports.
@@ -50,6 +51,11 @@ Install these tools explicitly before running the harness:
 - SDK: `~/toolchains/emsdk`, git revision
   `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb`, activated Emscripten **4.0.10** and
   SDK Node **22.16.0**. The harness does not install/activate an SDK or install Node.
+
+This SDK pin is maintained here and enforced in `scripts/ci/run-linux.sh`;
+no workflow YAML is needed to select or verify it. The worker sources
+`emsdk_env.sh`, checks the SDK revision and compiler version, selects the activated
+SDK's absolute Node executable, and verifies Node 22.16.0 before WASM execution.
 
 The Bash worker sources nvm explicitly in noninteractive shells. SDK activation
 is isolated to subprocesses: native/application commands keep Node 24, while
@@ -72,7 +78,7 @@ Unlike GitHub's disposable root-capable runner, local CI does not prompt for sud
 or change OS packages. A missing library/browser causes a recorded failing E2E or
 install step, never a pass. Locked npm installs/browser downloads still require
 network access unless their caches already contain the needed artifacts.
-Linux application Node matches the hosted 24.10.0 pin. Windows accepts installed
+Linux application Node retains the former hosted 24.10.0 pin. Windows accepts installed
 Node 24 and records its exact version (24.22.0 in this validation), so its toolchain
 does not exactly reproduce the hosted Windows Node 24.10.0 environment.
 
@@ -82,8 +88,13 @@ Both checkouts are inspected before any suite runs. Different HEAD SHAs block
 the combined run with exit 2; align the checkouts manually after protecting local
 work. Branch names may differ. The worker reads the harness from the Windows
 checkout's WSL mount while testing sources in the Linux checkout; it never copies
-new/uncommitted scripts or sources into the other repository. Harness and workflow
-SHA-256 values are recorded separately from the tested Git revision.
+new/uncommitted scripts or sources into the other repository. Mandatory harness
+SHA-256 values are recorded separately from the tested Git revision. Historical
+workflow evidence uses the fixed order `native`, `wasm`, `controller`, `gui` in
+each worker's JSON and Markdown reports. Each entry records its path and explicit
+`absent` status, or `present` with SHA-256 if the file exists. Absence is expected
+after retirement and does not affect acceptance; other read errors block the
+worker. Workflow definitions are neither execution inputs nor coverage inventories.
 
 Each platform records staged/unstaged tracked modifications, the Git index,
 all non-ignored untracked paths and working-content fingerprints before/after its
@@ -152,17 +163,20 @@ means blocked/incomplete/non-authoritative full validation. Missing platforms,
 missing gates, unavailable tools, interruption and mismatched sources cannot
 produce a combined authoritative pass. Individual success is not a full-suite pass.
 
-The local harness does not replace GitHub hosting controls, branch protection,
-required remote statuses, action pinning or hosted OS-image evidence. Windows 11
+GitHub continues to host source control, PRs and reviews. The user reported
+manually disabling all four hosted workflows on 2026-10-23; this cleanup removes
+their definitions and does not change GitHub settings or branch protection.
+Protection requirements must be reviewed separately with authorization; their
+current settings are not established by a local pass. Windows 11
 is not Windows Server 2022; WSL2 is not a fresh GitHub VM; cached/incremental builds
 are not clean-runner isolation. There is no macOS or Windows browser-gameplay
-gate. Review workflow changes against this coverage mapping before relying on it.
-GitHub workflows remain enabled until separately authorized changes are made.
+gate. Review infrastructure changes against this retained coverage mapping.
 The sequential local matrix has no GitHub job-level wall-clock ceiling; existing
 CTest and test-runner deadlines remain unchanged. Executed results and local-only
 evidence locations are recorded in [CURRENT_STATUS.md](CURRENT_STATUS.md#4-local-ci-infrastructure-and-m74-next-actions).
 
 Harness regressions run with `node scripts/ci/suite.test.mjs` on both platforms.
 They exercise negative exit codes, missing dependencies/gates/platforms, identity
-mismatch, dirty/changed source detection and quick-mode qualification. No project
+mismatch, dirty/changed source detection, retired workflow absence/fingerprints,
+unexpected workflow read failures and quick-mode qualification. No project
 commit or publication is necessary to inspect local validation evidence.
