@@ -135,7 +135,9 @@ exact decision, score, canonical PV and termination against the exhaustive legac
 reference. The native full matrix retains all three real-board evaluator values,
 30 generated trees and the original ordering/cache/pass Cartesian product.
 
-The bounded matrix performs 242 searches; the full matrix performs 2,208. Neither
+The original bounded/full matrices perform 242 / 2,208 searches. The additional
+fixed M7.4a.1 horizon regressions perform 358 inexpensive searches in either mode,
+bringing the totals to 600 bounded / 2,566 full. Neither
 changes production code or treats timeout as success. Both print flushed start/end
 checkpoints with monotonic elapsed seconds and search counts at group, fixture,
 reference and configuration boundaries. Only successful completion prints an end
