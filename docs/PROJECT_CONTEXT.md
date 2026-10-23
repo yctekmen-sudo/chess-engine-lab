@@ -57,6 +57,13 @@ See the approved [prepared-node design](m7.3-search-node-design.md). Consult `CU
 
 ## 5. Test and benchmark requirements
 
+The local acceptance workflow is documented in [local-ci.md](local-ci.md): one
+Windows PowerShell entrypoint coordinates Windows/MSVC and WSL2 Ubuntu suites,
+checking commit/working-tree identity and keeping application Node separate from
+the pinned WASM SDK Node. Quick or dirty/incomplete runs are not authoritative
+milestone passes. This local workflow does not grant permission to disable GitHub
+workflows or change branch protection; such changes require separate approval.
+
 For every substantive search optimization:
 
 - Run `cmake --preset native-release`, `cmake --build --preset native-release`, `ctest --preset native-release --output-on-failure`, and appropriate Debug/Profile/WASM/GUI/controller CI gates.
