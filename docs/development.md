@@ -1,5 +1,14 @@
 # Development workflow
 
+## Local Windows and WSL2 CI
+
+Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1`
+for the local full matrix. See [local-ci.md](local-ci.md) for prerequisites,
+coverage, quick selections, source-identity checks and timestamped reports.
+The harness does not synchronize checkouts or disable GitHub workflows. Only a
+clean, unchanged same-commit full run can claim authoritative local acceptance;
+quick, dirty, blocked and incomplete runs are qualified explicitly.
+
 ## Native prerequisites and commands
 
 Use a C++20 compiler, CMake **3.21+** (preset schema 3), and Ninja.

@@ -1,0 +1,1 @@
+Generate a comprehensive handoff summary for a new ChatGPT conversation, including all important technical decisions, current progress, unresolved issues, and immediate next steps.

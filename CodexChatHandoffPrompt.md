@@ -1,0 +1,1 @@
+Read AGENTS.md, docs/PROJECT_CONTEXT.md, and docs/CURRENT_STATUS.md. Inspect the current Git state and summarize the project's status before proposing changes.

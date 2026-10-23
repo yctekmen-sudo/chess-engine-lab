@@ -1,6 +1,6 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-**Verified:** M7.3 merge and documentation-branch update checked 2026-10-22, 18:47 UTC (14:47 America/New_York). Profiling evidence was checked at the earlier source revision recorded below and remains unchanged. This is a dated snapshot, not live data.
+**Verified:** local CI infrastructure prepared and hardened 2026-10-22 from `main` at `bead04a312180d8ce3ba3c48980659da273487c7` (merged PR #20). The hardening rerun passed all 54 command gates, including 50 harness regressions per platform, with both worker exits zero; uncommitted Windows changes make the combined result non-authoritative. UTC report directories below cross into 2026-10-23. Historical profiling evidence remains attributed to its recorded M7.3 revision. This is a dated snapshot, not live data.
 
 **Repository:** private [yctekmen-sudo/chess-engine-lab](https://github.com/yctekmen-sudo/chess-engine-lab).
 
@@ -10,17 +10,18 @@
 
 | Item | Verified state |
 | --- | --- |
-| GitHub `main` / fetched `origin/main` | `f0a5affee25a333ff23df2343277e052a2c2ae81`, merge of [PR #19](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19); incorporated into `docs/project-handoff` by a normal merge, without rewriting history |
+| Local baseline `main` / `origin/main` | `bead04a312180d8ce3ba3c48980659da273487c7`, merge of documentation PR #20; Windows and WSL checkouts both verified at this SHA |
 | M7.2 | Merged; single-PV PLAY-only root search and controller root draw arbitration, including fixed-depth cancellation validation |
 | M7.3 implementation | **Merged into `main`** at `f0a5affee25a333ff23df2343277e052a2c2ae81` |
 | M7.3 PR | [#19: M7.3 (draft): Reuse prepared legal moves and annotate draw claims](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19), **closed and merged**; “draft” remains in its historical title |
 | Profiled M7.3 source / merged PR head | `54ec7d93c759e9ac7f6b8115fb5ef1985972863f`; measurements below remain attributed to this revision, not newly measured at the merge commit |
 | PR #19 scope | Six files: `CMakeLists.txt`, `engine/src/chess_core.cpp`, `engine/src/search/search.cpp`, `docs/m7.3-search-node-design.md`, `tests/search/search_performance.cpp`, `tests/search/run_performance.mjs` |
 | M7.3 PR-head CI | Native Debug/Release/Profile, WebAssembly correctness, M6 controller, and M7 GUI including Windows smoke: completed successfully; links below |
-| Local M7.3 validation | Existing profiling-handoff log records native Release CTest **12/12 passed**, 0 failed, 4.68 s; this documentation task checked the log and did not rerun the suites |
+| Local M7.3 validation | Historical profiling-handoff log records native Release CTest **12/12 passed**, 0 failed, 4.68 s; newly executed local CI results are recorded in section 4 |
 | Profiling investigation | **Completed and reviewed**; accepted with M7.3 per the user's handoff and PR #19's recorded correctness/performance acceptance notes; raw artifacts remain local |
 | Next milestone | **M7.4 planned investigation**: lazy depth-zero move preparation, reduced move-allocation/encoding overhead, then TT bookkeeping; these are future proposals, not implemented improvements or measured speedups |
-| Documentation handoff | [PR #20](https://github.com/yctekmen-sudo/chess-engine-lab/pull/20), open and **draft**, branch `docs/project-handoff` targeting `main`; **not merged** |
+| Documentation handoff | [PR #20](https://github.com/yctekmen-sudo/chess-engine-lab/pull/20), merged into the local baseline above |
+| Active infrastructure task | `feature/local-ci-infrastructure`: Windows/WSL harness implemented; review hardening adds coverage floors, index-flag detection and required worker exits; full matrix revalidated; uncommitted and pending review; GitHub workflows unchanged |
 
 The successful PR-head CI results below belong to M7.3 PR #19 at `54ec7d9`; they are not proof of a pass at the merge commit or an updated PR #20 head. Check CI for the actual revision under review.
 
@@ -37,11 +38,20 @@ The push-triggered native workflow [39823909737](https://github.com/yctekmen-sud
 
 ### Protect existing local work
 
-The original implementation checkout remains on the historical M7.3 branch at `54ec7d9`; its local `main` bookmark has not been advanced by this documentation task. The separate `docs/project-handoff` worktree at `work/project-handoff/` now incorporates `origin/main` at `f0a5aff` through a normal merge. Inherited M7.3 production files match `main`; the PR diff contains documentation only. Do not switch or reset the original checkout to update this PR.
+The Windows checkout now uses `feature/local-ci-infrastructure` from `bead04a`;
+the Linux checkout remains at that same commit on `main`. The earlier
+`work/project-handoff/` documentation worktree is retained unchanged. The harness
+does not switch/reset/synchronize any of these checkouts.
 
-At inspection, one stash existed: `stash@{0}`, object `3669920a80ede34c7943adfdcfc7c3dcd807b7fe`, message `On investigation/m7.2-search-performance: Local M7.3 work before branch switch`. Nine other untracked M7.2 investigation files remain under `docs/search-performance-*` and `tests/search/` (the old performance harness, counters, preparation/report scripts and Windows sampler). The two supplied handoff documents were also untracked. Do not infer that any of these files were committed or that the stash should be applied/dropped.
+Earlier handoff notes recorded stash object `3669920a80ede34c7943adfdcfc7c3dcd807b7fe`
+and untracked M7.2 investigation files. At this infrastructure task's start,
+`git status` was clean and `git stash list` was empty. Those old inventories are
+historical; inspect actual status before attempting any restoration. No stash or
+existing profiling artifact was modified by this task.
 
-All 178 pre-existing tracked/untracked files outside the two handoff documents, and all 257 files under `work/m7.3/profiling/`, were hashed before documentation edits. Preserve their content, the stash and the implementation checkout. Inspect current status again before starting work; this inventory is a snapshot.
+The earlier documentation handoff verified 178 unrelated files and 257 profiling
+artifacts unchanged. Preserve existing evidence; those historical checks do not
+replace current source snapshots in each new local CI report.
 
 ## 2. What merged M7.3 implements
 
@@ -132,7 +142,156 @@ Notable self-sample groups (off/cold): heap allocation/free exports **21.8% / 18
 
 The historical M7.2 `Traversal::claim` share of about 84.7% was **inclusive**, overlapping and measured before M7.3. It is not a present-day hotspot share.
 
-## 4. M7.4 direction and next actions
+## 4. Local CI infrastructure and M7.4 next actions
+
+The current authorized implementation task is local CI infrastructure, not search
+optimization. See [local-ci.md](local-ci.md) for the new entrypoint, coverage map,
+source-identity rules and reports. Initial inspection found Windows and WSL clean
+at the same baseline SHA. Subsequent uncommitted infrastructure/documentation work
+must be disclosed in validation; it cannot produce a clean-commit acceptance pass.
+The existing M7.3 profiling artifacts and measurements remain unchanged.
+
+The following initial implementation results precede the review hardening below.
+They remain historical evidence, including the then-current 31 harness checks.
+Executed on Windows 11 x64 / PowerShell 5.1 / MSVC 19.44.35229 / Node 24.22.0 /
+CMake 4.4.4 / Ninja 1.13.2, and WSL2 Ubuntu 24.04 / GCC 13.3.0 / Node 24.10.0 /
+CMake 3.28.3 / Ninja 1.11.1. WASM used pinned emsdk 4.0.10 and SDK Node 22.16.0.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1 -Mode Full
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1 -Mode Quick -Areas infrastructure
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1 -Mode Quick -Areas wasm
+```
+
+| Executed check | Windows | WSL Ubuntu |
+| --- | --- | --- |
+| Native Debug CTest | 12/12, 92.413 s | 12/12, 35.692 s |
+| Native Release CTest | 12/12, 4.610 s | 12/12, 2.765 s |
+| Native Profile CTest | 12/12, 4.868 s | 12/12, 2.944 s |
+| Controller locked install/build/typecheck/lint/test | Passed; 107/107 tests | Passed; 107/107 tests |
+| GUI locked install/typecheck/lint/build/test | Passed; 14/14 tests | Passed; 14/14 tests |
+| Desktop static-assets/registration/orientation/IPC smoke | 2/2 | Not a Linux gate |
+| Playwright Chromium installation / E2E | Not a Windows gate | Passed; 5/5 E2E tests |
+| WASM configure/build/CTest | Not a Windows gate | 11/11, 52.700 s |
+| Harness regression checks | 31/31 | 31/31 |
+
+Full evidence: ignored, local-only
+`work/ci/20261022T211452435Z-61e84ee1/report.json` and `report.md`, with every
+command, tool version, duration, test count and full step log. **54/54 gates
+passed**, zero failed/blocked/skipped; recorded combined elapsed time **433.424 s**.
+Both checkouts retained the same SHA and unchanged working contents/index during
+the run. Windows was dirty; Linux was clean. The honest combined verdict was
+**`non_authoritative`, exit 2**, not a clean-commit acceptance pass.
+
+Subsequent reporting/source-fingerprint refinements (MSVC's stderr banner,
+BOM-free missing-Node reports with the SHA, and dangling-link handling) were
+revalidated with infrastructure quick mode on both platforms, **31/31 each**;
+evidence: `work/ci/20261022T212256800Z-fbe0d11f/`. The full command matrix and
+production sources were unchanged. The isolated WASM quick run also passed
+11/11 in 53.529 s (`work/ci/20261022T211243420Z-3882a169/`). Quick results never
+constitute milestone acceptance.
+
+`node --check scripts/ci/suite.mjs`, PowerShell AST parsing, and
+`wsl.exe -d Ubuntu-24.04 --exec bash -n /mnt/c/cursor/chess-engine-lab/scripts/ci/run-linux.sh`
+passed. An additional Linux Node 24 fixture check
+(`work/ci/verify-symlink.mjs`) confirmed that changing a dangling symlink invalidates
+the source fingerprint. Final diff/whitespace review includes all six new files
+as well as the three modified documentation files.
+
+Intentional negative runs returned blocked exit 2 for missing Linux Node
+(`-LinuxNodeVersion 99.0.0`, `work/ci/20261022T211437425Z-1a37bea8/`), missing SDK
+(`-Mode Quick -Areas wasm -EmsdkRoot /nonexistent/chess-lab-ci-sdk`,
+`work/ci/20261022T211040003Z-0529c5ed/`), and Windows Node removed from the child
+process PATH (`work/ci/20261022T212352343Z-6e8b63e4/`); no tools were uninstalled.
+Harness regressions also cover different commits, index/working-tree mutations,
+missing gates/platforms, skipped tests and nonzero process exits.
+
+Earlier attempts are retained: `20261022T210118532Z-63d5e424` found an inventory
+parser bug caused by SDK stderr; `20261022T211117607Z-fafedd12` was deliberately
+interrupted to correct Windows CTest summary parsing. Neither is reported as a
+pass. Both bugs were fixed before the completed full run above. No engine/test
+assertions, existing timeouts or bounded WASM selections were changed.
+
+The checkouts were not synchronized, pulled or reset. Three user-authored,
+untracked handoff-prompt files remain outside this change. Existing profiling
+artifacts, stashes and the separate documentation worktree were preserved.
+There is no environmental blocker in the completed local matrix. It used
+installed OS libraries and existing build/browser caches; this does not establish
+fresh-machine provisioning, hosted Windows Server 2022, macOS or remote required
+statuses. GitHub workflows and protection rules remain unchanged. Review and
+separate publication authorization are still required.
+
+### Local CI review hardening: completed 2026-10-22
+
+Three findings were corrected in `scripts/ci/suite.mjs`, `suite.test.mjs` and
+`run-all.ps1`; guidance is updated in `local-ci.md` and this status file.
+
+- Reviewed minimum counts are controller 107 and GUI 14 per platform,
+  Playwright 5, Windows smoke 2, and harness 50 per platform (31 existing plus
+  19 new regression cases). Additions remain allowed. Both summary parsing and
+  combined acceptance reject reduced/missing coverage; reports include the floors.
+- Snapshots record `assume-unchanged` and `skip-worktree` flags. Any flagged path
+  prevents authoritative full acceptance, even if unchanged. Content and flag
+  changes remain detectable during validation. Snapshot Git reads disable optional
+  index writes; temporary-repository regressions verified index bytes unchanged
+  on Windows and Linux, including modified files concealed from Git diff.
+- The coordinator persists `worker-exits.json` immediately after each worker.
+  Both exits must be zero for acceptance, independent of successful report files.
+  Missing/malformed exits block acceptance. Abnormal exits fail; an exit-2 worker
+  with an explicitly blocked report retains blocked semantics.
+
+Executed commands:
+
+```powershell
+node scripts/ci/suite.test.mjs
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1 -Mode Quick -Areas infrastructure
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1 -Mode Full
+```
+
+The full rerun used the same Windows/WSL toolchains and same unchanged baseline
+SHA as above. All **54/54 command gates passed**, zero failed/blocked/skipped,
+with worker exits **Windows 0 / WSL 0**. Recorded combined duration: **443.871 s**.
+
+| Test coverage | Windows | WSL Ubuntu |
+| --- | --- | --- |
+| Native Debug/Release/Profile | 12/12 each; 92.599 / 4.768 / 4.979 s | 12/12 each; 36.016 / 2.878 / 3.066 s |
+| Controller build/typecheck/lint/test | Passed; 107/107 | Passed; 107/107 |
+| GUI typecheck/lint/build/test | Passed; 14/14 | Passed; 14/14 |
+| Desktop smoke | 2/2 | Not a Linux gate |
+| Chromium E2E | Not a Windows gate | 5/5 |
+| WASM configure/build/CTest | Not a Windows gate | 11/11; 52.625 s |
+| Harness regressions | 50/50 | 50/50 |
+
+Ignored, local-only evidence:
+
+- Full rerun: `work/ci/20261023T025538833Z-1f33b1b7/report.json` / `report.md`.
+  This includes required coverage floors, observed counts, both zero worker exits,
+  source/index/flag snapshots, tool versions and complete command logs.
+- Quick infrastructure: `work/ci/20261023T025436275Z-9e4e27e6/`, exit 0,
+  `quick_pass`, with 50/50 regressions per platform.
+- Negative coordinator fixtures:
+  `work/ci/hardening-20261022/worker-exit-negatives/{windows,linux}/`.
+  The actual PowerShell invocation/persistence helpers ran a controlled Windows
+  Node worker and a WSL Node worker. Each wrote a synthetic successful report,
+  then exited **7**; the helpers captured **7**, and the actual combiner returned
+  **failed, exit 1, authoritative=false**. Reproduction scripts are retained in
+  that ignored hardening directory. These are deliberate negative fixtures, not
+  failed application tests or real clean-commit passes.
+
+The full combined verdict is **non_authoritative, exit 2** because Windows remains
+dirty/untracked; Linux is clean. Both source snapshots stayed unchanged during
+the run, neither had special index flags, and no checkouts were synchronized.
+Authoritative end-to-end acceptance still requires clean checkouts at the same
+commit. The conservative flag policy also excludes unchanged flagged/sparse
+checkouts. There were no environmental blockers in this rerun.
+
+Node syntax and PowerShell AST parsing passed. Final whitespace/diff review covers
+new files as well as tracked changes. Profiling evidence and prior review/log
+artifacts are preserved; production code, existing test commands/assertions,
+timeouts, the bounded WASM matrix and GitHub Actions are unchanged. Nothing has
+been staged, committed, pushed, published as a PR or merged.
+
+### M7.4 investigation directions
 
 M7.3's architectural optimization and completed profiling investigation have been reviewed and accepted, followed by PR #19's merge. M7.4 is the next investigation direction; its concrete implementation design, correctness proof and expected benefit still require review. No M7.4 code or new speedup is established by this documentation update.
 
@@ -140,7 +299,7 @@ M7.3's architectural optimization and completed profiling investigation have bee
 2. **Investigate reduced move-allocation and encoding overhead.** Assess compact internal move/fact/text representation, appropriate vector reservation and avoiding repeated coordinate conversion. Preserve adapter/public interfaces, certificates and make/undo restoration. The measured allocation/encoding/sorting costs identify an opportunity, not a validated replacement design.
 3. **Subsequently investigate TT bookkeeping.** After measuring the earlier changes independently, review repeated signature hashing, occurrence counts, persistent-history operations and ABI conversions. Retain bounded storage, exact collision/history verification, evaluator/depth/policy isolation and cancellation behavior; do not attribute the whole cold-TT penalty to the small exact-verification path.
 4. If raw evidence is needed outside this machine, explicitly arrange a separate handoff or authorize publication. Do not commit ignored profiling artifacts or the existing untracked M7.2 work as part of documentation maintenance.
-5. Agree the M7.4 design and scoped implementation request with ChatGPT before coding. Review exact-score/PV, claim/terminal, EP, clock 99/100, synthetic-adapter, certificate lifetime, cancellation/error and TT-history regression gates. Preserve the M7.3 evidence and benchmark each proposed change against the same uninstrumented baseline. PR #20 remains draft and unmerged; merging it requires separate explicit approval.
+5. Agree the M7.4 design and scoped implementation request with ChatGPT before coding. Review exact-score/PV, claim/terminal, EP, clock 99/100, synthetic-adapter, certificate lifetime, cancellation/error and TT-history regression gates. Preserve the M7.3 evidence and benchmark each proposed change against the same uninstrumented baseline. Local CI implementation is separate; do not commit, push, create a PR, disable GitHub workflows or change protection rules without separate authorization.
 
 ## 5. Recovery and reproduction
 
@@ -162,7 +321,7 @@ ctest --preset native-release --output-on-failure
 node tests/search/run_performance.mjs build/native-release work/m7.3/recheck-YYYYMMDD 4,5,6 3 1
 ```
 
-`search_performance` and this runner are now available on `main` and on the updated documentation branch through the M7.3 merge. For comparable runs, explicitly choose and record the intended source revision, build directory and evaluator artifact. Use a dedicated implementation/benchmark worktree rather than running benchmarks as part of documentation maintenance, and do not overwrite `work/m7.3/benchmark` / `profiling` without preserving existing results. No production benchmarks or local suites were rerun for this documentation-only update.
+`search_performance` and this runner are now available on `main` and on the updated documentation branch through the M7.3 merge. For comparable runs, explicitly choose and record the intended source revision, build directory and evaluator artifact. Use a dedicated implementation/benchmark worktree rather than running benchmarks as part of documentation maintenance, and do not overwrite `work/m7.3/benchmark` / `profiling` without preserving existing results. Profiling and performance benchmarks were not rerun for the local CI task; current correctness-suite results are recorded in section 4.
 
 ## 6. New-session handoff and maintenance
 
