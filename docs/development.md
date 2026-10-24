@@ -137,8 +137,10 @@ reference. The native full matrix retains all three real-board evaluator values,
 
 The original bounded/full matrices perform 242 / 2,208 searches. The additional
 fixed M7.4a.1 horizon regressions perform 358 inexpensive searches in either mode,
-bringing the totals to 600 bounded / 2,566 full. Neither
-changes production code or treats timeout as success. Both print flushed start/end
+bringing the earlier totals to 600 bounded / 2,566 full. M7.4a.2 adds 1,461 guarded
+leaf regression searches in either mode: current totals are 2,061 bounded /
+4,027 full. Matrix selection preserves assertions and never treats timeout as
+success. Both print flushed start/end
 checkpoints with monotonic elapsed seconds and search counts at group, fixture,
 reference and configuration boundaries. Only successful completion prints an end
 checkpoint. CTest's existing M7.2 timeout remains 300 seconds.
@@ -317,6 +319,78 @@ than TT off with the cheap material provider, despite useful warm evaluator-call
 reductions. See [M5 validation](m5-validation.md) and its raw CSV for exact
 commands, byte accounting, all cold/warm/off measurements and pinned CI evidence.
 
+
+## M7.4a.2 guarded native leaf checkpoint: 2026-10-24 UTC
+
+ChatGPT reviewed the implementation and TT investigation and decided to retain
+the original guarded native leaf preparation unchanged. It remains uncommitted
+on `feature/m7.4a2-guarded-leaf`, base
+`1d461dfab38e2f105ecb67529192c34b880f3efc`. The two-file source/test patch SHA-256
+is `a23441a795db11d9aa19699529f9f6258b4fb5456b318f9ff699d88b35c33e47`.
+The isolated in-place signature variation was not adopted.
+
+Only genuine depth-zero search children of the recognized native adapter can
+retain a complete raw legal-move set, including exact-PV re-search. Eligibility
+needs no effective TT session, no raw EP square, child clock below 99, and
+pairwise-distinct exact prospective history. Before history push, the guard checks
+`duplicate(H + [r]) = duplicate(H) || contains(H, r)` with cancellation polling.
+Active hint-only/numeric TT,
+EP-sensitive, claim-sensitive and synthetic cases stay eager, as do roots and
+positive-depth ordering. Full legal generation, snapshots, terminal/claim
+semantics, evaluation and restoration remain required. External interfaces,
+evaluator ABI, TT contracts and deterministic search behavior are unchanged.
+
+Recorded implementation checks passed, all final exits 0: native Release, Debug
+and Profile **12/12 each**, complete pinned Emscripten 4.0.10 / SDK Node 22.16.0
+WASM **11/11**, **1,703 exact differential records per platform**, **2,000 separate
+diagnostic cancellation injections**, and identical canonical completed-depth
+results/counter prefixes (225 of each). The **1,461 new regression searches**
+cover eligibility/fallback, history/clock/EP boundaries, synthetic encoding
+errors, TT modes, exact PVs, cancellation and restoration. These are checked
+existing results; no suites were rerun for this documentation handoff.
+
+At initial-position depth six with TT off, copied-source counters measured
+**266,606 raw leaf preparations**, **6,703,200 eliminated encodes** and
+**266,606 eliminated initial sorts**. Actual legal generations remain 385,132,
+visited nodes 381,938 and evaluator calls 328,475. Instrumented timing is excluded
+from canonical Release comparisons.
+
+The original 216-invocation interleaved ABBA/BAAB experiment measured paired time
+reductions of **29.61% / 41.38% / 40.18%** at TT-off depths **4 / 5 / 6**.
+Independent balanced follow-ups retained depth-six TT-off gains of **42.35% and
+44.04%**. They used fresh processes, normal evaluator identity/ABI checks and a
+common frozen material DLL, preserving single-PV PLAY-only options, complete
+history, 8 MiB TT request, equivalent warmup/population and cold clearing outside
+timing. Exact result/work checks matched and every outlier was retained.
+
+TT-enabled findings were mixed, including small regressions: the original
+experiment observed **0.64% slower depth-five cold** and **2.77% slower depth-six
+warm**, and follow-up directions varied. **TT-enabled neutrality has not been
+demonstrated, and the root cause of observed regressions remains unresolved.**
+Confirmed eager storage/temporary-copy changes are not proven timing causes.
+The in-place experiment lacked a consistent paired benefit and is excluded.
+These are single-machine Windows/MSVC initial-position findings, not universal
+engine speedups; thermal/core residency and desktop scheduling were not isolated.
+
+Valid long-history comparisons at depths 1/2 improved on the 49-entry distinct
+fixture (paired ratios 0.60971 / 0.67969) and were near neutral with mixed signs
+on the 113-entry repeated fixture (0.99465 / 1.00150). The guard replaces
+pre-existing pairwise claim scanning on eligible leaves; repeated histories
+reject early and retain eager claim lookahead. No pathological incremental cost
+or evidence supporting a fallback threshold was found, so none was introduced.
+Longer distinct histories remain unmeasured; the scan has quadratic worst-case
+cost and these short timings do not establish a universal bound.
+
+See [CURRENT_STATUS.md](CURRENT_STATUS.md#m74a2-guarded-native-leaf-preparation-2026-10-24-utc)
+for the detailed checkpoint. Ignored local-only evidence is in
+`work/m7.4a2/implementation-20261024T050939Z/` and
+`work/m7.4a2/tt-investigation-20261024T055228Z/`: reports, raw timing CSVs, artifact
+hashes, differential/counter records and the retained original patch. Preserve
+the latter's 3,743-file historical verification, all frozen binaries and all
+M7.3/M7.4/M7.4a.1/M7.4a.2 evidence. Use new ignored output directories for any
+separately authorized rerun. These results are not authoritative Full CI; that
+requires a separately authorized commit and clean, aligned Windows/Linux
+validation through [local-ci.md](local-ci.md).
 
 ## M6 controller and M7 desktop GUI
 

@@ -1,7 +1,9 @@
 #include "m4_fixtures.hpp"
 #include "../../engine/src/search/transposition_table_internal.hpp"
 #include <chrono>
+#include <cstdlib>
 #include <iomanip>
+#include <sstream>
 
 bool ci_matrix=false;
 std::uint64_t search_count=0;
@@ -200,6 +202,184 @@ void leaf_ordering_regressions() {
   }
   group.finish();
 }
+// Force eager generic preparation for a semantic oracle over real native rules.
+// This wrapper intentionally does NOT qualify as native; activation is measured
+// separately in copied-source diagnostics, not inferred from this oracle.
+struct EagerRules : ChessCore {
+  const ChessCore &c;
+  explicit EagerRules(const ChessCore &core):c(core){}
+  std::unique_ptr<Position> initial_position()const override{return c.initial_position();}
+  std::unique_ptr<Position> load_fen(std::string_view f)const override{return c.load_fen(f);}
+  std::string export_fen(const Position &p)const override{return c.export_fen(p);}
+  std::unique_ptr<Position> clone(const Position &p)const override{return c.clone(p);}
+  std::vector<std::unique_ptr<Move>> legal_moves(const Position &p)const override{return c.legal_moves(p);}
+  std::unique_ptr<UndoToken> make_move(Position &p,const Move &m)const override{return c.make_move(p,m);}
+  void undo_move(Position &p,UndoToken &u)const override{c.undo_move(p,u);}
+  std::string encode_move(const Position &p,const Move &m)const override{return c.encode_move(p,m);}
+  std::unique_ptr<Move> decode_move(const Position &p,std::string_view m)const override{return c.decode_move(p,m);}
+  void reset(Position &p,std::string_view f)const override{c.reset(p,f);}
+  bool in_check(const Position &p)const override{return c.in_check(p);}
+  PositionStatus status(const Position &p)const override{return c.status(p);}
+  bool known_dead_position(const Position &p)const override{return c.known_dead_position(p);}
+  std::uint64_t position_key(const Position &p)const override{return c.position_key(p);}
+  std::uint64_t repetition_key(const Position &p)const override{return c.repetition_key(p);}
+  std::unique_ptr<const PositionSnapshot> snapshot(const Position &p)const override{return c.snapshot(p);}
+};
+std::string deterministic_statistics(const SearchStatistics &s) {
+  const auto &t=s.transposition;std::ostringstream o;
+  o<<s.visited_nodes<<':'<<s.evaluator_calls<<':'<<s.alpha_beta_cutoffs<<':'
+   <<t.lookups<<':'<<t.candidate_hits<<':'<<t.exact_hits<<':'<<t.bound_hits<<':'
+   <<t.bound_cutoffs<<':'<<t.hint_hits<<':'<<t.context_rejections<<':'<<t.stores<<':'
+   <<t.evictions<<':'<<t.pv_researches<<':'<<t.verified_history_nodes<<':'<<t.skipped_stores;
+  return o.str();
+}
+std::uint64_t leaf_evidence_hash=1469598103934665603ULL,leaf_evidence_records=0;
+void leaf_evidence(const std::string &s) {
+  for(unsigned char c:s)leaf_evidence_hash=(leaf_evidence_hash^c)*1099511628211ULL;
+  ++leaf_evidence_records;
+  if(std::getenv("CHESS_LAB_M742_EVIDENCE"))std::cout<<"M7.4a.2 record "<<s<<std::endl;
+}
+void leaf_evidence(const SearchVariation &v,const SearchStatistics &s) {
+  std::ostringstream o;o<<int(v.decision.kind)<<':'<<v.decision.move<<':'
+    <<(v.decision.terminal_outcome?int(*v.decision.terminal_outcome):-1)<<':'<<int(v.score.kind())<<':';
+  if(v.score.kind()==SearchScore::Kind::finite)o<<std::hexfloat<<(v.score.value()==0?0.0:v.score.value());else o<<v.score.distance();
+  o<<':'<<int(v.pv_end)<<':'<<v.pv_intended_move<<':';for(const auto &m:v.principal_variation)o<<m<<',';
+  o<<':'<<deterministic_statistics(s);leaf_evidence(o.str());
+}
+void native_leaf_case(const ChessCore &c,const Position &p,const GameHistory &h,bool compact=false,int depth=1) {
+  EagerRules eager(c);const auto fen=c.export_fen(p);const auto occurrences=h.occurrences();
+  Checkpoint fixture("M7.4a.2 native fen="+fen+" complete="+std::to_string(h.complete()));
+  for(double value:{-2.0,0.0,2.0}) {
+    if(compact&&value!=0)continue;constant=value;
+    for(bool ab:{false,true}) {
+      auto ref_eval=evaluator();++search_count;auto ref=search(eager,p,h,*ref_eval,{depth,ab});
+      auto e=evaluator();++search_count;auto r=search(c,p,h,*e,{depth,ab});
+      check(r.status==ref.status&&r.decision&&r.score&&r.pv_end,"native fixed leaf completes like eager rules");
+      same({*r.decision,*r.score,r.principal_variation,*r.pv_end,r.pv_intended_move},
+           {*ref.decision,*ref.score,ref.principal_variation,*ref.pv_end,ref.pv_intended_move});
+      check(deterministic_statistics(r.statistics)==deterministic_statistics(ref.statistics),"fixed leaf node/eval/work counts unchanged");
+      leaf_evidence({*r.decision,*r.score,r.principal_variation,*r.pv_end,r.pv_intended_move},r.statistics);
+    }
+    for(bool ordering:{false,true})for(int policy:{0,1,3}) {
+      if(compact&&(ordering||policy==3))continue;
+      IterativeSearchOptions options{depth,true,policy==3?3U:1U,ordering,policy!=0};
+      auto re=evaluator();std::vector<CompletedDepth> reference;++search_count;
+      auto ref=iterative_search(eager,p,h,*re,options,{},[&](CompletedDepth d){reference.push_back(std::move(d));});
+      for(int mode:{0,1,2,3,4}) {
+        // Full cache cases once per fixture; alpha-beta-off and disabled-table
+        // controls prove eligibility depends on the effective session.
+        if(mode&& (value!=0||!ordering||policy!=1||compact))continue;
+        TranspositionTable table(mode==3?0:256*1024);TranspositionTableUse use;
+        if(mode)use={&table,mode==1?EvaluatorCacheCompatibility::not_certified:EvaluatorCacheCompatibility::deterministic_position,1};
+        auto actual_options=options;if(mode==4)actual_options.alpha_beta_enabled=false;
+        for(int pass=0;pass<(mode==1||mode==2?2:1);++pass) {
+          auto e=evaluator();int commits=0;++search_count;
+          auto r=iterative_search(c,p,h,*e,actual_options,{},[&](CompletedDepth d){
+            const auto &expected=reference.at(commits++);check(d.multipv.size()==expected.multipv.size(),"native exact rank count");
+            for(std::size_t i=0;i<d.multipv.size();++i){same(d.multipv[i],expected.multipv[i]);leaf_evidence(d.multipv[i],d.statistics);}
+            if(mode==0||mode==3)check(deterministic_statistics(d.statistics)==deterministic_statistics(expected.statistics),"uncached native/eager work prefix equality");
+          },use);
+          check(r.status==ref.status&&bool(r.completed)==bool(ref.completed)&&commits==int(reference.size()),"all native depths commit like eager reference");
+          check(r.terminal_decision==ref.terminal_decision&&r.terminal_score==ref.terminal_score,"native root terminal precedence");
+          check(r.provenance.history_incomplete==!h.complete(),"incomplete history provenance unchanged");
+          if(r.terminal_decision)leaf_evidence({*r.terminal_decision,*r.terminal_score,{},PVEnd::terminal,{}},r.statistics);
+          leaf_evidence("final:"+std::to_string(int(r.status))+":"+deterministic_statistics(r.statistics));
+          check(c.export_fen(p)==fen&&h.occurrences()==occurrences&&h.matches_root(c,p),"native board/history restored");
+        }
+      }
+    }
+  }
+  constant=0;
+  fixture.finish();
+}
+void native_encoding_set(const ChessCore &c,Position &p,bool castling,bool promotion) {
+  const auto fen=c.export_fen(p);std::vector<std::string> texts;
+  for(auto &m:c.legal_moves(p)) {
+    const auto text=c.encode_move(p,*m);
+    auto square=[&](int i){return text[i]>='a'&&text[i]<='h'&&text[i+1]>='1'&&text[i+1]<='8';};
+    check((text.size()==4||text.size()==5)&&square(0)&&square(2)&&
+          (text.size()==4||std::string("bnqr").find(text[4])!=std::string::npos),"native generated encoding canonical");
+    texts.push_back(text);auto u=c.make_move(p,*m);c.undo_move(p,*u);
+    check(c.encode_move(p,*m)==text&&c.export_fen(p)==fen,"native generated certificate survives exact undo");
+    auto decoded=c.decode_move(p,text);auto u2=c.make_move(p,*decoded);c.undo_move(p,*u2);
+  }
+  std::sort(texts.begin(),texts.end());check(std::adjacent_find(texts.begin(),texts.end())==texts.end(),"native generated encodings unique");
+  if(castling){const auto from=c.snapshot(p)->side_to_move()==Side::white?"e1":"e8";for(const auto to:{'c','g'})check(std::find(texts.begin(),texts.end(),std::string(from)+to+from[1])!=texts.end(),"both native castling encodings");}
+  if(promotion)for(char piece:std::string("bnqr"))check(std::count_if(texts.begin(),texts.end(),[&](const auto &t){return t.size()==5&&t[4]==piece;})==2,"all quiet/capture promotion encodings");
+}
+void guarded_leaf_regressions() {
+  Checkpoint group("group M7.4a.2 guarded native leaves");tree_values=false;constant=0;fail_at=0;eval_hook={};
+  auto c=create_chess_core();
+  for(Side side:{Side::white,Side::black})for(int clock:{0,97,98,99,148,149,150}) {
+    auto p=c->load_fen(std::string("4k3/8/8/8/8/8/8/R3K3 ")+(side==Side::white?"w":"b")+" - - "+std::to_string(clock)+" 1");
+    auto h=GameHistory::starting_at(*c,*p,side==Side::white);native_leaf_case(*c,*p,h);
+  }
+  for(const auto fen:{
+      "4k3/8/8/8/3p4/8/4P3/4K3 w - - 0 1", // child has legal raw EP
+      "3k4/8/8/8/3p4/8/4P3/K2R4 w - - 0 1", // child EP is pinned
+      "4k3/8/8/8/8/8/P7/4K3 w - - 0 1",     // irrelevant raw EP / clock zero
+      "7k/8/5KQ1/8/8/8/8/8 w - - 0 1", "7K/8/5kq1/8/8/8/8/8 b - - 0 1",
+      "4k3/8/8/8/8/8/r7/K7 w - - 0 1", "k7/R7/8/8/8/8/8/4K3 b - - 0 1",
+      "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1",
+      "1r2k3/P7/8/8/8/8/7p/4K3 w - - 0 1", "4k3/7P/8/8/8/8/p7/1R2K3 b - - 0 1"}) {
+    std::cout<<"M7.4a.2 encoding fixture "<<fen<<std::endl;
+    auto p=c->load_fen(fen);auto h=GameHistory::starting_at(*c,*p,true);
+    const bool castle=std::string(fen).find("KQkq")!=std::string::npos;
+    const bool promotion=std::string(fen).find("1r2k3")!=std::string::npos||std::string(fen).find("1R2K3")!=std::string::npos;
+    native_encoding_set(*c,*p,castle,promotion);native_leaf_case(*c,*p,h);
+  }
+  const std::vector<std::string> cycle={"g1f3","g8f6","f3g1","f6g8"};
+  for(bool complete:{false,true}) {
+    auto p=c->initial_position();auto h=GameHistory::starting_at(*c,*p,complete);
+    for(int i=0;i<16;++i){auto text=cycle[i%4];h=h.after_move(*c,*p,text);auto m=c->decode_move(*p,text);auto u=c->make_move(*p,*m);
+      if(i==2||i==6||i==7||i==14||i==15)native_leaf_case(*c,*p,h,true);}
+  }
+  // Long repeated prefix without fivefold or a 150-halfmove interval: three
+  // knight cycles, then a fresh pair of pawn moves, repeated across all files.
+  {
+    auto p=c->initial_position();auto h=GameHistory::starting_at(*c,*p,false);
+    auto play=[&](const std::string &s){h=h.after_move(*c,*p,s);auto m=c->decode_move(*p,s);auto u=c->make_move(*p,*m);};
+    // Leave f-pawns until last: advancing them earlier blocks the knight cycle.
+    for(char file:std::string("abcdeghf")){for(int j=0;j<12;++j)play(cycle[j%4]);play(std::string(1,file)+"2"+file+"3");play(std::string(1,file)+"7"+file+"6");}
+    check(h.occurrences().size()==113,"long repeated history fixture");native_leaf_case(*c,*p,h,true);
+  }
+  // Deterministic legal walk retaining only distinct exact identities.
+  {
+    auto p=c->initial_position();auto h=GameHistory::starting_at(*c,*p,true);unsigned seed=742;
+    for(int ply=0;ply<48;++ply){auto moves=c->legal_moves(*p);seed=seed*1664525U+1013904223U;bool found=false;
+      for(std::size_t i=0;i<moves.size();++i){auto &m=moves[(seed+i)%moves.size()];auto text=c->encode_move(*p,*m);auto u=c->make_move(*p,*m);
+        const auto signature=repetition_signature(*c,*p);bool suitable=std::find(h.occurrences().begin(),h.occurrences().end(),signature)==h.occurrences().end()&&c->status(*p)==PositionStatus::ongoing&&!c->known_dead_position(*p);c->undo_move(*p,*u);
+        if(suitable){h=h.after_move(*c,*p,text);auto chosen=c->decode_move(*p,text);auto undo=c->make_move(*p,*chosen);found=true;break;}}
+      check(found,"distinct native history walk available");}
+    check(h.occurrences().size()==49,"long distinct history fixture");native_leaf_case(*c,*p,h,true,2);
+  }
+  // Synthetic terminal status must not bypass early malformed/duplicate/throwing
+  // encoding validation or turn an invalid preparation into a terminal result.
+  struct InvalidTerminal : Tree {
+    int kind=0;
+    std::string encode_move(const Position &p,const Move &m)const override {
+      if(id(p)!=1)return Tree::encode_move(p,m);
+      if(kind==2)throw std::runtime_error("synthetic encoder failed");
+      return kind==0?"a1a2":"a1a2k";
+    }
+  };
+  for(int kind:{0,1,2})for(auto status:{PositionStatus::ongoing,PositionStatus::checkmate,PositionStatus::stalemate}) {
+    InvalidTerminal t;t.kind=kind;t.nodes={{Side::white,{1}},{Side::black,{2,3},status},{Side::white,{2}},{Side::white,{3}}};
+    auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p);auto e=evaluator();++search_count;auto r=iterative_search(t,*p,h,*e,{1,true,1,true});
+    check(r.status==IterativeSearchStatus::search_error&&!r.completed&&!r.terminal_decision&&!r.unevaluated_fallback&&r.statistics.visited_nodes==1&&r.statistics.evaluator_calls==0&&t.balance==0&&h.matches_root(t,*p),"generic encoding validation remains before terminal/node entry");
+    leaf_evidence("invalid:"+std::to_string(kind)+":"+std::to_string(int(status))+":"+deterministic_statistics(r.statistics));
+  }
+  for(int mode:{0,1,2})for(bool cancel:{false,true}) {
+    auto p=c->load_fen("4k3/8/8/8/8/8/8/R3K3 w - - 0 1");const auto fen=c->export_fen(*p);auto h=GameHistory::starting_at(*c,*p,true);auto e=evaluator();CancellationSource stop;
+    TranspositionTable table(256*1024);TranspositionTableUse use;if(mode)use={&table,mode==1?EvaluatorCacheCompatibility::not_certified:EvaluatorCacheCompatibility::deterministic_position,1};
+    if(cancel)eval_hook=[&]{stop.request();};else fail_at=1;
+    ++search_count;auto r=iterative_search(*c,*p,h,*e,{2,true,1,true},stop.token(),{},use);eval_hook={};fail_at=0;
+    check(r.status==(cancel?IterativeSearchStatus::cancelled:IterativeSearchStatus::evaluator_failed)&&!r.completed&&bool(r.unevaluated_fallback)==cancel&&c->export_fen(*p)==fen&&h.matches_root(*c,*p),"native leaf cancellation/evaluator failure restores root and preserves fallback labels");
+    leaf_evidence("failure:"+std::to_string(mode)+":"+std::to_string(cancel)+":"+deterministic_statistics(r.statistics));
+  }
+  std::cout<<"M7.4a.2 deterministic evidence records="<<leaf_evidence_records<<" hash="<<leaf_evidence_hash<<std::endl;
+  group.finish();
+}
 int main(int argc,char **argv)try {
   for(int i=1;i<argc;++i) {
     std::string arg=argv[i];
@@ -279,6 +459,6 @@ int main(int argc,char **argv)try {
   check(retained.completed&&retained.completed->depth==1&&retained.status==IterativeSearchStatus::cancelled,"committed depth retained on cancellation");
   ++search_count;auto failed=iterative_search(*c,*root,hist,*e,{3,true,1,true},{},[&](CompletedDepth){fail_at=calls+1;});
   check(failed.status==IterativeSearchStatus::evaluator_failed&&!failed.completed&&!failed.unevaluated_fallback,"late failure invalidates provisional depths");
-  failures.finish();leaf_ordering_regressions();total.finish();
+  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();total.finish();
   std::cout<<"M7.2 single-PV exact references, TT cross-policy, draw history, cancellation and failure passed"<<std::endl;
 }catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}
