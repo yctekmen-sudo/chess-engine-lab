@@ -1,5 +1,6 @@
 #include "transposition_table_internal.hpp"
 #include <algorithm>
+#include <cassert>
 #include <chess_lab/search.hpp>
 #include <cmath>
 #include <limits>
@@ -194,26 +195,66 @@ GameHistory GameHistory::replay(const ChessCore &c, const Position &start,
 }
 namespace {
 // A prepared node owns one legal list and its position-specific facts.
+enum class PreparationMode { eager, native_claim_free_leaf };
+enum class PreparationPurpose { eager, search_horizon };
 struct PreparedNode {
   std::unique_ptr<const PositionSnapshot> snapshot;
   std::vector<OrderedMove> legal;
+  std::vector<std::unique_ptr<Move>> raw_legal;
+  PreparationMode mode = PreparationMode::eager;
   RepetitionSignature repetition;
   bool claims_ready = false;
   bool claim_now_threefold = false;
   bool claim_now_fifty = false;
+  std::size_t legal_count() const {
+    return mode == PreparationMode::eager ? legal.size() : raw_legal.size();
+  }
 };
+RepetitionSignature snapshot_repetition(const PositionSnapshot &s) {
+  RepetitionSignature r;
+  std::copy(s.squares().begin(), s.squares().end(), r.pieces.begin());
+  r.side = s.side_to_move();
+  r.castling = {s.can_castle_kingside(Side::white),
+                s.can_castle_queenside(Side::white),
+                s.can_castle_kingside(Side::black),
+                s.can_castle_queenside(Side::black)};
+  return r;
+}
+bool distinct_with_child(std::span<const RepetitionSignature> history,
+                         const RepetitionSignature &child,
+                         const CancellationToken *token) {
+  // duplicate(H + [child]) == duplicate(H) || contains(H, child).
+  for (std::size_t i = 0; i < history.size(); ++i) {
+    if (token) detail::tt_poll(*token);
+    if (history[i] == child) return false;
+    for (std::size_t j = 0; j < i; ++j) {
+      if (token) detail::tt_poll(*token);
+      if (history[i] == history[j]) return false;
+    }
+  }
+  return true;
+}
 PreparedNode prepare_node(const ChessCore &c, const Position &p,
-                          const CancellationToken *token = nullptr) {
+                          const CancellationToken *token = nullptr,
+                          std::optional<std::span<const RepetitionSignature>> leaf_history = {}) {
   PreparedNode node;
   node.snapshot = c.snapshot(p);
+  if (leaf_history && native_chess_core(c) &&
+      !node.snapshot->en_passant_square() && node.snapshot->halfmove_clock() < 99) {
+    node.repetition = snapshot_repetition(*node.snapshot);
+    if (distinct_with_child(*leaf_history, node.repetition, token)) {
+      // These native owners stay in this position frame until child() unwinds.
+      // No text consumer is reachable, but full legal availability is required.
+      node.raw_legal = c.legal_moves(p);
+      for (std::size_t i = 0; i < node.raw_legal.size(); ++i)
+        if (token) detail::tt_poll(*token);
+      node.mode = PreparationMode::native_claim_free_leaf;
+      return node;
+    }
+  }
   node.legal = ordered_moves(c, p, token, node.snapshot.get());
+  node.repetition = snapshot_repetition(*node.snapshot);
   auto &r = node.repetition;
-  std::copy(node.snapshot->squares().begin(), node.snapshot->squares().end(), r.pieces.begin());
-  r.side = node.snapshot->side_to_move();
-  r.castling = {node.snapshot->can_castle_kingside(Side::white),
-                node.snapshot->can_castle_queenside(Side::white),
-                node.snapshot->can_castle_kingside(Side::black),
-                node.snapshot->can_castle_queenside(Side::black)};
   if (auto ep = node.snapshot->en_passant_square())
     for (const auto &move : node.legal)
       if (move.legal_ep) { r.legal_ep = ep; break; }
@@ -295,14 +336,18 @@ struct Traversal {
     }
     return n;
   }
-  template <class F> auto child(const OrderedMove &m, F f) {
+  template <class F> auto child(const OrderedMove &m, F f,
+                                PreparationPurpose purpose = PreparationPurpose::eager) {
     poll();
     const bool track_path = previous != nullptr;
     return with_move(core, position, *m.move, [&] {
       if (track_path) path.push_back(m.text); // Already encoded.
       std::optional<PreparedNode> prepared;
       try {
-        prepared.emplace(prepare_node(core, position, &cancellation));
+        std::optional<std::span<const RepetitionSignature>> leaf_history;
+        if (purpose == PreparationPurpose::search_horizon && !cache)
+          leaf_history.emplace(history);
+        prepared.emplace(prepare_node(core, position, &cancellation, leaf_history));
         history.push_back(prepared->repetition);
       } catch (...) {
         if (track_path) path.pop_back();
@@ -337,7 +382,7 @@ struct Traversal {
     // This adapter's legal list has already established terminal move
     // availability. Synthetic test adapters retain their independent status.
     auto status = native_chess_core(core)
-        ? (prepared.legal.empty()
+        ? (prepared.legal_count() == 0
               ? (core.in_check(position) ? PositionStatus::checkmate
                                          : PositionStatus::stalemate)
               : PositionStatus::ongoing)
@@ -442,6 +487,8 @@ struct Traversal {
               std::equal(path.begin(), path.end(), pv->begin());
     }
     ++stats.visited_nodes;
+    const bool raw_leaf = prepared.mode == PreparationMode::native_claim_free_leaf;
+    assert(!raw_leaf || (depth == 0 && !cache && native_chess_core(core)));
     const auto original_alpha = alpha, original_beta = beta;
     const auto &s = prepared.snapshot;
     auto finish = [&](Line line) {
@@ -458,10 +505,11 @@ struct Traversal {
     auto &moves_here = depth == 0 ? prepared.legal : moves(prepared, false);
     if (auto end = terminal(ply, prepared))
       return finish(std::move(*end));
-    if (moves_here.empty())
+    if (prepared.legal_count() == 0)
       throw std::runtime_error("ongoing node has no legal moves");
-    if (!root_play_only) annotate_claims(prepared);
-    auto best = root_play_only ? std::optional<Line>{} : claim(prepared);
+    if (!root_play_only && !raw_leaf) annotate_claims(prepared);
+    // The raw-leaf guard proves both immediate and intended claims unavailable.
+    auto best = root_play_only || raw_leaf ? std::optional<Line>{} : claim(prepared);
     if (depth > 0) prefer_previous(moves_here);
     if (cache && !root_play_only) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
@@ -526,7 +574,7 @@ struct Traversal {
       bool direct_exact = exact && (!options.alpha_beta_enabled || (!alpha && !beta));
       auto line = child(m, [&](PreparedNode &next) {
         return node(depth - 1, ply + 1, next, alpha, beta, direct_exact);
-      });
+      }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::eager);
       ChessDecision action{DecisionKind::play, m.text};
       auto competitive = [&] {
         return !best || better(line.score, best->score) ||
@@ -536,7 +584,7 @@ struct Traversal {
         if (exact && !direct_exact)
           line = child(m, [&](PreparedNode &next) {
             return node(depth - 1, ply + 1, next, {}, {}, true);
-          });
+          }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::eager);
         if (competitive()) {
           line.action = std::move(action);
           line.pv.insert(line.pv.begin(), m.text);
@@ -687,7 +735,7 @@ IterativeSearchResult iterative_search(
           // shared traversal refines internal ordering ties before publishing.
           auto line = t.child(m, [&](PreparedNode &next) {
             return t.node(depth - 1, 1, next, {}, {}, true);
-          });
+          }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::eager);
           line.action = {DecisionKind::play, m.text};
           line.pv.insert(line.pv.begin(), m.text);
           ranking.push_back(variation(std::move(line)));
