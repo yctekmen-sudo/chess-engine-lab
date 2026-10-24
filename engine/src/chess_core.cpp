@@ -223,4 +223,10 @@ std::unique_ptr<ChessCore> create_chess_core() { return std::make_unique<Core>()
 // Search-internal adapter dispatch; synthetic ChessCore fixtures retain their
 // existing status and clock-transition semantics.
 bool native_chess_core(const ChessCore& c) noexcept { return dynamic_cast<const Core*>(&c)!=nullptr; }
+// Private search capability: complete generation without boxing unused moves.
+// Neither native move values nor certificates escape the current position frame.
+std::size_t native_legal_move_count(const ChessCore& c, const Position& p) {
+    (void)cast<Core>(c);
+    return moves(cast<Pos>(p)).size();
+}
 }

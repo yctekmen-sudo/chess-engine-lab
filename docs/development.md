@@ -138,8 +138,10 @@ reference. The native full matrix retains all three real-board evaluator values,
 The original bounded/full matrices perform 242 / 2,208 searches. The additional
 fixed M7.4a.1 horizon regressions perform 358 inexpensive searches in either mode,
 bringing the earlier totals to 600 bounded / 2,566 full. M7.4a.2 adds 1,461 guarded
-leaf regression searches in either mode: current totals are 2,061 bounded /
-4,027 full. Matrix selection preserves assertions and never treats timeout as
+leaf regression searches in either mode: the merged M7.4a.2 totals are 2,061
+bounded / 4,027 full. The reviewed, uncommitted M7.5b candidate adds 132 searches
+in either mode, for 2,193 bounded / 4,159 full; these candidate totals are not yet
+on main. Matrix selection preserves assertions and never treats timeout as
 success. Both print flushed start/end
 checkpoints with monotonic elapsed seconds and search counts at group, fixture,
 reference and configuration boundaries. Only successful completion prints an end
@@ -322,6 +324,11 @@ commands, byte accounting, all cold/warm/off measurements and pinned CI evidence
 
 ## M7.4a.2 guarded native leaf checkpoint: 2026-10-24 UTC
 
+**Historical pre-commit snapshot:** preserve the implementation, measurements
+and acceptance statements below as dated evidence. M7.4a.2 subsequently merged
+through PR #24 and passed committed Full CI; the current M7.5b checkpoint below
+records that completion and supersedes this snapshot's branch/acceptance status.
+
 ChatGPT reviewed the implementation and TT investigation and decided to retain
 the original guarded native leaf preparation unchanged. It remains uncommitted
 on `feature/m7.4a2-guarded-leaf`, base
@@ -391,6 +398,75 @@ M7.3/M7.4/M7.4a.1/M7.4a.2 evidence. Use new ignored output directories for any
 separately authorized rerun. These results are not authoritative Full CI; that
 requires a separately authorized commit and clean, aligned Windows/Linux
 validation through [local-ci.md](local-ci.md).
+
+## M7.5a / M7.5b reviewed checkpoint: 2026-10-24 UTC
+
+M7.4a.2 merged on 2026-10-24 through
+[PR #24](https://github.com/yctekmen-sudo/chess-engine-lab/pull/24), main merge
+`f3aaee0a284b206a347786a8e5418c3773654a40`. Its approved feature commit
+`8b68e241717a8e205d86904fc2d26f9077dca76f` passed authoritative **54/54 Full
+local CI gates**, clean and aligned, all worker/coordinator exits 0. Original
+local-only acceptance evidence: `work/ci/20261024T185729687Z-1e5cefff/`.
+Its historical TT-performance uncertainty remains unresolved.
+
+M7.5a profiling is complete, reviewed and accepted. The separate merged-baseline
+session measured initial-position native Release depth-six TT-off **348,774 NPS**.
+Sampled CPU stacks showed **60.86% exclusive move/list ownership**, **41.76%
+inclusive heap-path stack union** (overlapping the owner categories, not additive)
+and **2.20% evaluator**. Provenance is
+`work/m7.5a/investigation-20261024T202503Z/`: `report.md`,
+`throughput.csv` and `cpu-breakdown.json`, with executable/toolchain identities.
+These are workload-specific measurements, not general cost or savings bounds.
+
+The reviewed M7.5b candidate uses an **adapter-private complete native legal-count
+path** only for the previously guarded genuine depth-zero leaves. The recognized
+native adapter performs the same full legal generation without creating unused
+native move wrappers. The exact prospective-history guard, cancellation,
+restoration, terminal/claim handling and eager fallbacks for effective TT,
+EP-sensitive, claim-sensitive and synthetic-adapter cases remain unchanged.
+There are no public ChessCore, evaluator ABI, controller, GUI or dependency
+changes. Frozen depth-six initial-position TT-off diagnostics measured exactly
+**6,703,200 avoided wrappers**; actual legal-generation calls **385,132**, nodes
+**381,938**, evaluations **328,475**, decisions, scores, complete PVs, claims and
+deterministic statistics remain identical. Active TT sessions never use the
+count path.
+
+Recorded correctness: **132 additional searches**, **43-position count corpus**,
+native **Release/Debug/Profile 12/12 each**, complete pinned Emscripten 4.0.10 /
+SDK Node 22.16.0 **WASM 11/11**; **1,855 direct structured records**, **225 exact
+completed-depth comparisons** with deterministic counter prefixes, and **2,000
+diagnostic cancellation injections**. Native/WASM comparison only normalizes
+lossless hexadecimal-float spelling, without numerical tolerance. These checks
+are existing implementation evidence, not suites rerun for documentation.
+
+The controlled **408-invocation** crossover used six balanced ABBA/BAAB blocks
+per configuration and a common frozen evaluator DLL through normal ABI/identity
+checks. Paired median TT-off time reductions were **22.36% / 29.75% / 31.71%**
+at initial-position depths **4 / 5 / 6**, and **39.43% tactical / 42.84%
+middlegame** at depth four; each favored the candidate in all six blocks.
+Descriptive crossover depth-six TT-off throughput was approximately **320K
+baseline / 467K candidate NPS**, distinct from the separate M7.5a session.
+**TT-enabled neutrality is unproven:** depth-six TT-warm was **0.89% slower**,
+four of six blocks favoring the baseline. The cause remains unresolved.
+All raw observations, including outliers, are retained. These single-machine
+Windows/MSVC workload findings are not universal speedup or playing-strength
+claims; thermal/frequency/core-affinity and desktop activity were not isolated.
+
+See [CURRENT_STATUS.md](CURRENT_STATUS.md#m75b-approved-native-leaf-count-handoff-2026-10-24-utc)
+and the original ignored `work/m7.5b/implementation-20261024T210345Z/`
+(`report.md`, `final-audit.json`, differential/diagnostic/cancellation records,
+`ab/timings.csv`, block summaries and artifact hashes). These local-only files
+are not published through GitHub. Preserve the **5,555 historical files**, **213
+frozen local artifacts**, frozen binaries and original three-file review patch.
+
+**Current acceptance:** ChatGPT approved the original M7.5b implementation/tests
+and controlled evidence. On `feature/m7.5b-native-leaf-count` at `f3aaee0`,
+the three implementation/test files plus these two documentation files remain
+uncommitted, index empty. Linux remains clean on main at the merged baseline.
+There is **no authoritative 54-gate Full CI for M7.5b yet**. Commit and publication
+need separate authorization; clean aligned Full validation follows the
+[local CI guide](local-ci.md). Documentation maintenance does not authorize
+benchmark reruns or changes to frozen evidence.
 
 ## M6 controller and M7 desktop GUI
 
