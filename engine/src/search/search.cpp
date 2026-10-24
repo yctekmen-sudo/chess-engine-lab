@@ -452,14 +452,17 @@ struct Traversal {
       }
       return line;
     };
-    auto &moves_here = moves(prepared, false);
+    // Leaves own a fresh, canonical list from prepare_node(); only positive
+    // depths consume move ordering or reuse the iterative root's reordered list.
+    if (depth == 0) poll(); // Retain moves()'s cancellation boundary.
+    auto &moves_here = depth == 0 ? prepared.legal : moves(prepared, false);
     if (auto end = terminal(ply, prepared))
       return finish(std::move(*end));
     if (moves_here.empty())
       throw std::runtime_error("ongoing node has no legal moves");
     if (!root_play_only) annotate_claims(prepared);
     auto best = root_play_only ? std::optional<Line>{} : claim(prepared);
-    prefer_previous(moves_here);
+    if (depth > 0) prefer_previous(moves_here);
     if (cache && !root_play_only) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
@@ -467,7 +470,7 @@ struct Traversal {
       if (!hit.hint.empty()) {
         auto found = std::find_if(moves_here.begin(), moves_here.end(), [&](const auto &m) { return m.text == hit.hint; });
         if (found != moves_here.end()) {
-          std::rotate(moves_here.begin(), found, found + 1);
+          if (depth > 0) std::rotate(moves_here.begin(), found, found + 1);
           ++stats.transposition.hint_hits;
         }
       }

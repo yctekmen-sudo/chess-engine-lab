@@ -1,8 +1,12 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-**Verified migration checkpoint (2026-10-23 UTC):** [PR #21](https://github.com/yctekmen-sudo/chess-engine-lab/pull/21) is closed and merged into `main` at `bae9da7914a769bdffcabe31fc78c1f2e63e8af7`, verified through GitHub and fetched `origin/main`. The user reports manually disabling all four hosted workflows. Local Windows 11 + WSL2 Ubuntu 24.04 CI is the validation process; GitHub retains source control, PRs and reviews. The uncommitted `chore/retire-github-actions` cleanup retires the YAML definitions and makes their absence explicit in harness reports. No GitHub settings or branch-protection changes were made or reverified here.
+**Latest validation checkpoint (2026-10-23 UTC):** M7.4a.1 depth-zero ordering remains uncommitted on `feature/m7.4a1-leaf-ordering` at base `b04a198f543aad2a1eb9d9475db23779b010ca71`. ChatGPT independently approved the production/regression diff; controlled performance validation is now complete. Interleaved ABBA/BAAB measurements support a repeatable local improvement for depth-six TT-off/cold and depth-five off/cold/warm; depth-six warm remains inconclusive. Section 4 records the paired results and limitations. Earlier native/WASM correctness results remain historical validation, not a new Full CI pass. No M7.4a.2 deferred encoding or TT bookkeeping change is included.
 
-**Prior authoritative validation:** at `6a0b3848f317c8f16b0f5fdee4878aa039d7b304`, all 54 gates passed, exit 0, with both checkouts clean and unchanged. The merge has the same tracked tree as that revision. This is prior evidence, not a new Full pass for the cleanup; see section 4 for provenance and current Quick validation.
+**Earlier investigation checkpoint (2026-10-23 UTC):** fetched `origin/main` was `b04a198f543aad2a1eb9d9475db23779b010ca71`, the verified merge of [PR #22](https://github.com/yctekmen-sudo/chess-engine-lab/pull/22). Local CI infrastructure and hosted-workflow retirement are merged. The M7.4 baseline/design investigation completed on `investigation/m7.4-lazy-leaf` before production changes. ChatGPT subsequently approved that investigation and authorized the narrowly scoped M7.4a.1 implementation below; deferred encoding and further changes remain separate proposals.
+
+**Earlier migration checkpoint (2026-10-23 UTC):** [PR #21](https://github.com/yctekmen-sudo/chess-engine-lab/pull/21) merged at `bae9da7914a769bdffcabe31fc78c1f2e63e8af7`. The user reported manually disabling all four hosted workflows. Local Windows 11 + WSL2 Ubuntu 24.04 CI is the validation process; GitHub retains source control, PRs and reviews. PR #22 subsequently retired the definitions and made their absence explicit in harness reports. No GitHub settings or branch-protection changes were made or reverified during this investigation.
+
+**Prior authoritative validation:** at `6a0b3848f317c8f16b0f5fdee4878aa039d7b304`, all 54 gates passed, exit 0, with both checkouts clean and unchanged; PR #21's merge `bae9da7` has the same tracked tree. Retirement head `9b5ece5` subsequently passed the full matrix as recorded below. These are prior CI results, not a new Full run at the M7.4 investigation revision.
 
 **Earlier verification:** local CI infrastructure prepared and hardened 2026-10-22 from `main` at `bead04a312180d8ce3ba3c48980659da273487c7` (merged PR #20). The hardening rerun passed all 54 command gates, including 50 harness regressions per platform, with both worker exits zero; uncommitted Windows changes made that combined result non-authoritative. UTC report directories below cross into 2026-10-23. Historical profiling evidence remains attributed to its recorded M7.3 revision. This is a dated snapshot, not live data.
 
@@ -14,7 +18,7 @@
 
 | Item | Verified state |
 | --- | --- |
-| Cleanup baseline / fetched Windows `origin/main` | `bae9da7914a769bdffcabe31fc78c1f2e63e8af7`, merge of local CI PR #21; both cleanup branches start here. Existing local `main` refs remain at `bead04a312180d8ce3ba3c48980659da273487c7` (PR #20) |
+| Current baseline / fetched Windows `origin/main` | `b04a198f543aad2a1eb9d9475db23779b010ca71`, merge of retirement PR #22; Windows local `main` and the investigation branch start here |
 | M7.2 | Merged; single-PV PLAY-only root search and controller root draw arbitration, including fixed-depth cancellation validation |
 | M7.3 implementation | **Merged into `main`** at `f0a5affee25a333ff23df2343277e052a2c2ae81` |
 | M7.3 PR | [#19: M7.3 (draft): Reuse prepared legal moves and annotate draw claims](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19), **closed and merged**; “draft” remains in its historical title |
@@ -23,10 +27,12 @@
 | M7.3 PR-head CI | Native Debug/Release/Profile, WebAssembly correctness, M6 controller, and M7 GUI including Windows smoke: completed successfully; links below |
 | Local M7.3 validation | Historical profiling-handoff log records native Release CTest **12/12 passed**, 0 failed, 4.68 s; newly executed local CI results are recorded in section 4 |
 | Profiling investigation | **Completed and reviewed**; accepted with M7.3 per the user's handoff and PR #19's recorded correctness/performance acceptance notes; raw artifacts remain local |
-| Next milestone | **M7.4 planned investigation**: lazy depth-zero move preparation, reduced move-allocation/encoding overhead, then TT bookkeeping; these are future proposals, not implemented improvements or measured speedups |
+| Next milestone | **M7.4a.1 reviewed implementation, controlled validation complete**, uncommitted; repeatable local benefit in five measured configurations, depth-six warm inconclusive. Guarded lazy text/facts, reduced allocation/encoding and TT bookkeeping remain future proposals |
 | Documentation handoff | [PR #20](https://github.com/yctekmen-sudo/chess-engine-lab/pull/20), merged into the local baseline above |
 | Local CI implementation | [PR #21](https://github.com/yctekmen-sudo/chess-engine-lab/pull/21) merged at `bae9da7`; prior authoritative validation at its head `6a0b384` |
-| Active infrastructure cleanup | `chore/retire-github-actions`: retire four hosted definitions, preserve harness fingerprints/acceptance and document completed local validation migration; uncommitted |
+| Infrastructure retirement | PR #22 merged at `b04a198`; authoritative Full local CI at its head `9b5ece5f527fb154a669485e863f9b047cd6a9ef` passed 54/54 gates, exit 0, 441.429 s; local evidence `work/ci/20261023T051529887Z-ec9f96f3/` |
+| Approved investigation | `investigation/m7.4-lazy-leaf` at `b04a198`: fresh five-repetition Release baseline and first-step design reviewed and approved by ChatGPT |
+| Active implementation | `feature/m7.4a1-leaf-ordering` at `b04a198`, dirty: depth-zero sort/previous-PV/TT-rotation guards, focused regressions and documentation; no commit/publication authorized |
 
 The successful PR-head CI results below belong to M7.3 PR #19 at `54ec7d9`; they are not proof of a pass at the merge commit or an updated PR #20 head. Check CI for the actual revision under review.
 
@@ -43,7 +49,8 @@ The push-triggered native workflow [39823909737](https://github.com/yctekmen-sud
 
 ### Protect existing local work
 
-Both checkouts now use `chore/retire-github-actions` from `bae9da7`. Original
+At the earlier retirement-preparation checkpoint, both checkouts used
+`chore/retire-github-actions` from `bae9da7`. Original
 `feature/local-ci-infrastructure` refs remain at `6a0b384`, with no reset or stash.
 The pre-existing Windows status note was explicitly carried across the branch
 switch and preserved separately under `work/ci/retire-actions-20261023T043737044Z/`.
@@ -51,6 +58,18 @@ Linux was clean before switching; the verified merge was fetched from the Window
 checkout's existing local remote after a stalled Linux HTTPS fetch was terminated.
 The earlier `work/project-handoff/` documentation worktree is retained unchanged.
 The harness itself never switches/resets/synchronizes checkouts.
+
+At this investigation's start, Windows was clean on `main` at `b04a198`; a new
+`investigation/m7.4-lazy-leaf` branch was created there. Linux remains clean on
+`chore/retire-github-actions` at `9b5ece5`, unchanged by this investigation. Existing
+worktrees/stashes and all 257 M7.3 profiling files were preserved. The only tracked
+investigation edit is this dated status update, written after clean-source timing.
+
+The M7.4a.1 implementation explicitly carried that existing status work onto its
+new feature branch and preserved a copy in its ignored evidence directory. Linux
+remains unchanged. The implementation's tracked inventory is search.cpp,
+m72_search.cpp, development.md and this status file; older profiling/baseline
+artifacts remain intact.
 
 Earlier handoff notes recorded stash object `3669920a80ede34c7943adfdcfc7c3dcd807b7fe`
 and untracked M7.2 investigation files. At this infrastructure task's start,
@@ -364,7 +383,179 @@ the profiling section above and sampled report/results/counter hashes were
 verified unchanged. Final whitespace review passed. No commit, push, PR, merge or
 GitHub-settings change was made.
 
-### M7.4 investigation directions
+### M7.4 baseline and lazy-leaf design investigation: 2026-10-23 UTC
+
+Investigation completed against fetched merged `main` at `b04a198`. Engine,
+vendored rules, CMake and benchmark/runner sources are unchanged from profiled
+M7.3 `54ec7d9`. A fresh uninstrumented Windows/MSVC Release build used depths
+4/5/6, TT off/cold/warm, default material evaluator, single-PV PLAY-only root,
+alpha-beta/previous-PV ordering, 8 MiB TT request, serial execution, **five measured
+repetitions and one warmup** per configuration. Warm explicitly populates first.
+
+| Depth | Off median ms | Cold median ms | Warm median ms |
+| --- | ---: | ---: | ---: |
+| 4 | 9.562 | 10.982 | 1.215 |
+| 5 | 147.896 | 148.233 | 150.883 |
+| 6 | 2,089.650 | 2,235.407 | 2,302.892 |
+
+All 45 measured rows match historical checksums/best moves/PVs; all 27 overlapping
+records match deterministic work statistics. An untimed read-only inspector matched
+225 complete-depth decision/hexadecimal-score/PV/end records across modes and all
+45 final work records. Depth-six nodes/evals remain 381,938/328,475 off and
+355,879/301,184 cold/warm. All **12/12 fresh Release CTest suites passed**, exit 0,
+5.36 s. Timing snapshots were clean and unchanged; this is a performance baseline,
+not a newly executed Full local CI pass. No Linux/Profile/WASM timings were taken.
+
+Environment matches reported M7.3 OS/CPU/compiler versions, but the build directory,
+whole-artifact hashes and repetition count differ. Executable/material `.text`
+hashes match the prior binaries; PE timestamps and `.rdata` differ. Desktop
+scheduling/thermal state was not isolated. Timing changes are observations, not
+measured M7.4 speedups. Two metadata setup attempts stalled before timing; bounded
+Node collection resolved setup. Historical profiling files were hash-verified
+unchanged; no old output was overwritten.
+
+Local-only report and evidence: `work/m7.4/baseline-20261023T152516Z/`:
+`investigation.md`, `baseline-summary.csv`, `canonical/results.json` / `results.csv`,
+`validation.json`, `completed-depths.json`, toolchain/artifact/source evidence and
+logs. Fresh benchmark SHA-256:
+`2cd6e91808e5ebf34a556afa6790c8a6de2b65825bc38fac4518ae97f0f4fde1`;
+material SHA-256:
+`424e3fb4ac9081ceeea489638858d861d0ec9583829432fb742b54526b273b51`.
+These ignored artifacts must be supplied separately for review outside this machine.
+
+**Proposed smallest first implementation:** skip redundant depth-zero sorting and
+unused previous-PV/TT rotations, preserving canonical claims, legal TT hint
+validation/counts, probe/store/bound semantics and all result/work statistics.
+No prepared-node representation or adapter change is needed. A subsequent
+increment would defer text/facts/order only for actual native depth-zero children
+with no active TT, no raw EP, halfmove clock <99 and no repeated
+target in the active history including the just-entered child. Retain full legal
+generation, snapshot, terminal precedence, exact repetition identity, cancellation
+and restoration. Reuse the raw list on fallback; keep roots, speculative lookahead,
+synthetic adapters and TT/EP/claim-sensitive leaves eager. The historical counters
+suggest 266,606–266,741 eligible depth-six off leaves; this is a derived opportunity,
+not measured savings. TT-enabled laziness and TT bookkeeping remain later proposals.
+Review the detailed proof/fixtures before authorizing production implementation.
+
+### M7.4a.1 depth-zero ordering: 2026-10-23 UTC
+
+This is the earlier implementation/grouped-timing checkpoint. The controlled
+crossover below supplies the subsequent performance assessment; retain these
+original measurements and limitations as provenance.
+
+Implemented only within `Traversal::node()`: depth-zero nodes reuse the initial
+canonical list without another sort, retain its cancellation boundary, skip
+previous-PV ordering and skip TT move rotation. Legal hint lookup/membership and
+`hint_hits` remain unchanged. Positive-depth/root ordering, initial move encoding/
+validation, terminal/claim/evaluation and TT probe/store behavior are retained.
+
+The existing M7.2 suite adds **358 focused searches** covering both colors,
+fixed/iterative exact results, horizon claims/terminals, canonical ties, previous-PV
+on/off, legacy/MultiPV/root policy, valid/invalid leaf hints and wrong-depth numeric
+entries, TT hint/numeric cold/warm, actual repetitions, native clocks, synthetic
+encoding failures, cancellation and evaluator failures. New assertions passed
+against the unchanged search first. One initial fixture mistakenly compared its
+make/undo count against zero after replay setup; the corrected test compares with
+the post-setup count, and the failed log is preserved. No engine defect was found.
+
+Changed-source validation, all exit 0:
+
+- Native M3/M4/M5/M7.2: **4/4**, 3.73 s; complete Release CTest **12/12**, 4.88 s.
+- Pinned emsdk `62a853cd3b3134398ce85cde8bb5cbb2ef0194cb`, Emscripten 4.0.10,
+  SDK Node 22.16.0: affected WASM suites **4/4**, 33.07 s; complete WASM **11/11**,
+  52.02 s, built from the modified Windows source through WSL without changing
+  the Linux checkout. M7.2 totals are 600 bounded / 2,566 native; timeout remains
+  300 s. The added group took 0.170 s WASM / 0.007 s native Release.
+- All **45 candidate benchmark rows**, plus **90** frozen control rows, match
+  baseline checksums, final PVs and deterministic work fields. Untimed differential
+  inspection directly matches **225 completed-depth exact results** and **225
+  cumulative counter prefixes**, including every deterministic TT field.
+
+Serial uninstrumented Release, five measurements plus one warmup, same material/
+initial position/TT budget/options as the approved baseline:
+
+| Depth | Candidate off ms | Candidate cold ms | Candidate warm ms |
+| --- | ---: | ---: | ---: |
+| 4 | 9.082 | 10.560 | 1.120 |
+| 5 | 139.296 | 134.946 | 137.586 |
+| 6 | 2,173.709 | 2,422.264 | 2,480.441 |
+
+Depth-five medians are roughly 4–6% lower than both same-session frozen controls.
+Depth-four off is slightly slower than controls; warm changes direction.
+Depth-six results overlap broad control distributions: its warm median is +0.80%
+versus the first control and -3.46% versus the ending control. Against the earlier
+approved baseline, candidate depth-six times are **4.02% / 8.36% / 7.71% higher**.
+These mixed observations and uncontrolled desktop/grouped run order make overall
+performance **inconclusive**; no stable overall speedup or attributable regression
+is established. Keep this limitation visible during review.
+
+Ignored local evidence: `work/m7.4a1/validation-20261023T163313Z/`, especially
+`report.md`, `comparison.json` / `comparison.csv`, all raw configuration logs,
+completed-depth comparisons and `m7.4a1-source-tests.patch`. All 403 files from
+M7.3 profiling and the approved M7.4 baseline were verified unchanged. Existing
+status work is preserved in `CURRENT_STATUS-before.md`. Only tracked documentation changed
+after measurements; source identity was unchanged throughout timing.
+
+This dirty implementation is **not authoritative Full CI acceptance**. Native
+Debug/Profile and the full controller/GUI matrix were not rerun; no coordinated
+Quick pass is claimed. Full local CI requires a separately authorized commit and
+aligned clean checkouts. No source changes were made to chase timing results.
+No commit, push, PR, merge or GitHub-settings change was performed.
+
+### M7.4a.1 controlled crossover: 2026-10-23 UTC
+
+After independent review approved the production/regression diff, the frozen
+baseline and candidate Release artifacts ran **144 fresh-process invocations**:
+six four-run blocks per configuration, three ABBA and three BAAB. Configuration
+order rotated between rounds. Each invocation retained the unchanged benchmark's
+one warmup, one measured search, initial position/full history, material evaluator,
+single-PV PLAY-only options and 8 MiB TT request. Warm TT had explicit population
+before warmup; cold clearing remained outside timing. No observation was excluded.
+
+The paired estimate is the median of six within-block geometric B/A time ratios
+(two adjacent A/B pairs per block); percentages below express time reduction,
+not comparisons with historical unpaired medians.
+
+| Depth / TT | Median paired time reduction | Faster blocks | Block B/A range |
+| --- | ---: | ---: | ---: |
+| 5 / off | 3.69% | 6/6 | 0.9336–0.9745 |
+| 5 / cold | 3.88% | 6/6 | 0.9551–0.9743 |
+| 5 / warm | 3.31% | 6/6 | 0.9503–0.9680 |
+| 6 / off (primary) | 4.68% | 6/6 | 0.8645–0.9796 |
+| 6 / cold | 3.85% | 6/6 | 0.9546–0.9816 |
+| 6 / warm | 2.54% | 4/6 | 0.9567–1.0300 |
+
+Depth-six off/cold also had lower measured CPU time in all six blocks. Depth-five
+CPU measurements are coarse (15.625 ms units); cold's median CPU ratio was 1.0541
+despite consistent wall-time reductions. Depth-six warm reversed direction in
+two blocks, so its apparent median benefit is **inconclusive**. A 2,603.041 ms
+baseline depth-six off observation with 2,531.25 ms CPU remains included. Neither
+thermal state nor hybrid-core residency was measured; desktop/OS effects remain
+possible. These results support retaining this separate optimization for review,
+not a universal speedup or an attributable regression in warm TT.
+
+All **144** invocations matched the established completed-depth checksums, final
+PVs, nodes, evaluations and emitted deterministic TT counters. Direct completed-
+depth inspection also passed: each frozen companion produced **45 records / 225
+exact completed-depth results and counter prefixes**, matching the established
+reference. These untimed results are retained alongside the timing results;
+the canonical executable exposes checksum evidence rather than raw per-depth
+scores. Executable/DLL hashes were checked before and after every invocation.
+Production code, regression tests and the canonical benchmark were not edited.
+
+New ignored evidence: `work/m7.4a1/ab-20261023T204000Z/`, including `report.md`,
+`timings.csv`, `observations.jsonl`, `blocks.csv`, `summary.csv`, `artifacts.json`,
+all raw logs, the predeclared schedule and a complete four-file review patch.
+The timed crossover took **398.784 s**, exit 0. All **646** existing files across
+M7.3 profiling, the M7.4 baseline and prior M7.4a.1 validation were verified
+unchanged. No commit/publication occurred; this dirty-tree benchmark investigation
+does not claim authoritative Full CI acceptance or new Linux/WASM performance.
+
+### M7.4 investigation directions (earlier planning snapshot)
+
+The following pre-implementation directions are retained as historical context.
+The reviewed M7.4a.1 implementation and its measured scope are recorded above;
+deferred encoding/allocation and TT bookkeeping still require separate approval.
 
 M7.3's architectural optimization and completed profiling investigation have been reviewed and accepted, followed by PR #19's merge. M7.4 is the next investigation direction; its concrete implementation design, correctness proof and expected benefit still require review. No M7.4 code or new speedup is established by this documentation update.
 
@@ -398,6 +589,6 @@ node tests/search/run_performance.mjs build/native-release work/m7.3/recheck-YYY
 
 ## 6. New-session handoff and maintenance
 
-> Read `AGENTS.md`, `docs/PROJECT_CONTEXT.md` and `docs/CURRENT_STATUS.md`. Verify actual GitHub/main/PR/CI and local worktree/stash state. M7.3 is merged at `f0a5affee25a333ff23df2343277e052a2c2ae81`; its completed profiling has been reviewed. M7.4 will investigate lazy depth-zero preparation and lower move-allocation/encoding overhead, then TT bookkeeping. These directions are proposals, not implemented behavior or measured gains. Review the concrete design before coding. Preserve exact scores/PVs, rule/history semantics, evaluator ABI and the M7.2 root policy. Do not publish or merge without authorization for that action and scope.
+> Read `AGENTS.md`, `docs/PROJECT_CONTEXT.md` and `docs/CURRENT_STATUS.md`. Verify actual GitHub/main/PR/CI and local worktree/stash state. M7.3 is merged at `f0a5affee25a333ff23df2343277e052a2c2ae81`; its completed profiling has been reviewed. M7.4a.1's narrow depth-zero ordering change is reviewed and implemented locally, uncommitted. Controlled Windows Release timing supports local benefits in five configurations; depth-six warm is inconclusive. Read section 4 and its ignored evidence before making performance claims. Deferred encoding/allocation and TT bookkeeping remain separately reviewed proposals. Preserve exact scores/PVs, rule/history semantics, evaluator ABI and the M7.2 root policy. Do not publish or merge without authorization for that action and scope.
 
 Update this file when milestones conclude, profiling becomes available, or PR/CI states change. Include verification date/SHA, distinguish executed results from checked logs, user reports and CI, and label local-only evidence. Modify `PROJECT_CONTEXT.md` only for enduring architecture/workflow decisions. Documentation maintenance is not standing permission to commit, push, create PRs or merge.
