@@ -5,6 +5,11 @@
 #include <iomanip>
 #include <sstream>
 
+// Adapter-private search capability; no public ChessCore/ABI extension.
+namespace chess_lab {
+std::size_t native_legal_move_count(const ChessCore &, const Position &);
+}
+
 bool ci_matrix=false;
 std::uint64_t search_count=0;
 struct Checkpoint {
@@ -380,6 +385,63 @@ void guarded_leaf_regressions() {
   std::cout<<"M7.4a.2 deterministic evidence records="<<leaf_evidence_records<<" hash="<<leaf_evidence_hash<<std::endl;
   group.finish();
 }
+void native_count_regressions() {
+  Checkpoint group("group M7.5b complete native leaf counts");
+  auto c=create_chess_core();std::size_t positions=0;
+  auto parity=[&](Position &p) {
+    const auto fen=c->export_fen(p);const auto key=c->position_key(p);
+    auto legal=c->legal_moves(p);
+    check(native_legal_move_count(*c,p)==legal.size(),"private count equals complete public legal list");
+    check(c->export_fen(p)==fen&&c->position_key(p)==key,"count leaves exact board unchanged");
+    // Existing owners keep their position-frame certificates across counting.
+    for(const auto &m:legal) {
+      const auto text=c->encode_move(p,*m);auto u=c->make_move(p,*m);
+      check(native_legal_move_count(*c,p)==c->legal_moves(p).size(),"child count parity");
+      c->undo_move(p,*u);
+      check(c->encode_move(p,*m)==text&&c->export_fen(p)==fen,"count preserves undo and certificate validity");
+    }
+    auto cloned=c->clone(p);
+    check(native_legal_move_count(*c,*cloned)==legal.size(),"count accepts genuine cloned native position");
+    ++positions;
+  };
+  for(const auto fen:{
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1",
+      "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+      "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R b KQkq - 0 1",
+      "7k/5K2/6Q1/8/8/8/8/8 b - - 0 1", "7k/6Q1/5K2/8/8/8/8/8 b - - 0 1",
+      "7K/5k2/6q1/8/8/8/8/8 w - - 0 1", "7K/6q1/5k2/8/8/8/8/8 w - - 0 1",
+      "4k3/8/8/8/8/8/8/4K3 w - - 0 1", "4k3/8/8/8/8/8/r7/K7 w - - 0 1",
+      "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1",
+      "1r2k3/P7/8/8/8/8/7p/4K3 w - - 0 1", "4k3/7P/8/8/8/8/p7/1R2K3 b - - 0 1",
+      "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2", "3k4/8/8/8/3pP3/8/8/K2R4 b - e3 0 1",
+      "4k3/8/8/3p4/8/8/8/4K3 w - d6 0 2"}) {
+    auto p=c->load_fen(fen);parity(*p);
+  }
+  for(Side side:{Side::white,Side::black})for(int clock:{98,99,100,149,150}) {
+    auto p=c->load_fen(std::string("4k3/8/8/8/8/8/8/R3K3 ")+(side==Side::white?"w":"b")+" - - "+std::to_string(clock)+" 1");parity(*p);
+    if(clock==100)native_leaf_case(*c,*p,GameHistory::starting_at(*c,*p,false),true);
+  }
+  // A valid repeatable middlegame with actual complete history, plus check-heavy
+  // high-branching imported boards with explicitly incomplete histories.
+  auto p=c->initial_position();auto h=GameHistory::starting_at(*c,*p,true);
+  for(const auto text:{"e2e4","e7e5","g1f3","b8c6","f1b5","a7a6","b5a4","g8f6","e1g1","f8e7","f1e1","b7b5","a4b3","d7d6","c2c3","e8g8"}) {
+    h=h.after_move(*c,*p,text);auto m=c->decode_move(*p,text);auto u=c->make_move(*p,*m);parity(*p);
+  }
+  native_leaf_case(*c,*p,h,true,2);
+  for(const auto fen:{
+      "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+      "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R b KQkq - 0 1"}) {
+    auto tactical=c->load_fen(fen);native_leaf_case(*c,*tactical,GameHistory::starting_at(*c,*tactical,false));
+  }
+  Tree synthetic;synthetic.nodes={{Side::white,{0}}};auto foreign=synthetic.initial_position();
+  bool rejected=false;try{native_legal_move_count(synthetic,*p);}catch(const std::invalid_argument&){rejected=true;}
+  check(rejected,"private capability rejects synthetic Core even with native Position");
+  rejected=false;try{native_legal_move_count(*c,*foreign);}catch(const std::invalid_argument&){rejected=true;}
+  check(rejected,"private capability rejects foreign Position");
+  std::cout<<"M7.5b count corpus positions="<<positions<<" deterministic records="<<leaf_evidence_records<<" hash="<<leaf_evidence_hash<<std::endl;
+  group.finish();
+}
 int main(int argc,char **argv)try {
   for(int i=1;i<argc;++i) {
     std::string arg=argv[i];
@@ -459,6 +521,6 @@ int main(int argc,char **argv)try {
   check(retained.completed&&retained.completed->depth==1&&retained.status==IterativeSearchStatus::cancelled,"committed depth retained on cancellation");
   ++search_count;auto failed=iterative_search(*c,*root,hist,*e,{3,true,1,true},{},[&](CompletedDepth){fail_at=calls+1;});
   check(failed.status==IterativeSearchStatus::evaluator_failed&&!failed.completed&&!failed.unevaluated_fallback,"late failure invalidates provisional depths");
-  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();total.finish();
+  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();total.finish();
   std::cout<<"M7.2 single-PV exact references, TT cross-policy, draw history, cancellation and failure passed"<<std::endl;
 }catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}

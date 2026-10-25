@@ -1,6 +1,8 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-**Latest review checkpoint (2026-10-24 UTC):** ChatGPT completed M7.4a.2 and TT investigation review and decided to retain the original guarded native leaf implementation unchanged. Windows is on `feature/m7.4a2-guarded-leaf`, base `1d461dfab38e2f105ecb67529192c34b880f3efc`, with the source/test patch uncommitted. The isolated in-place signature variation was not adopted. Section 4 records exact correctness/work equivalence, repeated workload-specific TT-off gains and local-only evidence. **TT-enabled neutrality has not been demonstrated; regression root cause remains unresolved.** This documentation handoff reruns no suites/benchmarks and claims no authoritative Full CI pass. Commit, synchronization and acceptance validation need separate authorization.
+**Latest handoff (2026-10-24 UTC):** M7.4a.2 merged through PR #24 at `f3aaee0a284b206a347786a8e5418c3773654a40`. M7.5a profiling is complete, reviewed and accepted. ChatGPT approved the original M7.5b implementation, tests and controlled performance evidence. Windows is on `feature/m7.5b-native-leaf-count` at that merged baseline, with three approved implementation/test changes and the two documentation updates uncommitted; the index is empty. Linux is clean on `main` at the same baseline. M7.5b has **no authoritative 54-gate Full CI yet**; commit and publication require separate authorization. Section 4 records the measured benefits, unresolved TT uncertainty and local-only provenance. The dated pre-commit checkpoints below are historical, not current branch or acceptance status.
+
+**Earlier M7.4a.2 pre-commit review checkpoint (2026-10-24 UTC):** ChatGPT completed M7.4a.2 and TT investigation review and decided to retain the original guarded native leaf implementation unchanged. Windows is on `feature/m7.4a2-guarded-leaf`, base `1d461dfab38e2f105ecb67529192c34b880f3efc`, with the source/test patch uncommitted. The isolated in-place signature variation was not adopted. Section 4 records exact correctness/work equivalence, repeated workload-specific TT-off gains and local-only evidence. **TT-enabled neutrality has not been demonstrated; regression root cause remains unresolved.** This documentation handoff reruns no suites/benchmarks and claims no authoritative Full CI pass. Commit, synchronization and acceptance validation need separate authorization.
 
 **Earlier M7.4a.1 validation checkpoint (2026-10-23 UTC):** M7.4a.1 depth-zero ordering remains uncommitted on `feature/m7.4a1-leaf-ordering` at base `b04a198f543aad2a1eb9d9475db23779b010ca71`. ChatGPT independently approved the production/regression diff; controlled performance validation is now complete. Interleaved ABBA/BAAB measurements support a repeatable local improvement for depth-six TT-off/cold and depth-five off/cold/warm; depth-six warm remains inconclusive. Section 4 records the paired results and limitations. Earlier native/WASM correctness results remain historical validation, not a new Full CI pass. No M7.4a.2 deferred encoding or TT bookkeeping change is included.
 
@@ -16,15 +18,16 @@
 
 **Stable context:** [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Read the root [AGENTS.md](../AGENTS.md) before implementation. ChatGPT supports architecture/design review; Codex implements only within the user's authorized scope.
 
-## 1. Repository checkpoint: M7.4a.2, 2026-10-24 UTC
+## 1. Repository checkpoint: M7.5b, 2026-10-24 UTC
 
-The active checkout and review decision are current to this handoff. Earlier
-PR/CI rows retain their recorded provenance; GitHub state was not reverified
-during this documentation-only task.
+The active Windows/Linux states were inspected read-only for this documentation
+handoff. GitHub PR #24 was reverified merged on 2026-10-24 at 19:37:10 UTC;
+earlier PR/CI rows retain their original provenance. Tests and benchmarks below
+are checked existing evidence, not newly executed validation.
 
 | Item | Verified state |
 | --- | --- |
-| M7.4a.2 source baseline | `1d461dfab38e2f105ecb67529192c34b880f3efc`; current feature HEAD and the clean Linux `main` checkpoint recorded by the TT investigation |
+| M7.4a.2 integration / M7.5b baseline | [PR #24](https://github.com/yctekmen-sudo/chess-engine-lab/pull/24) merged 2026-10-24; `f3aaee0a284b206a347786a8e5418c3773654a40`, current Windows feature HEAD and clean Linux `main` |
 | M7.2 | Merged; single-PV PLAY-only root search and controller root draw arbitration, including fixed-depth cancellation validation |
 | M7.3 implementation | **Merged into `main`** at `f0a5affee25a333ff23df2343277e052a2c2ae81` |
 | M7.3 PR | [#19: M7.3 (draft): Reuse prepared legal moves and annotate draw claims](https://github.com/yctekmen-sudo/chess-engine-lab/pull/19), **closed and merged**; “draft” remains in its historical title |
@@ -33,12 +36,14 @@ during this documentation-only task.
 | M7.3 PR-head CI | Native Debug/Release/Profile, WebAssembly correctness, M6 controller, and M7 GUI including Windows smoke: completed successfully; links below |
 | Local M7.3 validation | Historical profiling-handoff log records native Release CTest **12/12 passed**, 0 failed, 4.68 s; newly executed local CI results are recorded in section 4 |
 | Profiling investigation | **Completed and reviewed**; accepted with M7.3 per the user's handoff and PR #19's recorded correctness/performance acceptance notes; raw artifacts remain local |
-| Next action | **M7.4a.2 original implementation retained after review**; final four-file review, then separately authorized commit and clean, aligned Full CI. TT attribution is unresolved; further optimizations need separate scope |
+| Next action | **M7.5b source/test and performance review approved**; final five-file documentation handoff. Commit, clean aligned Full CI and publication remain pending applicable separate authorization; TT-enabled neutrality remains unproven |
 | Documentation handoff | [PR #20](https://github.com/yctekmen-sudo/chess-engine-lab/pull/20), merged into the local baseline above |
 | Local CI implementation | [PR #21](https://github.com/yctekmen-sudo/chess-engine-lab/pull/21) merged at `bae9da7`; prior authoritative validation at its head `6a0b384` |
 | Infrastructure retirement | PR #22 merged at `b04a198`; authoritative Full local CI at its head `9b5ece5f527fb154a669485e863f9b047cd6a9ef` passed 54/54 gates, exit 0, 441.429 s; local evidence `work/ci/20261023T051529887Z-ec9f96f3/` |
 | Approved investigation | `investigation/m7.4-lazy-leaf` at `b04a198`: fresh five-repetition Release baseline and first-step design reviewed and approved by ChatGPT |
-| Active implementation | `feature/m7.4a2-guarded-leaf` at `1d461df`, dirty: original guarded native leaf preparation/tests, development documentation and this handoff; no commit/publication authorized |
+| Active implementation | `feature/m7.5b-native-leaf-count` at `f3aaee0`, dirty: three approved implementation/test files plus `docs/development.md` and this status file; no commit/publication authorized |
+| M7.5a investigation | Completed, reviewed and accepted; measurements remain attributed to its separate frozen baseline session |
+| M7.5b acceptance | Focused native/WASM correctness and controlled crossover complete; no authoritative Full CI on an M7.5b commit yet |
 
 The successful PR-head CI results below belong to M7.3 PR #19 at `54ec7d9`; they are not proof of a pass at the merge commit or an updated PR #20 head. Check CI for the actual revision under review.
 
@@ -55,11 +60,18 @@ The push-triggered native workflow [39823909737](https://github.com/yctekmen-sud
 
 ### Protect existing local work
 
-At the M7.4a.2 final handoff, preserve the original source/test patch and all
+At the earlier M7.4a.2 pre-commit handoff, preserve the original source/test patch and all
 ignored profiling, benchmark and CI artifacts. The TT investigation verified
 3,743 historical files unchanged; preserve its audit and manifest too. Linux
-remains clean on `main` at `1d461df`; this documentation task does not modify
-that checkout. The paragraphs below record earlier checkout states as history.
+was then clean on `main` at `1d461df`. Those checkout states are historical.
+
+For the current M7.5b handoff, preserve all **5,555** previously verified historical
+files, the **213** frozen local artifacts and the complete original ignored
+`work/m7.5b/implementation-20261024T210345Z/` directory. Linux is now clean on
+`main` at `f3aaee0`; this task does not modify it. Its stale local `origin/main`
+tracking ref remains at `1d461df` (status reports ahead 2); no fetch or sync was
+performed. Existing branches, stashes, remotes and worktrees are preserved.
+The paragraphs below record earlier checkout states as history.
 
 At the earlier retirement-preparation checkpoint, both checkouts used
 `chore/retire-github-actions` from `bae9da7`. Original
@@ -71,7 +83,7 @@ checkout's existing local remote after a stalled Linux HTTPS fetch was terminate
 The earlier `work/project-handoff/` documentation worktree is retained unchanged.
 The harness itself never switches/resets/synchronizes checkouts.
 
-At this investigation's start, Windows was clean on `main` at `b04a198`; a new
+At the M7.4 investigation's start, Windows was clean on `main` at `b04a198`; a new
 `investigation/m7.4-lazy-leaf` branch was created there. Linux remains clean on
 `chore/retire-github-actions` at `9b5ece5`, unchanged by this investigation. Existing
 worktrees/stashes and all 257 M7.3 profiling files were preserved. The only tracked
@@ -182,7 +194,11 @@ Notable self-sample groups (off/cold): heap allocation/free exports **21.8% / 18
 
 The historical M7.2 `Traversal::claim` share of about 84.7% was **inclusive**, overlapping and measured before M7.3. It is not a present-day hotspot share.
 
-## 4. Local CI infrastructure and M7.4 next actions
+## 4. Local CI and performance milestone checkpoints
+
+**Historical local CI implementation snapshot:** the following infrastructure
+task and its validation are retained with their original provenance. The current
+M7.5b documentation-only handoff is recorded later in this section.
 
 The current authorized implementation task is local CI infrastructure, not search
 optimization. See [local-ci.md](local-ci.md) for the new entrypoint, coverage map,
@@ -565,6 +581,11 @@ does not claim authoritative Full CI acceptance or new Linux/WASM performance.
 
 ### M7.4a.2 guarded native leaf preparation: 2026-10-24 UTC
 
+**Historical pre-commit snapshot:** the implementation and measurements below
+are retained unchanged. The subsequent completion checkpoint records PR #24 and
+committed Full CI; the uncommitted acceptance statements in this snapshot do not
+describe the current M7.5b branch.
+
 **Reviewed decision:** retain the original implementation unchanged on
 `feature/m7.4a2-guarded-leaf`, base
 `1d461dfab38e2f105ecb67529192c34b880f3efc`. The source/test patch for
@@ -684,6 +705,106 @@ A separately authorized commit and clean, identical Windows/Linux checkouts are
 required before the complete 54-gate acceptance run. No commit, push, PR or merge
 is authorized by this handoff.
 
+### M7.4a.2 completion and M7.5a accepted investigation: 2026-10-24 UTC
+
+[PR #24](https://github.com/yctekmen-sudo/chess-engine-lab/pull/24) merged M7.4a.2
+into main at `f3aaee0a284b206a347786a8e5418c3773654a40` on 2026-10-24.
+Its approved feature commit `8b68e241717a8e205d86904fc2d26f9077dca76f` passed
+authoritative Full local CI: **54/54** command gates, Windows **24/24**, Linux
+**30/30**, worker/coordinator exits **0/0/0**, verdict `passed` and authoritative
+full pass `true`, with clean aligned checkouts. Checked local-only evidence:
+`work/ci/20261024T185729687Z-1e5cefff/report.md` and `report.json`, plus
+`work/m7.4a2/publication-20261024T185446Z/`. These are historical M7.4a.2 results,
+not M7.5b acceptance. M7.4a.2's unresolved TT-performance uncertainty remains
+historical and unresolved; merging did not demonstrate TT-enabled neutrality.
+
+**M7.5a is complete, reviewed and accepted.** Its separate baseline session at
+`f3aaee0` measured initial-position depth-six uninstrumented native Release
+TT-off throughput of **348,774 NPS**. Sampling of TT-off execution classified
+**60.86%** of sampled CPU stacks under the exclusive move/list owner category;
+the **41.76%** inclusive heap-path stack union overlaps those owner categories
+and must not be added to them. Evaluator stacks accounted for **2.20%**.
+Provenance: `work/m7.5a/investigation-20261024T202503Z/report.md`,
+`throughput.csv`, `cpu-breakdown.json`, `artifacts.json` and
+`canonical-release/results.json`. These single-machine Windows/MSVC,
+material-evaluator measurements describe that workload/session; sampling
+categories are not independent elapsed-time savings estimates.
+
+### M7.5b approved native leaf count handoff: 2026-10-24 UTC
+
+The original implementation replaces unused native move-wrapper allocation with
+an **adapter-private complete native legal-count path**, only at the previously
+guarded depth-zero leaves. Full legal generation remains required. TT-enabled,
+EP-sensitive, claim-sensitive and synthetic-adapter cases retain eager handling.
+No public ChessCore, evaluator ABI, controller, GUI or dependency changes are
+included. The original source/test patch remains approved and unchanged; no
+experimental variant is adopted.
+
+At frozen initial-position depth six with TT off, **6,703,200 unused native move
+wrappers** are avoided across 266,606 guarded leaves. Actual full legal-generation
+calls remain **385,132**, visited nodes **381,938** and evaluations **328,475**.
+Decisions, exact scores, complete PVs/endings, claims and deterministic statistics
+match the frozen merged M7.4a.2 baseline. Instrumented counters are separate from
+uninstrumented Release timings; fewer public boxing calls are not fewer actual
+legal generations.
+
+Checked existing correctness evidence, not rerun for this documentation task:
+
+- **132 additional regression searches**, with a **43-position** complete-count
+  corpus, retaining all earlier assertions and matrices.
+- Native **Release / Debug / Profile 12/12 each**; complete pinned Emscripten
+  **4.0.10 / SDK Node 22.16.0 WASM 11/11**, all final exits 0.
+- **1,855 direct structured differential records**, **225 completed-depth
+  comparisons** and corresponding deterministic counter prefixes. Native/WASM
+  records agree after lossless hexadecimal-float spelling normalization, with
+  no numerical tolerance; the earlier 1,703 records per target remain intact.
+- **2,000 diagnostic cancellation injections**, plus targeted helper/evaluator
+  failures and restoration checks; no diagnostic hooks enter public interfaces.
+
+The controlled **408-invocation** crossover compares the frozen merged baseline
+against the original candidate with the same frozen evaluator DLL through normal
+identity/ABI checks. It covers 17 configurations, each with six four-run blocks
+(three ABBA, three BAAB), rotating configuration order, equivalent warmup and
+warm-TT population, and cold clearing outside timing. All raw observations,
+including outliers, and exact result/work checks are retained. Reductions below
+are medians of contemporaneous paired block ratios, not historical unpaired
+median comparisons.
+
+| TT-off workload | Median paired time reduction | Faster blocks |
+| --- | ---: | ---: |
+| Initial position, depth 4 | 22.36% | 6/6 |
+| Initial position, depth 5 | 29.75% | 6/6 |
+| Initial position, depth 6 | 31.71% | 6/6 |
+| Tactical, depth 4 | 39.43% | 6/6 |
+| Middlegame, depth 4 | 42.84% | 6/6 |
+
+Descriptive initial-position depth-six TT-off throughput in **this crossover**
+was approximately **320K baseline versus 467K candidate NPS**. It is distinct
+from the separate M7.5a baseline session's 348,774 NPS; do not use that historical
+value to attribute the paired improvement. **TT-enabled neutrality remains
+unproven:** depth-six TT-warm was **0.89% slower**, with **four of six blocks
+favoring the baseline**. TT-enabled count-path activations are zero; the cause
+of small timing differences is unresolved. These are single-machine,
+workload-specific findings without thermal/frequency/core-affinity or desktop
+isolation, not universal speedups or playing-strength claims.
+
+Original ignored, local-only evidence (not available through GitHub or a fresh
+clone): `work/m7.5b/implementation-20261024T210345Z/`. Preserve its `report.md`,
+`final-audit.json`, `review-identity.json`, `artifacts.json`,
+`diagnostic-results.json`, `differential.json`, `wasm-differential.json`,
+cancellation/native/WASM logs, and `ab/` raw timings, block summaries and artifact
+identities. Do not overwrite its frozen binaries or earlier M7.3/M7.4 evidence.
+The implementation audit verified **5,555 historical files** and **213 frozen
+local artifacts** unchanged; this documentation handoff rechecks preservation.
+
+**Acceptance:** ChatGPT approved the original source/tests and controlled
+performance evidence. The three implementation/test files and two documentation
+updates remain **uncommitted**, index empty. **No authoritative 54-gate Full CI
+has run for M7.5b.** Linux remains clean on `main` at the merged baseline.
+Commit and publication require separate authorization; aligned clean-commit Full
+CI remains pending. No benchmark or correctness suite was rerun for this
+documentation-only handoff.
+
 ### M7.4 investigation directions (earlier planning snapshot)
 
 The following pre-implementation directions are retained as historical context.
@@ -722,6 +843,6 @@ node tests/search/run_performance.mjs build/native-release work/m7.3/recheck-YYY
 
 ## 6. New-session handoff and maintenance
 
-> Read `AGENTS.md`, `docs/PROJECT_CONTEXT.md` and `docs/CURRENT_STATUS.md`. Verify actual GitHub/main/PR/CI and local worktree/stash state. M7.3 and its profiling review are complete. M7.4a.2's original guarded native leaf implementation is retained after ChatGPT review on `feature/m7.4a2-guarded-leaf`, base `1d461dfab38e2f105ecb67529192c34b880f3efc`, uncommitted. Do not incorporate the rejected in-place variation. Section 4 records correctness/work equivalence and repeatable workload-specific TT-off gains; TT-enabled neutrality is unproven and regression attribution unresolved. Preserve all ignored evidence and the approved two-file patch. Commit, clean aligned Full CI, publication and integration need their applicable separate authorization. Further allocation/TT optimization requires separate scope. Preserve exact scores/PVs, rule/history semantics, evaluator ABI and the M7.2 root policy.
+> Read `AGENTS.md`, `docs/PROJECT_CONTEXT.md` and `docs/CURRENT_STATUS.md`. Verify actual GitHub/main/PR/CI and local worktree/stash state. M7.4a.2 merged through PR #24 at `f3aaee0a284b206a347786a8e5418c3773654a40`; its approved feature commit passed authoritative 54-gate Full CI. M7.5a profiling is complete, reviewed and accepted. ChatGPT approved M7.5b original source/tests and controlled evidence on `feature/m7.5b-native-leaf-count` at that merged baseline; the five-file handoff remains uncommitted, index empty, with no authoritative M7.5b Full CI yet. Linux is clean on main at the same baseline. Section 4 records exact work equivalence and paired workload-specific TT-off gains; TT-enabled neutrality remains unproven. Preserve the approved three-file patch and all ignored evidence. Commit, clean aligned Full CI and publication need applicable separate authorization. Preserve exact scores/PVs, rule/history semantics, evaluator ABI and the M7.2 root policy.
 
 Update this file when milestones conclude, profiling becomes available, or PR/CI states change. Include verification date/SHA, distinguish executed results from checked logs, user reports and CI, and label local-only evidence. Modify `PROJECT_CONTEXT.md` only for enduring architecture/workflow decisions. Documentation maintenance is not standing permission to commit, push, create PRs or merge.

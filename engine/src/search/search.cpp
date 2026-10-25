@@ -10,6 +10,7 @@ namespace chess_lab {
 static_assert(std::is_trivially_copyable_v<SearchScore>);
 // Native adapter identification; synthetic adapters retain custom status and clock semantics.
 bool native_chess_core(const ChessCore &) noexcept;
+std::size_t native_legal_move_count(const ChessCore &, const Position &);
 SearchScore SearchScore::finite(double v) {
   if (!std::isfinite(v))
     throw std::invalid_argument("nonfinite search score");
@@ -200,14 +201,14 @@ enum class PreparationPurpose { eager, search_horizon };
 struct PreparedNode {
   std::unique_ptr<const PositionSnapshot> snapshot;
   std::vector<OrderedMove> legal;
-  std::vector<std::unique_ptr<Move>> raw_legal;
+  std::size_t native_legal_count = 0;
   PreparationMode mode = PreparationMode::eager;
   RepetitionSignature repetition;
   bool claims_ready = false;
   bool claim_now_threefold = false;
   bool claim_now_fifty = false;
   std::size_t legal_count() const {
-    return mode == PreparationMode::eager ? legal.size() : raw_legal.size();
+    return mode == PreparationMode::eager ? legal.size() : native_legal_count;
   }
 };
 RepetitionSignature snapshot_repetition(const PositionSnapshot &s) {
@@ -243,10 +244,12 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
       !node.snapshot->en_passant_square() && node.snapshot->halfmove_clock() < 99) {
     node.repetition = snapshot_repetition(*node.snapshot);
     if (distinct_with_child(*leaf_history, node.repetition, token)) {
-      // These native owners stay in this position frame until child() unwinds.
-      // No text consumer is reachable, but full legal availability is required.
-      node.raw_legal = c.legal_moves(p);
-      for (std::size_t i = 0; i < node.raw_legal.size(); ++i)
+      // No move/text consumer is reachable in this certified position frame.
+      // Generate the complete set, retaining its count without move owners.
+      if (token) detail::tt_poll(*token);
+      node.native_legal_count = native_legal_move_count(c, p);
+      if (token) detail::tt_poll(*token); // Also covers zero-move terminals.
+      for (std::size_t i = 0; i < node.native_legal_count; ++i)
         if (token) detail::tt_poll(*token);
       node.mode = PreparationMode::native_claim_free_leaf;
       return node;
