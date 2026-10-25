@@ -1,4 +1,5 @@
 #include "chess_lab/chess_core.hpp"
+#include "native_move_batch.hpp"
 #include "chess.hpp"
 
 #include <array>
@@ -229,4 +230,54 @@ std::size_t native_legal_move_count(const ChessCore& c, const Position& p) {
     (void)cast<Core>(c);
     return moves(cast<Pos>(p)).size();
 }
+namespace detail {
+struct NativeMoveBatch {
+    std::shared_ptr<const int> owner;
+    std::uint64_t top = 0;
+    std::array<std::uint16_t, chess::constants::MAX_MOVES> identities{};
+    std::size_t size = 0;
+    bool invalidated = false;
+};
+void NativeMoveBatchDeleter::operator()(NativeMoveBatch* batch) const noexcept {
+    delete batch;
+}
+NativeMoveBatchOwner prepare_native_move_batch(const ChessCore& core,
+                                               const Position& position) {
+    (void)cast<Core>(core);
+    const auto& p = cast<Pos>(position);
+    NativeMoveBatchOwner batch(new NativeMoveBatch);
+    batch->owner = p.identity;
+    batch->top = p.top;
+    const auto legal = moves(p); // Complete existing generator, exactly once.
+    for (auto move : legal) batch->identities.at(batch->size++) = move.move();
+    return batch;
+}
+std::size_t native_move_batch_size(const NativeMoveBatch& batch) noexcept {
+    return batch.size;
+}
+// Batch ordinals can never fall through to public stale-move revalidation.
+static chess::Move checked_batch_member(const ChessCore& core, const Position& position,
+                                const NativeMoveBatch& batch, std::size_t ordinal) {
+    (void)cast<Core>(core);
+    const auto& p = cast<Pos>(position);
+    if (batch.invalidated || batch.owner != p.identity || batch.top != p.top ||
+        ordinal >= batch.size) invalid();
+    return chess::Move(batch.identities[ordinal]);
+}
+std::string encode_native_batch_member(const ChessCore& core,
+                                       const Position& position,
+                                       const NativeMoveBatch& batch,
+                                       std::size_t ordinal) {
+    return chess::uci::moveToUci(checked_batch_member(core, position, batch, ordinal));
+}
+std::unique_ptr<Move> materialize_native_batch_member(
+    const ChessCore& core, const Position& position, const NativeMoveBatch& batch,
+    std::size_t ordinal) {
+    const auto move = checked_batch_member(core, position, batch, ordinal);
+    return std::make_unique<Mv>(move, cast<Pos>(position));
+}
+void invalidate_native_move_batch(NativeMoveBatch& batch) noexcept {
+    batch.invalidated = true;
+}
+} // namespace detail
 }

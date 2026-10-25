@@ -1,5 +1,6 @@
 #include "m4_fixtures.hpp"
 #include "../../engine/src/search/transposition_table_internal.hpp"
+#include "../../engine/src/native_move_batch.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <iomanip>
@@ -390,18 +391,54 @@ void native_count_regressions() {
   auto c=create_chess_core();std::size_t positions=0;
   auto parity=[&](Position &p) {
     const auto fen=c->export_fen(p);const auto key=c->position_key(p);
+    auto batch=detail::prepare_native_move_batch(*c,p);
     auto legal=c->legal_moves(p);
+    check(detail::native_move_batch_size(*batch)==legal.size(),"batch complete count parity");
+    std::vector<std::pair<std::string,std::size_t>> members;
+    for(std::size_t i=0;i<detail::native_move_batch_size(*batch);++i)
+      members.emplace_back(detail::encode_native_batch_member(*c,p,*batch,i),i);
+    std::sort(members.begin(),members.end());
+    std::vector<std::string> public_texts;
+    for(const auto &move:legal)public_texts.push_back(c->encode_move(p,*move));
+    std::sort(public_texts.begin(),public_texts.end());
+    for(std::size_t i=0;i<members.size();++i)check(members[i].first==public_texts[i],"batch complete canonical UCI parity");
     check(native_legal_move_count(*c,p)==legal.size(),"private count equals complete public legal list");
     check(c->export_fen(p)==fen&&c->position_key(p)==key,"count leaves exact board unchanged");
     // Existing owners keep their position-frame certificates across counting.
     for(const auto &m:legal) {
-      const auto text=c->encode_move(p,*m);auto u=c->make_move(p,*m);
+      const auto text=c->encode_move(p,*m);
+      const auto ordinal=std::find_if(members.begin(),members.end(),[&](const auto &v){return v.first==text;})->second;
+      auto materialized=detail::materialize_native_batch_member(*c,p,*batch,ordinal);
+      auto reference=c->make_move(p,*m);const auto child_fen=c->export_fen(p);c->undo_move(p,*reference);
+      auto u=c->make_move(p,*materialized);
+      check(c->export_fen(p)==child_fen,"batch materialized child exact board parity");
+      bool rejected=false;try{detail::encode_native_batch_member(*c,p,*batch,ordinal);}catch(const std::invalid_argument&){rejected=true;}
+      check(rejected,"parent batch rejected while child frame active");
+      auto child_batch=detail::prepare_native_move_batch(*c,p);
       check(native_legal_move_count(*c,p)==c->legal_moves(p).size(),"child count parity");
+      if(detail::native_move_batch_size(*child_batch)) {
+        auto nested=detail::materialize_native_batch_member(*c,p,*child_batch,0);
+        auto nested_token=c->make_move(p,*nested);c->undo_move(p,*nested_token);
+        check(!detail::encode_native_batch_member(*c,p,*child_batch,0).empty(),"child batch survives nested strict undo");
+      }
       c->undo_move(p,*u);
       check(c->encode_move(p,*m)==text&&c->export_fen(p)==fen,"count preserves undo and certificate validity");
+      check(detail::encode_native_batch_member(*c,p,*batch,ordinal)==text,"batch original ordinal survives sorting and undo");
+      rejected=false;try{detail::encode_native_batch_member(*c,p,*child_batch,0);}catch(const std::invalid_argument&){rejected=true;}
+      check(rejected,"undone child batch cannot execute in parent");
+      auto sibling=c->make_move(p,*materialized);
+      rejected=false;try{detail::materialize_native_batch_member(*c,p,*child_batch,0);}catch(const std::invalid_argument&){rejected=true;}
+      check(rejected,"old child batch rejected on sibling re-entry");c->undo_move(p,*sibling);
     }
     auto cloned=c->clone(p);
     check(native_legal_move_count(*c,*cloned)==legal.size(),"count accepts genuine cloned native position");
+    bool rejected=false;try{detail::materialize_native_batch_member(*c,*cloned,*batch,0);}catch(const std::invalid_argument&){rejected=true;}
+    check(rejected,"batch rejects cloned position identity");
+    rejected=false;try{detail::encode_native_batch_member(*c,p,*batch,legal.size());}catch(const std::invalid_argument&){rejected=true;}
+    check(rejected,"batch rejects out of range ordinal");
+    detail::invalidate_native_move_batch(*batch);
+    rejected=false;try{detail::encode_native_batch_member(*c,p,*batch,0);}catch(const std::invalid_argument&){rejected=true;}
+    check(rejected,"invalidated batch never revives");
     ++positions;
   };
   for(const auto fen:{
@@ -439,7 +476,37 @@ void native_count_regressions() {
   check(rejected,"private capability rejects synthetic Core even with native Position");
   rejected=false;try{native_legal_move_count(*c,*foreign);}catch(const std::invalid_argument&){rejected=true;}
   check(rejected,"private capability rejects foreign Position");
+  rejected=false;try{detail::prepare_native_move_batch(synthetic,*p);}catch(const std::invalid_argument&){rejected=true;}
+  check(rejected,"batch generation rejects synthetic Core");
+  auto native_batch=detail::prepare_native_move_batch(*c,*p);
+  rejected=false;try{detail::encode_native_batch_member(synthetic,*p,*native_batch,0);}catch(const std::invalid_argument&){rejected=true;}
+  check(rejected,"batch description rejects foreign Core");
+  rejected=false;try{detail::materialize_native_batch_member(*c,*foreign,*native_batch,0);}catch(const std::invalid_argument&){rejected=true;}
+  check(rejected,"batch materialization rejects foreign Position");
+  const auto fen=c->export_fen(*p);c->reset(*p,fen);
+  rejected=false;try{detail::encode_native_batch_member(*c,*p,*native_batch,0);}catch(const std::invalid_argument&){rejected=true;}
+  check(rejected,"reset invalidates batch lifetime even for identical FEN");
+  detail::NativeMoveBatchOwner expired;
+  {auto doomed=c->initial_position();expired=detail::prepare_native_move_batch(*c,*doomed);}
+  auto replacement=c->initial_position();
+  rejected=false;try{detail::encode_native_batch_member(*c,*replacement,*expired,0);}catch(const std::invalid_argument&){rejected=true;}
+  check(rejected,"destroyed position identity cannot be reused by a batch");
   std::cout<<"M7.5b count corpus positions="<<positions<<" deterministic records="<<leaf_evidence_records<<" hash="<<leaf_evidence_hash<<std::endl;
+  group.finish();
+}
+void native_batch_regressions() {
+  Checkpoint group("group M7.5c.2 native TT leaf batches");
+  auto c=create_chess_core();auto p=c->initial_position();auto h=GameHistory::starting_at(*c,*p,true);
+  const std::vector<std::string> cycle={"g1f3","g8f6","f3g1","f6g8"};
+  for(int i=0;i<7;++i){auto text=cycle[i%4];h=h.after_move(*c,*p,text);auto m=c->decode_move(*p,text);auto u=c->make_move(*p,*m);}
+  // Non-compact cases exercise hint/numeric cold/warm, ignored/zero-capacity TT,
+  // both root policies, MultiPV, previous-PV and all existing exact record fields.
+  native_leaf_case(*c,*p,h);
+  for(const auto fen:{"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+                      "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"}) {
+    auto root=c->load_fen(fen);native_leaf_case(*c,*root,GameHistory::starting_at(*c,*root,false));
+  }
+  std::cout<<"M7.5c.2 batch deterministic evidence records="<<leaf_evidence_records<<" hash="<<leaf_evidence_hash<<std::endl;
   group.finish();
 }
 int main(int argc,char **argv)try {
@@ -521,6 +588,6 @@ int main(int argc,char **argv)try {
   check(retained.completed&&retained.completed->depth==1&&retained.status==IterativeSearchStatus::cancelled,"committed depth retained on cancellation");
   ++search_count;auto failed=iterative_search(*c,*root,hist,*e,{3,true,1,true},{},[&](CompletedDepth){fail_at=calls+1;});
   check(failed.status==IterativeSearchStatus::evaluator_failed&&!failed.completed&&!failed.unevaluated_fallback,"late failure invalidates provisional depths");
-  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();total.finish();
+  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();native_batch_regressions();total.finish();
   std::cout<<"M7.2 single-PV exact references, TT cross-policy, draw history, cancellation and failure passed"<<std::endl;
 }catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}

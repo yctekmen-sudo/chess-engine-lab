@@ -459,7 +459,7 @@ and the original ignored `work/m7.5b/implementation-20261024T210345Z/`
 are not published through GitHub. Preserve the **5,555 historical files**, **213
 frozen local artifacts**, frozen binaries and original three-file review patch.
 
-**Current acceptance:** ChatGPT approved the original M7.5b implementation/tests
+**Acceptance at that historical checkpoint:** ChatGPT approved the original M7.5b implementation/tests
 and controlled evidence. On `feature/m7.5b-native-leaf-count` at `f3aaee0`,
 the three implementation/test files plus these two documentation files remain
 uncommitted, index empty. Linux remains clean on main at the merged baseline.
@@ -467,6 +467,137 @@ There is **no authoritative 54-gate Full CI for M7.5b yet**. Commit and publicat
 need separate authorization; clean aligned Full validation follows the
 [local CI guide](local-ci.md). Documentation maintenance does not authorize
 benchmark reruns or changes to frozen evidence.
+
+## M7.5c accepted implementation checkpoint: 2026-10-25 (America/New_York)
+
+Base is the local M7.5b PR #25 merge
+`5f3654c80cdc7ad3f7c01a9c0f70877a1bd531e2`. ChatGPT accepted **Choice 1** after
+reviewing M7.5c.2 and M7.5c.3: **retain the original compact native TT-leaf batch
+unchanged, with the measured regressions explicitly retained as known tradeoffs**.
+No performance workaround, selective fallback or diagnostic variant is adopted.
+
+### Scope and invariants
+
+The adapter-private batch owns compact complete native move identities and a
+position-lifetime/frame certificate. Only genuine depth-zero search children
+with an **effective hint-only or certified numeric TT** select it. Complete legal
+generation, UCI encoding, canonical sorting, capture/pawn/legal-EP metadata and
+legal TT-hint validation remain intact. Ordinary leaf preparation omits individual
+polymorphic move wrappers; exceptional intended-claim lookahead materializes a
+certified ordinary move and uses the existing make/undo restoration path.
+
+Public ChessCore/evaluator interfaces and ABI, move validation, lifetime/frame
+checks, cancellation, error propagation, restoration, terminal/draw semantics,
+exact decisions/scores/PVs and deterministic counters are preserved. Roots,
+positive-depth nodes, TT-off M7.5b count leaves, synthetic adapters and speculative
+claim children keep their established paths. No TT bookkeeping, evaluator,
+controller, GUI or dependency changes are included.
+
+### Existing correctness and allocation evidence
+
+Focused implementation checks passed native **Release/Debug/Profile 12/12 each**
+and complete pinned **Emscripten 4.0.10 / SDK Node 22.16.0 WASM 11/11**. Evidence
+includes **162 new regression searches**, **2,053 exact structured differential
+records per platform**, **225 exact completed-depth results and deterministic work
+prefixes**, **2,000 cancellation injections**, and allocation, evaluator,
+materialization and undo-failure/restoration checks. Interrupted/failed searches
+retain the existing score-validity and restoration contracts. These are existing
+implementation results, not reruns for this documentation task.
+
+Initial-position depth-six numeric-TT diagnostics avoided **7,557,314 wrappers
+cold / 7,557,332 warm**. Both modes create **302,740 batch owners**, with **45
+exceptional leaf encounters / 1,052 materializations**. Full legal generations
+**356,926**, visited nodes **355,879** and evaluations **301,184**, along with
+complete results and deterministic statistics, remain unchanged. These are avoided
+individual wrappers, not total allocations eliminated; batch ownership, temporary
+vectors, snapshots and exceptional materializations still have costs.
+
+### Controlled performance: keep TT policies separate
+
+The original **1,008 fresh-process invocation** experiment used an **8 MiB
+certified-numeric TT request**, 21 configurations, two independent serial sessions
+and six balanced ABBA/BAAB blocks per configuration/session. Depth-six cold
+paired reductions were **18.00% / 17.87%**, warm **19.15% / 18.32%**. Its separate
+repetition-cold regression was **1.44% / 2.07%**, and middlegame TT-off control
+regression **4.24% / 2.49%**. All raw observations and outliers remain retained.
+
+The real native UCI defaults are **Hash=16 MiB requested, NumericTT=false** and
+value policy 1. This is an attached effective **hint-only** table, not TT disabled.
+The separate **336-invocation default-policy** study used the iterative API with
+`TranspositionTableUse{&table, EvaluatorCacheCompatibility::not_certified, 1}`.
+Actual allocated capacity was verified as **9,044,156 bytes**, with positive hint,
+probe and store activity and zero numeric exact/bound reuse. It comprised seven
+configurations, two independently launched serial sessions and six balanced blocks
+each. The same frozen material DLL, options and original complete replayed or
+explicitly incomplete imported-FEN histories were preserved.
+
+| Default-policy workload | Session 1 paired time reduction | Session 2 paired time reduction |
+| --- | --- | --- |
+| Initial depth-six hint-only cold | 18.27% | 18.06% |
+| Initial depth-six hint-only warm | 17.22% | 17.11% |
+| Tactical depth-four hint-only cold | 19.97% | 20.06% |
+| Tactical depth-four hint-only warm | 20.57% | 19.98% |
+| Repetition depth-four hint-only cold | -2.73% (slower) | -2.62% (slower) |
+| Repetition depth-four hint-only warm | -1.26% (slower) | -2.52% (slower) |
+| Middlegame depth-four TT off | -2.57% (slower) | -1.65% (slower) |
+
+Every measured invocation preserved exact completed-depth scores, decisions, full
+PVs and deterministic counters. **Do not pool numeric and hint-only observations**
+or infer equivalent policy performance. These are single-machine Windows/MSVC,
+workload-specific findings, not universal engine-speed or playing-strength claims.
+Thermal/frequency/core-affinity and exclusive desktop activity were not controlled.
+
+### M7.5c.3 attribution and final decision
+
+The follow-up ran **480 controlled benchmark invocations**, **32 separate diagnostic
+invocations** and **2,112 exact completed-depth records**, with all observations
+retained. Copied-source controls tested equivalent rebuilds, an inert owner field
+and constant-disabled batch dispatch; none became production code.
+
+No increased TT-off heap traffic was demonstrated: both variants made **350,114
+intercepted host allocations / 47,396,724 requested bytes** in middlegame, with
+the same generations, encodings, sorts and search work. `PreparedNode` grew
+**120 to 128 bytes**, while `OrderedMove` stayed 48. The inert-field control was
+**6.59% / 6.47% slower**, but equivalent rebuild/relink controls also changed
+timings despite identical generated raw function bodies and different linked
+placements. These facts do not isolate size, initialization, destruction,
+mode/accessor checks, inlining or placement as a single runtime cause.
+
+Hint-only repetition cold creates **3,102 batches / 74,656 exceptional move
+materializations**; warm **2,816 / 67,363**, avoiding only **20 wrappers** each.
+Net host allocation counts nevertheless decrease because eager wrapper-vector
+growth is removed. Disabling batches did not consistently improve repetition;
+globally disabling them made the initial depth-six benefit control **23.60% /
+23.01% slower**. Intrusive function/allocation timer sums overlap and were kept
+separate from canonical timing. No hardware sampling profile or specific cache,
+thermal or frequency mechanism is claimed.
+
+**The precise regression mechanism remains unresolved.** Choice 1 accepts the
+original M7.5c.2 unchanged with explicit adverse workloads. No fix, proven causal
+attribution or safe benefit-preserving narrow refinement has been established.
+Any future refinement requires a new scoped authorization, focused correctness
+and cancellation/restoration validation, native/WASM checks and controlled A/B
+evidence; it is not part of this milestone handoff.
+
+### Local-only provenance and pending acceptance gates
+
+Preserve these ignored directories; their raw artifacts are not published through
+GitHub or included in a fresh clone:
+
+- `work/m7.5c/investigation-20261025T005211Z/`: approved design/plans and baseline census.
+- `work/m7.5c/implementation-20261025T012607Z/`: focused correctness, differential/cancellation logs, allocation census and original numeric `ab/` experiment.
+- `work/m7.5c/default-tt-verification-20261025T021117Z/`: default-policy raw timing, exact TT counters, reports and artifact identities.
+- `work/m7.5c/regression-attribution-20261025T050554Z/`: compiler/disassembly/layout findings, counts/costs, isolated source diffs, raw timings, hashes and decision analysis.
+
+Preserve all **13,311 previously verified frozen files**, the attribution archive
+and all Linux historical evidence. Windows remains on
+`feature/m7.5c2-native-tt-leaf-batch` at the full baseline above; Linux stays clean
+on `main` at that same SHA. The prospective six-file change is **uncommitted**,
+including the still-untracked private header, with an empty index. Local review
+acceptance is complete, but **no authoritative 54-gate Full CI for M7.5c has run**
+and these changes are unpublished. Commit, clean aligned Full validation and
+publication require the applicable separate authorization. This documentation
+task performs no builds, tests, benchmarks, GitHub refresh or publication.
 
 ## M6 controller and M7 desktop GUI
 

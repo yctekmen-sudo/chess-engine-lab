@@ -39,6 +39,23 @@ check('a blocker never hides an executed failure',()=>{const a=report('windows')
 check('omitted full gate blocks',()=>{const b=report('linux');b.steps.pop();assert.equal(combinedVerdict('full',[report('windows'),b]),'blocked');});
 check('quick is never full acceptance',()=>assert.equal(combinedVerdict('quick',[report('windows'),report('linux')]),'quick_pass'));
 check('quick reports omitted configurations',()=>{const p=plan('linux','quick',['controller']);assert.equal(p.find(s=>s.id==='native-release-ctest').selected,false);assert.equal(p.find(s=>s.id==='native-debug-ctest').selected,true);assert.equal(p.find(s=>s.id==='controller-test').selected,true);});
+check('fresh Full plans build GUI assets before controller tests on both platforms',()=>{
+  for(const os of ['windows','linux']){
+    const p=plan(os,'full'),done=new Set();assert.equal(p.length,os==='windows'?24:30);
+    for(const step of p){for(const dep of step.dependencies)assert(done.has(dep),`${os}/${step.id}: prerequisite ${dep} must run first`);done.add(step.id);}
+    const controller=p.find(s=>s.id==='controller-test');assert(controller.dependencies.includes('gui-build'));assert(controller.dependencies.includes('controller-build'));
+    assert.equal(p.filter(s=>s.id==='controller-test').length,1);assert.deepEqual(controller.command,['npm','run','test']);
+  }
+});
+check('controller-only Quick plans select and order fresh GUI asset prerequisites without unrelated GUI tests',()=>{
+  for(const os of ['windows','linux']){
+    const p=plan(os,'quick',['controller']),done=new Set();
+    for(const step of p.filter(s=>s.selected)){for(const dep of step.dependencies)assert(done.has(dep),`${os}/${step.id}: selected prerequisite ${dep} must run first`);done.add(step.id);}
+    for(const id of ['gui-ci','gui-build','controller-build','controller-test'])assert(done.has(id));
+    for(const id of ['gui-typecheck','gui-lint','gui-test'])assert(!done.has(id));
+    assert(p.find(s=>s.id==='controller-test').dependencies.includes('gui-build'));
+  }
+});
 check('bounded WASM timeout is not overridden',()=>{const p=plan('linux','full');assert(!p.some(s=>s.command.includes('--timeout')));assert(p.some(s=>s.id==='wasm-inventory'&&s.inventory.includes('m72_search')));});
 check('CTest must execute the entire inventory',()=>{assert.equal(testEvidence('wasm-ctest','100% tests passed, 0 tests failed out of 11',11).passed,11);assert.throws(()=>testEvidence('wasm-ctest','100% tests passed, 0 tests failed out of 10',11),/Incomplete/);});
 check('CTest Windows success summary is recognized',()=>assert.equal(testEvidence('native-debug-ctest','100% tests passed out of 12',12).passed,12));

@@ -1,4 +1,5 @@
 #include "transposition_table_internal.hpp"
+#include "../native_move_batch.hpp"
 #include <algorithm>
 #include <cassert>
 #include <chess_lab/search.hpp>
@@ -67,6 +68,11 @@ struct OrderedMove {
   bool legal_ep = false;
   bool claim_threefold = false;
   bool claim_fifty = false;
+  std::uint16_t native_ordinal = 0;
+  const Move &executable() const {
+    if (!move) throw std::logic_error("batch member requires certified materialization");
+    return *move;
+  }
 };
 std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
                                        const CancellationToken *token = nullptr,
@@ -100,6 +106,43 @@ std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
     if ((s.size() != 4 && s.size() != 5) || !square(0) || !square(2) ||
         (s.size() == 5 &&
          std::string("bnqr").find(s[4]) == std::string::npos) ||
+        (i && result[i - 1].text == s))
+      throw std::runtime_error("ambiguous/noncanonical legal move encoding");
+  }
+  return result;
+}
+// The generic eager path above stays the reference/fallback. Native TT leaves
+// keep the same text/fact/validation rules without allocating unused Mv owners.
+std::vector<OrderedMove> batch_ordered_moves(
+    const ChessCore &c, const Position &p, const detail::NativeMoveBatch &batch,
+    const CancellationToken *token, const PositionSnapshot &snapshot) {
+  std::vector<OrderedMove> result;
+  for (std::size_t i = 0; i < detail::native_move_batch_size(batch); ++i) {
+    if (token) detail::tt_poll(*token);
+    OrderedMove move{detail::encode_native_batch_member(c, p, batch, i), {}};
+    move.native_ordinal = static_cast<std::uint16_t>(i);
+    result.push_back(std::move(move));
+  }
+  const auto squares = snapshot.squares();
+  for (auto &m : result) {
+    const unsigned from = unsigned(m.text[0] - 'a') + 8U * unsigned(m.text[1] - '1');
+    const unsigned to = unsigned(m.text[2] - 'a') + 8U * unsigned(m.text[3] - '1');
+    const auto piece = squares[from];
+    m.pawn_move = piece == PieceCode::white_pawn || piece == PieceCode::black_pawn;
+    m.legal_ep = m.pawn_move && m.text[0] != m.text[2] &&
+        squares[to] == PieceCode::empty &&
+        snapshot.en_passant_square() == std::optional<std::uint8_t>(static_cast<std::uint8_t>(to));
+    m.capture = squares[to] != PieceCode::empty || m.legal_ep;
+  }
+  std::sort(result.begin(), result.end(),
+            [](const auto &a, const auto &b) { return a.text < b.text; });
+  for (std::size_t i = 0; i < result.size(); ++i) {
+    const auto &s = result[i].text;
+    auto square = [&](int n) {
+      return s[n] >= 'a' && s[n] <= 'h' && s[n + 1] >= '1' && s[n + 1] <= '8';
+    };
+    if ((s.size() != 4 && s.size() != 5) || !square(0) || !square(2) ||
+        (s.size() == 5 && std::string("bnqr").find(s[4]) == std::string::npos) ||
         (i && result[i - 1].text == s))
       throw std::runtime_error("ambiguous/noncanonical legal move encoding");
   }
@@ -196,7 +239,7 @@ GameHistory GameHistory::replay(const ChessCore &c, const Position &start,
 }
 namespace {
 // A prepared node owns one legal list and its position-specific facts.
-enum class PreparationMode { eager, native_claim_free_leaf };
+enum class PreparationMode { eager, native_claim_free_leaf, native_tt_leaf_batch };
 enum class PreparationPurpose { eager, search_horizon };
 struct PreparedNode {
   std::unique_ptr<const PositionSnapshot> snapshot;
@@ -207,8 +250,9 @@ struct PreparedNode {
   bool claims_ready = false;
   bool claim_now_threefold = false;
   bool claim_now_fifty = false;
+  detail::NativeMoveBatchOwner batch;
   std::size_t legal_count() const {
-    return mode == PreparationMode::eager ? legal.size() : native_legal_count;
+    return mode == PreparationMode::native_claim_free_leaf ? native_legal_count : legal.size();
   }
 };
 RepetitionSignature snapshot_repetition(const PositionSnapshot &s) {
@@ -237,7 +281,8 @@ bool distinct_with_child(std::span<const RepetitionSignature> history,
 }
 PreparedNode prepare_node(const ChessCore &c, const Position &p,
                           const CancellationToken *token = nullptr,
-                          std::optional<std::span<const RepetitionSignature>> leaf_history = {}) {
+                          std::optional<std::span<const RepetitionSignature>> leaf_history = {},
+                          bool tt_search_horizon = false) {
   PreparedNode node;
   node.snapshot = c.snapshot(p);
   if (leaf_history && native_chess_core(c) &&
@@ -255,7 +300,15 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
       return node;
     }
   }
-  node.legal = ordered_moves(c, p, token, node.snapshot.get());
+  if (tt_search_horizon && native_chess_core(c)) {
+    if (token) detail::tt_poll(*token);
+    node.batch = detail::prepare_native_move_batch(c, p);
+    if (token) detail::tt_poll(*token); // Including zero-legal terminal positions.
+    node.legal = batch_ordered_moves(c, p, *node.batch, token, *node.snapshot);
+    node.mode = PreparationMode::native_tt_leaf_batch;
+  } else {
+    node.legal = ordered_moves(c, p, token, node.snapshot.get());
+  }
   node.repetition = snapshot_repetition(*node.snapshot);
   auto &r = node.repetition;
   if (auto ep = node.snapshot->en_passant_square())
@@ -343,14 +396,15 @@ struct Traversal {
                                 PreparationPurpose purpose = PreparationPurpose::eager) {
     poll();
     const bool track_path = previous != nullptr;
-    return with_move(core, position, *m.move, [&] {
+    return with_move(core, position, m.executable(), [&] {
       if (track_path) path.push_back(m.text); // Already encoded.
       std::optional<PreparedNode> prepared;
       try {
         std::optional<std::span<const RepetitionSignature>> leaf_history;
         if (purpose == PreparationPurpose::search_horizon && !cache)
           leaf_history.emplace(history);
-        prepared.emplace(prepare_node(core, position, &cancellation, leaf_history));
+        prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
+            purpose == PreparationPurpose::search_horizon && cache));
         history.push_back(prepared->repetition);
       } catch (...) {
         if (track_path) path.pop_back();
@@ -429,10 +483,24 @@ struct Traversal {
       if (repeated_target) {
         // Read-only lookahead. Never insert a hypothetical occurrence into
         // the actual history or the table's history-interning structure.
-        m.claim_threefold = with_move(core, position, *m.move, [&] {
-          auto next = prepare_node(core, position, &cancellation);
-          return count(next.repetition) >= 2;
-        });
+        std::unique_ptr<Move> materialized;
+        const bool batched = prepared.mode == PreparationMode::native_tt_leaf_batch;
+        if (batched) {
+          poll();
+          materialized = detail::materialize_native_batch_member(
+              core, position, *prepared.batch, m.native_ordinal);
+          poll();
+        }
+        try {
+          m.claim_threefold = with_move(core, position,
+              batched ? *materialized : m.executable(), [&] {
+            auto next = prepare_node(core, position, &cancellation);
+            return count(next.repetition) >= 2;
+          });
+        } catch (...) {
+          if (batched) detail::invalidate_native_move_batch(*prepared.batch);
+          throw;
+        }
       }
     }
   }
@@ -492,6 +560,8 @@ struct Traversal {
     ++stats.visited_nodes;
     const bool raw_leaf = prepared.mode == PreparationMode::native_claim_free_leaf;
     assert(!raw_leaf || (depth == 0 && !cache && native_chess_core(core)));
+    assert(prepared.mode != PreparationMode::native_tt_leaf_batch ||
+           (depth == 0 && cache && native_chess_core(core) && prepared.batch));
     const auto original_alpha = alpha, original_beta = beta;
     const auto &s = prepared.snapshot;
     auto finish = [&](Line line) {
