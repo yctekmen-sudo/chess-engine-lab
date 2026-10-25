@@ -134,10 +134,13 @@ export function plan(os,mode,areas=[]){
   }
   const controller=mode==='full'||areas.some(a=>['controller','gui','smoke','e2e'].includes(a));
   add('controller-ci',['npm','ci','--ignore-scripts'],'controller',[],'controller',{selected:controller});
-  for(const task of ['build','typecheck','lint','test'])add(`controller-${task}`,['npm','run',task],'controller',['controller-ci',...(task==='test'?['native-debug-build']:[])],'controller',{selected:controller,build:'native-debug'});
+  for(const task of ['build','typecheck','lint'])add(`controller-${task}`,['npm','run',task],'controller',['controller-ci'],'controller',{selected:controller,build:'native-debug'});
   const gui=mode==='full'||areas.some(a=>['gui','smoke','e2e'].includes(a));
-  add('gui-ci',['npm','ci','--ignore-scripts'],'gui',[],'gui',{selected:gui});
-  for(const task of ['typecheck','lint','build','test'])add(`gui-${task}`,['npm','run',task],'gui',['gui-ci'],'gui',{selected:gui});
+  const guiAssets=gui||controller;
+  add('gui-ci',['npm','ci','--ignore-scripts'],'gui',[],'gui',{selected:guiAssets});
+  for(const task of ['typecheck','lint','build','test'])add(`gui-${task}`,['npm','run',task],'gui',['gui-ci'],'gui',{selected:task==='build'?guiAssets:gui});
+  // Controller tests include the real built-assets desktop assertion.
+  add('controller-test',['npm','run','test'],'controller',['controller-ci','controller-build','native-debug-build','gui-build'],'controller',{selected:controller,build:'native-debug'});
   if(os==='windows')add('windows-desktop-smoke',['node','--test','--test-isolation=none','--test-reporter=spec','controller/test/m7-desktop-smoke.test.mjs'],'',['controller-build','gui-build'],'smoke',{selected:mode==='full'||areas.includes('smoke')});
   if(os==='linux'){
     add('playwright-install',['npm','exec','--no','--','playwright','install','chromium'],'gui',['gui-ci'],'e2e');
