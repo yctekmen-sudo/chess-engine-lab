@@ -509,6 +509,18 @@ void native_batch_regressions() {
   std::cout<<"M7.5c.2 batch deterministic evidence records="<<leaf_evidence_records<<" hash="<<leaf_evidence_hash<<std::endl;
   group.finish();
 }
+void hint_count_leaf_regressions() {
+  Checkpoint group("group M7.5e.1 hint-only count leaves");
+  auto c=create_chess_core(); tree_values=false;constant=0;fail_at=0;eval_hook={};
+  for(const auto fen:{"4k3/8/8/8/8/8/8/R3K3 w - - 0 1",
+      "7k/8/5KQ1/8/8/8/8/8 w - - 0 1",
+      "4k3/8/8/8/8/8/8/R3K3 w - - 98 1",
+      "4k3/8/8/8/8/8/8/R3K3 w - - 99 1",
+      "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"}) {
+    auto p=c->load_fen(fen);native_leaf_case(*c,*p,GameHistory::starting_at(*c,*p,true));
+  }
+  group.finish();
+}
 int main(int argc,char **argv)try {
   for(int i=1;i<argc;++i) {
     std::string arg=argv[i];
@@ -588,6 +600,6 @@ int main(int argc,char **argv)try {
   check(retained.completed&&retained.completed->depth==1&&retained.status==IterativeSearchStatus::cancelled,"committed depth retained on cancellation");
   ++search_count;auto failed=iterative_search(*c,*root,hist,*e,{3,true,1,true},{},[&](CompletedDepth){fail_at=calls+1;});
   check(failed.status==IterativeSearchStatus::evaluator_failed&&!failed.completed&&!failed.unevaluated_fallback,"late failure invalidates provisional depths");
-  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();native_batch_regressions();total.finish();
+  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();native_batch_regressions();hint_count_leaf_regressions();total.finish();
   std::cout<<"M7.2 single-PV exact references, TT cross-policy, draw history, cancellation and failure passed"<<std::endl;
 }catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}

@@ -1,5 +1,49 @@
 # Development workflow
 
+## M7.5e.3 hint-only count-only leaf candidate
+
+The uncommitted candidate reproduces the reviewed M7.5e.1/E.2 implementation.
+At depth zero, an effective hint-only TT no longer excludes the existing native
+count-only preparation path. Eligibility still requires the native adapter, no
+en passant target, halfmove clock below 99, and exact uniqueness of the supplied
+actual history plus the prospective child. Ineligible and synthetic positions
+retain their existing preparation; certified numeric TT remains unchanged.
+
+Eligible leaves establish legal availability by count and preserve terminal,
+automatic-draw and evaluator handling without constructing or sorting moves.
+Their ineffective hint probe and hintless store conversions are omitted.
+Evaluator usability checks and cancellation boundaries remain; TTSession
+occurrence/history bookkeeping is unchanged. Positive-depth ordering and useful
+hint operations, B's hintless-write suppression, public statistics semantics,
+TT memory layout, age/depth eviction and the 16 MiB default are preserved.
+Depth-zero lookup and hint-hit counts may decrease intentionally.
+
+The frozen patch and source hashes are recorded in ignored M7.5e.2 evidence at
+`work/m7.5e2/validation-20261026T011943Z/`. That investigation found repeated
+large hint-only gains on initial, tactical, middlegame and persistent-sequence
+fixtures, but small repetition penalties and a middlegame TT-off slowdown of
+1.74% / 0.61% across two sessions (B favored in 12/16 blocks). Binary timing
+neutrality is not established. These are workload-specific measurements, with
+no playing-strength claim. The exact guard has quadratic worst-case cost for
+distinct history; the retained 49-entry distinct and 113-entry repeated
+diagnostics do not establish a universal safe history limit.
+
+M7.5e.3 adds production-linked and uninstrumented long-history acceptance
+measurements under `work/m7.5e3/candidate-20261026T021744Z/`. No history cutoff,
+guard optimization, recency policy, allocation change or favorable relink is
+part of this candidate. Local production-candidate validation passed all 54
+Full-mode command gates, with both worker exits zero; the uncommitted, isolated
+validation trees correctly yield `non_authoritative` (combine exit 2). Final
+documentation additions occurred after those snapshots closed; tested production
+source and regression tests remain byte-identical. The long-history matrix uses
+legal distinct replay prefixes of 17/33/49/65/97 entries, plus the legacy113-entry
+explicitly incomplete repeated control, at depths 1/2. Fixed pilot-declared
+search batches avoid relying on sub-millisecond single observations; cold
+clearing remains outside each timed search. All per-iteration observations are
+retained. No repeatable hint-only crossover was observed in the tested distinct 17/33/49/65/97-entry histories at depths 1/2. This is not a universal history-length guarantee. Review the final local report for distributions
+and tradeoffs. Dirty-tree Full-mode checks are never authoritative acceptance;
+commit, publication and merge each need separate authorization.
+
 ## Local Windows and WSL2 CI
 
 Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/ci/run-all.ps1`

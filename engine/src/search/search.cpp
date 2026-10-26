@@ -401,7 +401,7 @@ struct Traversal {
       std::optional<PreparedNode> prepared;
       try {
         std::optional<std::span<const RepetitionSignature>> leaf_history;
-        if (purpose == PreparationPurpose::search_horizon && !cache)
+        if (purpose == PreparationPurpose::search_horizon && (!cache || !cache->numeric()))
           leaf_history.emplace(history);
         prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
             purpose == PreparationPurpose::search_horizon && cache));
@@ -559,13 +559,14 @@ struct Traversal {
     }
     ++stats.visited_nodes;
     const bool raw_leaf = prepared.mode == PreparationMode::native_claim_free_leaf;
-    assert(!raw_leaf || (depth == 0 && !cache && native_chess_core(core)));
+    assert(!raw_leaf || (depth == 0 && (!cache || !cache->numeric()) && native_chess_core(core)));
     assert(prepared.mode != PreparationMode::native_tt_leaf_batch ||
            (depth == 0 && cache && native_chess_core(core) && prepared.batch));
     const auto original_alpha = alpha, original_beta = beta;
     const auto &s = prepared.snapshot;
     auto finish = [&](Line line) {
-      if (cache && !root_play_only) {
+      if (cache && !root_play_only && raw_leaf) poll(); // Preserve the skipped store boundary.
+      if (cache && !root_play_only && !raw_leaf) {
         poll();
         cache->store(evaluation_snapshot(*s), history.back(), depth, line.score,
           detail::classify_bound(line.score, original_alpha, original_beta), line.action, ply);
@@ -584,7 +585,11 @@ struct Traversal {
     // The raw-leaf guard proves both immediate and intended claims unavailable.
     auto best = root_play_only || raw_leaf ? std::optional<Line>{} : claim(prepared);
     if (depth > 0) prefer_previous(moves_here);
-    if (cache && !root_play_only) {
+    if (raw_leaf && cache && !root_play_only) {
+      if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
+      poll();
+    }
+    if (cache && !root_play_only && !raw_leaf) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
       auto hit = cache->probe(evaluation_snapshot(*s), history.back(), depth, ply);
