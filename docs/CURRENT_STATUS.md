@@ -1,6 +1,57 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-## Current local checkpoint — 2026-10-25: M7.5d.3 B-only candidate
+## Current local checkpoint — 2026-10-25: M7.5e.3 production candidate
+
+M7.5d.3 merged through PR #27 at
+`02d1a3453f81d97f32c485681969f0be6f45818c`. Windows is now on
+`feature/m7.5e3-hint-only-count-leaves` at that baseline, with an uncommitted
+production candidate. Linux's primary checkout remains clean on `main` at the
+baseline; validation uses an isolated checkout. Older branch and acceptance
+snapshots below are historical, with their evidence preserved.
+
+The production source and 270 regression searches reproduce the reviewed
+M7.5e.1/E.2 Variant E exactly. Eligible native, claim-free depth-zero leaves can
+use count-only preparation with an effective hint-only TT. Their ineffective
+leaf probes and hintless store snapshot conversions are skipped. Numeric TT,
+ineligible leaves, draw/history semantics, the existing 16 MiB default,
+age/depth eviction policy and public interfaces remain unchanged. The exact
+prospective-history uniqueness guard is retained without a length cutoff.
+
+M7.5e.2's ignored local evidence is
+`work/m7.5e2/validation-20261026T011943Z/`. Both variants passed Windows Debug
+search 4/4, Release full native 12/12, Profile search 4/4, Linux Release search
+4/4 and pinned WASM 11/11. Its 448 canonical invocations / 3,584 completed-depth
+records preserved exact results and deterministic useful work. Initial,
+tactical, middlegame and persistent-sequence hint-only searches improved in
+every paired block; repetition did not improve. Middlegame TT-off was 1.74% /
+0.61% slower, with B favored in 12/16 blocks. These single-machine observations
+are not universal speedup or playing-strength claims. Distinct-history guard
+cost is quadratic; diagnostic measurements motivated new uninstrumented
+long-history acceptance work rather than a guard optimization.
+
+M7.5e.3 evidence is local-only under
+`work/m7.5e3/candidate-20261026T021744Z/`. Production-linked validation completed on 2026-10-25 (America/New_York):
+all 54 local Full CI-equivalent gates passed (Windows 24/24, Linux 30/30),
+both workers exited 0, and the combined verdict was `non_authoritative`
+(coordinator combine exit 2), because the candidate is uncommitted. Native
+Debug/Release/Profile were 12/12 on each platform; controller 107/107 and GUI
+14/14 on each; harness 54/54 on each, desktop smoke 2/2, Playwright 5/5 and
+pinned WASM 11/11. These are local checks, not hosted CI or clean-commit acceptance.
+
+Fresh production-linked default-hint timing used 320 balanced invocations,
+with separate 128-invocation TT-off controls. Middlegame cold paired reductions
+were 57.48% / 57.92% across two sessions.
+Middlegame TT-off reductions were -1.27% / -2.16%;
+negative means slower. Repetition and binary-layout tradeoffs remain explicit.
+The long-history matrix used 768 fresh-process invocations with fixed repeated
+search batches and retained every measured iteration. No repeatable hint-only crossover was observed in the tested distinct 17/33/49/65/97-entry histories at depths 1/2. This is not a universal history-length guarantee.
+The 49-entry control remains complete and the legacy 113-entry repeated control
+remains explicitly incomplete. No history cutoff or guard optimization was added.
+Exact results, useful work and positive-depth rotations match. The final local
+report records distributions, exact counters, artifact hashes and limitations. An uncommitted run cannot be authoritative local Full CI. Production
+acceptance remains pending ChatGPT review; no commit or publication is authorized.
+
+## Historical checkpoint — 2026-10-25: M7.5d.3 B-only candidate
 
 This checkpoint supersedes the older working-branch and acceptance snapshots
 below; their historical measurements and provenance are retained. The task's

@@ -65,6 +65,7 @@ public:
             TranspositionStatistics &stats, CancellationToken cancellation);
   ~TTSession();
   TTSession(const TTSession &) = delete;
+  bool numeric() const noexcept { return numeric_; }
   bool enabled() const noexcept { return table_ != nullptr; }
   void start(const std::vector<RepetitionSignature> &);
   std::uint32_t push(const RepetitionSignature &);
