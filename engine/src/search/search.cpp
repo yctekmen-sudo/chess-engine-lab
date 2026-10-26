@@ -1,4 +1,5 @@
 #include "transposition_table_internal.hpp"
+#include "history_duplicates.hpp"
 #include "../native_move_batch.hpp"
 #include <algorithm>
 #include <cassert>
@@ -265,30 +266,28 @@ RepetitionSignature snapshot_repetition(const PositionSnapshot &s) {
                 s.can_castle_queenside(Side::black)};
   return r;
 }
-bool distinct_with_child(std::span<const RepetitionSignature> history,
-                         const RepetitionSignature &child,
-                         const CancellationToken *token) {
-  // duplicate(H + [child]) == duplicate(H) || contains(H, child).
-  for (std::size_t i = 0; i < history.size(); ++i) {
+bool history_contains(std::span<const RepetitionSignature> history,
+                      const RepetitionSignature &child,
+                      const CancellationToken *token) {
+  if (token) detail::tt_poll(*token);
+  for (const auto &entry : history) {
     if (token) detail::tt_poll(*token);
-    if (history[i] == child) return false;
-    for (std::size_t j = 0; j < i; ++j) {
-      if (token) detail::tt_poll(*token);
-      if (history[i] == history[j]) return false;
-    }
+    if (entry == child) return true;
   }
-  return true;
+  return false;
 }
 PreparedNode prepare_node(const ChessCore &c, const Position &p,
                           const CancellationToken *token = nullptr,
                           std::optional<std::span<const RepetitionSignature>> leaf_history = {},
-                          bool tt_search_horizon = false) {
+                          bool tt_search_horizon = false,
+                          bool parent_has_duplicate = false) {
   PreparedNode node;
   node.snapshot = c.snapshot(p);
   if (leaf_history && native_chess_core(c) &&
       !node.snapshot->en_passant_square() && node.snapshot->halfmove_clock() < 99) {
     node.repetition = snapshot_repetition(*node.snapshot);
-    if (distinct_with_child(*leaf_history, node.repetition, token)) {
+    if (token) detail::tt_poll(*token);
+    if (!parent_has_duplicate && !history_contains(*leaf_history, node.repetition, token)) {
       // No move/text consumer is reachable in this certified position frame.
       // Generate the complete set, retaining its count without move owners.
       if (token) detail::tt_poll(*token);
@@ -345,6 +344,7 @@ struct Traversal {
   const CompletedDepth *previous = nullptr;
   std::vector<std::string> path{};
   detail::TTSession *cache = nullptr;
+  bool has_duplicate = detail::initial_history_has_duplicates(history);
   void poll() const {
     detail::tt_poll(cancellation);
   }
@@ -397,6 +397,9 @@ struct Traversal {
     poll();
     const bool track_path = previous != nullptr;
     return with_move(core, position, m.executable(), [&] {
+      // A child inherits the parent flag until terminal() observes its count.
+      // Synthetic claim-only lookahead never consumes the flag or descends.
+      detail::RestoreDuplicateFlag duplicate_frame(has_duplicate);
       if (track_path) path.push_back(m.text); // Already encoded.
       std::optional<PreparedNode> prepared;
       try {
@@ -404,7 +407,7 @@ struct Traversal {
         if (purpose == PreparationPurpose::search_horizon && (!cache || !cache->numeric()))
           leaf_history.emplace(history);
         prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
-            purpose == PreparationPurpose::search_horizon && cache));
+            purpose == PreparationPurpose::search_horizon && cache, has_duplicate));
         history.push_back(prepared->repetition);
       } catch (...) {
         if (track_path) path.pop_back();
@@ -460,6 +463,8 @@ struct Traversal {
         core.known_dead_position(position))
       return terminal(SearchScore::finite(0), TerminalOutcome::draw);
     auto occurrences = count(history.back());
+    has_duplicate = has_duplicate || occurrences >= 2;
+    // Earlier mate/stalemate/dead returns cannot annotate or descend.
     if (occurrences >= 5 || s.halfmove_clock() >= 150)
       return terminal(SearchScore::finite(0), TerminalOutcome::draw);
     return {};
@@ -473,10 +478,7 @@ struct Traversal {
     if (prepared.claim_now_threefold || prepared.claim_now_fifty) return;
     // For an intended threefold claim, the destination must already occur
     // twice. Avoid all hypothetical child work when this is impossible.
-    bool repeated_target = false;
-    for (std::size_t i = 0; i < history.size() && !repeated_target; ++i)
-      for (std::size_t j = 0; j < i; ++j)
-        if (history[i] == history[j]) { repeated_target = true; break; }
+    const bool repeated_target = has_duplicate;
     for (auto &m : prepared.legal) {
       poll();
       m.claim_fifty = s.halfmove_clock() == 99 && !m.pawn_move && !m.capture;

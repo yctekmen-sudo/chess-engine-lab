@@ -1,5 +1,6 @@
 #include "m4_fixtures.hpp"
 #include "../../engine/src/search/transposition_table_internal.hpp"
+#include "../../engine/src/search/history_duplicates.hpp"
 #include "../../engine/src/native_move_batch.hpp"
 #include <chrono>
 #include <cstdlib>
@@ -12,6 +13,51 @@ std::size_t native_legal_move_count(const ChessCore &, const Position &);
 }
 
 bool ci_matrix=false;
+void boolean_history_regressions() {
+  auto original=[](const std::vector<RepetitionSignature>& h) {
+    for(std::size_t i=0;i<h.size();++i)for(std::size_t j=0;j<i;++j)
+      if(h[i]==h[j])return true;
+    return false;
+  };
+  auto c=create_chess_core();auto p=c->initial_position();
+  std::vector<RepetitionSignature> keys{repetition_signature(*c,*p)};
+  for(int i=0;i<192;++i){auto key=keys.front();key.castling[i%4]=false;
+    key.pieces[(i/4)%64]=static_cast<decltype(key.pieces)::value_type>(i%13);
+    key.side=i%2?Side::white:Side::black;keys.push_back(key);}
+  auto rights=keys.front();rights.castling[0]=false;keys.push_back(rights);
+  auto ep=keys.front();ep.legal_ep=20;keys.push_back(ep);
+  std::vector<RepetitionSignature> history;std::vector<bool> parents;
+  bool duplicate=detail::initial_history_has_duplicates(history);
+  auto verify=[&] {
+    check(duplicate==original(history),"path boolean equals original duplicate scan");
+    for(const auto& child:keys){bool old=true;
+      for(std::size_t i=0;i<history.size()&&old;++i){if(history[i]==child)old=false;
+        for(std::size_t j=0;j<i;++j)if(history[i]==history[j])old=false;}
+      bool contains=std::find(history.begin(),history.end(),child)!=history.end();
+      check((!duplicate&&!contains)==old,"parent boolean prospective guard");
+    }
+  };
+  auto push=[&](const RepetitionSignature& key){parents.push_back(duplicate);history.push_back(key);
+    auto occurrences=std::count(history.begin(),history.end(),key);
+    duplicate=duplicate||occurrences>=2;verify();};
+  auto pop=[&]{history.pop_back();duplicate=parents.back();parents.pop_back();verify();};
+  verify();for(const auto& key:keys)push(key);
+  for(int n=0;n<5;++n)for(auto key:{keys.front(),keys.back()})push(key);
+  while(!history.empty())pop();
+  unsigned seed=7512;for(int i=0;i<2000;++i){seed=seed*1664525U+1013904223U;
+    if(!history.empty()&&((seed>>12)%3==0||history.size()>192))pop();
+    else push(keys[(seed>>16)%keys.size()]);
+    if(i%37==0)check(detail::initial_history_has_duplicates(history)==original(history),"imported root boolean");
+  }
+  while(!history.empty())pop();
+  {detail::RestoreDuplicateFlag outer(duplicate);duplicate=true;
+    try{detail::RestoreDuplicateFlag inner(duplicate);duplicate=false;throw std::runtime_error("test unwind");}
+    catch(const std::runtime_error&){}check(duplicate,"nested exception restores duplicate parent");}
+  check(!duplicate,"normal scope restores distinct parent");
+  try{detail::RestoreDuplicateFlag frame(duplicate);duplicate=true;throw std::runtime_error("test unwind");}
+  catch(const std::runtime_error&){}check(!duplicate,"exception scope restores distinct parent");
+}
+
 std::uint64_t search_count=0;
 struct Checkpoint {
   std::string name;
@@ -687,6 +733,6 @@ int main(int argc,char **argv)try {
   check(retained.completed&&retained.completed->depth==1&&retained.status==IterativeSearchStatus::cancelled,"committed depth retained on cancellation");
   ++search_count;auto failed=iterative_search(*c,*root,hist,*e,{3,true,1,true},{},[&](CompletedDepth){fail_at=calls+1;});
   check(failed.status==IterativeSearchStatus::evaluator_failed&&!failed.completed&&!failed.unevaluated_fallback,"late failure invalidates provisional depths");
-  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();native_batch_regressions();hint_count_leaf_regressions();repetition_annotation_regressions();total.finish();
+  failures.finish();boolean_history_regressions();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();native_batch_regressions();hint_count_leaf_regressions();repetition_annotation_regressions();total.finish();
   std::cout<<"M7.2 single-PV exact references, TT cross-policy, draw history, cancellation and failure passed"<<std::endl;
 }catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}
