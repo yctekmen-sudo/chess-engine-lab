@@ -1,5 +1,60 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## Current local checkpoint — 2026-10-25: M7.5d.3 B-only candidate
+
+This checkpoint supersedes the older working-branch and acceptance snapshots
+below; their historical measurements and provenance are retained. The task's
+merged M7.5c baseline is `9f28852867f340f93e6abb7a49d303d2653ba38f`.
+Windows is on `feature/m7.5d3-hintless-tt-stores` at that HEAD with an uncommitted
+candidate. Linux's primary checkout remains clean on `main` at the same SHA.
+Remote GitHub state was not refreshed during this investigation.
+
+The production change is confined to `engine/src/search/transposition_table.cpp`
+and matches M7.5d.2 B's approved implementation (experimental review patch
+SHA-256 `8c654f6a3893d99e4609f0000cc8dece470423205652da2f76f38e0a872ecdb3`).
+Hint-only stores without a PLAY move return before backend hashing/replacement;
+certified-numeric writes, validation, public statistics, allocation and age/depth
+priority are preserved. No C/D recency logic is adopted. Tests add forced-bucket
+retention and mixed-mode numeric coverage and update the exact hint-only horizon
+store expectation without relaxing result assertions.
+
+Executed correctness: Windows Debug search **4/4**, Release full CTest **12/12**,
+Profile search **4/4**; Linux Release search **4/4**; pinned Emscripten 4.0.10 / SDK
+Node 22.16.0 WASM CTest **11/11**, retaining its bounded M7.2 matrix. Linux/WASM
+used an isolated source mirror, not a modified Linux Git checkout. All 25
+production-binary preflight configurations match frozen B results/work; numeric
+and TT-off controls also match A's work. Hint-only A/B work may differ.
+
+Fresh default hint-only 16 MiB comparisons use six balanced blocks per session,
+two independent sessions, the frozen material evaluator and original fixtures.
+Paired wall-time reductions (session 1 / session 2) include initial depth-six cold
+**7.48% / 8.69%**, tactical depth-four warm **84.58% / 84.69%**, and the persistent
+seven-position sequence warm **38.16% / 38.03%**. Cold repetition is **0.50% /
+0.33% slower**, with mixed blocks. These are single-machine workload findings,
+not universal speedup or playing-strength claims.
+
+**Performance acceptance remains pending.** The previous M7.5d.2 initial TT-off
+observation of **4.16% slower** is preserved. New eight-block/session controls
+give initial **0.39% / 0.01% slower**, with balanced block signs, but middlegame
+**2.40% / 2.81% slower**, with all 16 blocks favoring frozen A. Same-object linker
+controls show construction sensitivity: direct objects are **0.82% / 1.63%
+faster** than archive-linked B on middlegame (14/16 blocks). Adverse variation
+remains against A; a physical CPU/cache cause is not established. Source-level
+inactivity of the guard does not prove timing neutrality.
+
+Evidence is ignored and local-only under
+`work/m7.5d3/review-20261025T202753Z/`: source/patch hashes, exact test commands and
+logs, separate TT-off/hint/link-control observations, linker maps/disassembly,
+PE section hashes and preservation audit. M7.5d.1/M7.5d.2 evidence is unchanged.
+Monitoring hit an automatic-approval usage limit during hint session 1; the
+benchmark completed all observations, and session 2 was launched after resumption.
+No observations were discarded or substituted.
+
+No commit, push, PR, merge or authoritative Full CI was performed. The candidate,
+tests, documentation and unresolved TT-off tradeoff await review.
+
+## Historical handoffs (superseded by the checkpoint above)
+
 **Latest handoff (2026-10-25, America/New_York):** ChatGPT accepted Choice 1: retain the original M7.5c.2 native TT-leaf batch unchanged, with the measured repetition and TT-off middlegame regressions retained as known tradeoffs. Windows is on `feature/m7.5c2-native-tt-leaf-batch`, base `5f3654c80cdc7ad3f7c01a9c0f70877a1bd531e2` (local M7.5b PR #25 merge). The original four implementation/test files plus these two documentation updates remain uncommitted, index empty; the private header remains untracked. Linux stays clean on main at the same baseline. Local implementation/performance acceptance is complete; authoritative Full CI and publication remain pending separate authorization. Current evidence is summarized below; older checkout/CI checkpoints remain historical.
 
 **Earlier M7.5b pre-commit handoff (2026-10-24 UTC):** M7.4a.2 merged through PR #24 at `f3aaee0a284b206a347786a8e5418c3773654a40`. M7.5a profiling is complete, reviewed and accepted. ChatGPT approved the original M7.5b implementation, tests and controlled performance evidence. Windows is on `feature/m7.5b-native-leaf-count` at that merged baseline, with three approved implementation/test changes and the two documentation updates uncommitted; the index is empty. Linux is clean on `main` at the same baseline. M7.5b has **no authoritative 54-gate Full CI yet**; commit and publication require separate authorization. Section 4 records the measured benefits, unresolved TT uncertainty and local-only provenance. The dated pre-commit checkpoints below are historical, not current branch or acceptance status.

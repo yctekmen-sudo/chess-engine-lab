@@ -616,3 +616,71 @@ Linux Playwright Chromium against the real server/native engine, and Windows
 desktop smoke. Historical results and D118–D138 traceability remain in
 [M7 validation](m7-validation.md); current local evidence is in
 [CURRENT_STATUS.md](CURRENT_STATUS.md).
+
+## M7.5d.3: B-only hintless TT-store candidate (2026-10-25)
+
+The uncommitted candidate changes only `TTAccess::store` in production code.
+In effective hint-only mode, a non-PLAY decision or an empty PLAY move returns
+before store-side hashing, victim selection, entry construction, replacement or
+timestamp advancement. Search supplies already-validated PLAY moves; the existing
+legal-membership check at hint use is unchanged. Oversized decision strings still
+throw, including on the suppression path. Every certified-numeric store retains
+the original path, including hintless values and omitted numeric payloads.
+
+Public `stores` still counts successful writes. `skipped_stores` still counts a
+numeric payload omitted on an entry that was actually written; it does not count
+suppressed hintless attempts. No public suppression field, interface, memory-layout
+change or C/D recency refresh is introduced. The original age/depth replacement
+priority is unchanged. Caller snapshot conversion, native batch preparation,
+probes and session/history bookkeeping remain; this is not a complete TT-cost fix.
+
+The M5 regression fills a forced-collision bucket with four useful hints, floods
+it with hintless PLAY/claim/terminal attempts, and checks exact write/omission/
+eviction counts and retention. It also covers malformed decisions, certified
+hintless scores and mixed-mode reuse. M7.2's hint-only horizon expectation becomes
+exactly zero successful writes; numeric remains exactly one. Result, score, full
+PV, terminal, claim, history, cancellation and restoration assertions remain.
+
+Current correctness gates passed: Windows Debug search 4/4, Release full CTest
+12/12, Profile search 4/4, Linux Release search 4/4 and pinned WASM 11/11. The
+WASM gate retains its existing bounded M7.2 schedule and timeout. No authoritative
+Full local CI was launched; Linux's primary Git checkout was not modified.
+
+Fresh serial, uninstrumented Release comparisons against frozen M7.5c A use the
+same material DLL, histories, iterative single-PV PLAY-only policy, default
+hint-only 16 MiB request, warmup/population rules and cold clearing outside search.
+Six balanced ABBA/BAAB blocks per configuration/session were run in two independent
+sessions. Positive numbers below are median paired wall-time reductions:
+
+| Workload | Cold, sessions 1 / 2 | Warm, sessions 1 / 2 |
+| --- | --- | --- |
+| Initial depth 6 | 7.48% / 8.69% | 8.13% / 8.05% |
+| Tactical depth 4 | 49.58% / 50.58% | 84.58% / 84.69% |
+| Repetition depth 4 | -0.50% / -0.33% | 5.89% / 5.52% |
+| Middlegame depth 4 | 24.95% / 24.72% | 69.99% / 69.83% |
+| Seven consecutive positions, depth 4 | 20.22% / 20.62% | 38.16% / 38.03% |
+
+Nine configurations favor B in every one of their 12 blocks; cold repetition
+does not establish an improvement. These are workload-specific results with a
+cheap deterministic evaluator, not universal engine speedups or strength claims.
+All completed-depth results remain exact; hint-only work counts may change.
+
+TT-off was measured separately with eight blocks per workload/session, exceeding
+the earlier two-block controls. The historical initial-position adverse 4.16%
+observation is retained. New initial reductions are -0.39% / -0.01%, with four of
+eight blocks favoring B in each session. Middlegame is -2.40% / -2.81%, with all
+16 blocks favoring A. Thus TT-off neutrality and performance acceptance remain
+unproven, despite correctness and TT-enabled gains.
+
+Linker investigation preserves raw commands, maps, disassembly and PE hashes.
+Rebuilding A with the candidate's unchanged search object/common libraries gives
+the frozen A `.text` bytes exactly. Linking the same B objects directly instead
+of through `chess_search.lib` changes `.text` and improves middlegame TT-off by
+0.82% / 1.63% (14/16 blocks). Direct B versus rebuilt A remains adverse/variable
+(-0.58% / -2.72%). This demonstrates link-construction sensitivity but does not
+prove a specific cache/alignment cause or resolve the production-image regression.
+No linker variant replaces the frozen production candidate or baseline.
+
+Complete local evidence: `work/m7.5d3/review-20261025T202753Z/`. Earlier M7.5d.1
+and M7.5d.2 archives remain unchanged. The proposed patch and measured tradeoff
+require review before any commit, publication or separately authorized Full CI.

@@ -292,6 +292,12 @@ void TTAccess::store(TranspositionTable &t, const ChessEvalPosition &snapshot,
     int depth, std::string_view evaluator, std::uint64_t policy, std::uint32_t tail,
     bool numeric, SearchScore score, TTBound bound, const ChessDecision &decision,
     std::uint64_t ply, TranspositionStatistics &stats) {
+  // Hint-only policy: no score reuse, so non-PLAY/empty decisions cannot help.
+  // Certified numeric writes remain intact even when normalization omits a payload.
+  if (!numeric && (decision.kind != DecisionKind::play || decision.move.empty())) {
+    if (decision.move.size() > 5) throw std::logic_error("noncanonical TT decision");
+    return;
+  }
   auto &p = *t.impl_;
   auto normalized = numeric && tail != invalid && evaluator.size() == 64
                       ? to_node_score(score, ply) : std::nullopt;
