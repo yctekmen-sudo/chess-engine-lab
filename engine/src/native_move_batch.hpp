@@ -20,4 +20,6 @@ std::string encode_native_batch_member(const ChessCore &, const Position &,
 std::unique_ptr<Move> materialize_native_batch_member(
     const ChessCore &, const Position &, const NativeMoveBatch &, std::size_t ordinal);
 void invalidate_native_move_batch(NativeMoveBatch &) noexcept;
+// Exact effective EP availability without constructing a legal-move list.
+bool native_has_legal_en_passant(const ChessCore &, const Position &);
 } // namespace chess_lab::detail

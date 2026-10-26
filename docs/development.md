@@ -1,5 +1,48 @@
 # Development workflow
 
+## M7.5f.1 experimental repetition annotations
+
+Variant F on merged E reuses `OrderedMove::claim_threefold` and `claims_ready`;
+no per-move storage is added. The existing native annotation pass, after legal
+construction and terminal checks, determines intended claims once per prepared
+node. Flags move with their moves through canonical sorting, previous-PV and TT
+rotations, including iterative-root reuse. Immediate claims and automatic
+terminal processing remain separate.
+
+When actual history contains a repeated target, F makes each hypothetical move,
+copies its exact snapshot repetition fields, tests effective EP through an
+adapter-private helper, looks up the existing actual-history occurrence count,
+and undoes the move. The helper tests at most two EP candidates with the vendored
+single-move legality routine; it does not construct a legal-move list. No call to
+`prepare_node()`, `ordered_moves()` or the public `repetition_signature()` is
+used solely for optimized native intended-claim identity. No hypothetical
+signature is inserted into history or TTSession.
+
+Synthetic adapters intentionally retain their custom status/clock and generic
+claim fallback, which can still prepare hypothetical children. This boundary
+exception was declared before timing. Ordinary search children, Variant E's
+count-only eligibility and uniqueness guard, numeric/hint-only policies,
+16 MiB default, capacity/layout/eviction, evaluator ABI and root ranking are
+unchanged. No guard cutoff, recency change or additional optimization is included.
+
+Local evidence is ignored under `work/m7.5f1/experiment-20261026T043522Z/`.
+Separate copied-source counters/fault seams are excluded from canonical timing
+and from production code. Focused tests include full-legal-list EP identity
+parity, multiple intended targets, castling-right distinctions, annotation
+overflow, complete/incomplete histories and existing cancellation/evaluator
+failure coverage. The original material evaluator, FENs, histories, warmup,
+cold clearing and paired-session methodology are retained. Review the local
+report for primary improvements and adverse/mixed general controls; do not
+pool sessions or infer universal speedup or timing neutrality. Source remains
+uncommitted pending ChatGPT review and separate publication authorization.
+The completed local Full-mode run passed all 54 command gates, both workers 0,
+with the required dirty-tree `non_authoritative` verdict (combine exit 2).
+Canonical primary repetition comparisons favored F in all 16 blocks per
+off/cold/warm configuration across two sessions. The 113-entry repeated control
+also improved strongly; 49-entry distinct results and initial/tactical controls
+include mixed/adverse observations. No claim of universal neutrality is made.
+Final report, raw data and preservation results remain local-only.
+
 ## M7.5e.3 hint-only count-only leaf candidate
 
 The uncommitted candidate reproduces the reviewed M7.5e.1/E.2 implementation.

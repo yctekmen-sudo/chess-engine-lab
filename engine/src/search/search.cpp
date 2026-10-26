@@ -494,8 +494,17 @@ struct Traversal {
         try {
           m.claim_threefold = with_move(core, position,
               batched ? *materialized : m.executable(), [&] {
-            auto next = prepare_node(core, position, &cancellation);
-            return count(next.repetition) >= 2;
+            // This once-per-prepared-node pass retains eligibility on the
+            // move through every later reorder. Hypothetical identities do
+            // not require child move lists or affect actual history/TT state.
+            auto snapshot = core.snapshot(position);
+            auto signature = snapshot_repetition(*snapshot);
+            poll();
+            if (auto ep = snapshot->en_passant_square(); ep &&
+                detail::native_has_legal_en_passant(core, position))
+              signature.legal_ep = ep;
+            poll();
+            return count(signature) >= 2;
           });
         } catch (...) {
           if (batched) detail::invalidate_native_move_batch(*prepared.batch);
