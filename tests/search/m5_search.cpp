@@ -365,8 +365,55 @@ void ordered_trap_and_certification() {
   simple.undo_move(*child,*token);
   std::cout<<"ordered tie/bound traps, evicted PV re-search, certification/fingerprint and legal hints passed\n";
 }
+void hintless_storage_retains_hints() {
+  auto core=create_chess_core();auto root=core->initial_position();
+  auto signature=repetition_signature(*core,*root);
+  auto snapshot=evaluation_snapshot(*core->snapshot(*root));
+  std::string fingerprint(64,'a');TranspositionTable table(16384);
+  TTAccess::force_collisions(table,true);TranspositionStatistics stats;
+  const std::array<ChessDecision,4> hintless={
+    ChessDecision{DecisionKind::play,{}},ChessDecision{DecisionKind::claim_draw,{}},
+    ChessDecision{DecisionKind::claim_draw_with_intended_move,"e2e4"},
+    ChessDecision{DecisionKind::terminal,{},TerminalOutcome::draw}};
+  {
+    TTSession session({&table},fingerprint,true,stats,{});session.start({signature});
+    int depth=1;
+    for(const auto&move:{"e2e4","d2d4","g1f3","b1c3"})
+      session.store(snapshot,signature,depth++,SearchScore::finite(0),TTBound::exact,{DecisionKind::play,move},0);
+    check(table.entry_count()==4&&stats.stores==4&&stats.skipped_stores==4,"four colliding useful hints written; numeric payloads omitted");
+    for(int repeat=0;repeat<16;++repeat)for(const auto&decision:hintless)
+      session.store(snapshot,signature,0,SearchScore::finite(0),TTBound::exact,decision,0);
+    check(table.entry_count()==4&&stats.stores==4&&stats.skipped_stores==4&&stats.evictions==0,"hintless attempts neither displace useful hints nor count as written payload omissions");
+    check(session.probe(snapshot,signature,1,0).hint=="b1c3","suppressed attempts preserve the most recent useful source hint");
+    rejects([&]{session.store(snapshot,signature,0,SearchScore::finite(0),TTBound::exact,{DecisionKind::claim_draw_with_intended_move,"e2e4xx"},0);});
+    rejects([&]{session.store(snapshot,signature,0,SearchScore::finite(0),TTBound::exact,{DecisionKind::play,"e2e4xx"},0);});
+    check(stats.stores==4&&stats.skipped_stores==4&&stats.evictions==0,"malformed decisions fail without writes or evictions");
+  }
+  table.clear();stats={};
+  {
+    TTSession session(certified(table),fingerprint,true,stats,{});session.start({signature});
+    int depth=0;
+    for(const auto&decision:hintless){
+      session.store(snapshot,signature,depth,SearchScore::finite(3),TTBound::exact,decision,0);
+      auto hit=session.probe(snapshot,signature,depth++,0);
+      check(hit.score==SearchScore::finite(3)&&hit.decision==decision,"certified hintless PLAY/claim/terminal values remain stored and retrievable");
+    }
+    check(stats.stores==4&&stats.skipped_stores==0,"certified hintless writes retain original public statistics");
+  }
+  const auto retained=table.entry_count();TranspositionStatistics hints;
+  {
+    TTSession session({&table},fingerprint,true,hints,{});session.start({signature});
+    for(const auto&decision:hintless)session.store(snapshot,signature,0,SearchScore::finite(0),TTBound::exact,decision,0);
+  }
+  check(hints.stores==0&&hints.skipped_stores==0&&hints.evictions==0&&table.entry_count()==retained,"hint-only suppression preserves prior numeric entries in mixed-mode reuse");
+  {
+    TTSession session(certified(table),fingerprint,true,stats,{});session.start({signature});
+    check(session.probe(snapshot,signature,0,0).score==SearchScore::finite(3),"numeric hintless value survives intervening hint-only attempts");
+  }
+  std::cout<<"hintless suppression, collision retention, mixed numeric reuse and validation passed\n";
+}
 int main(int argc,char**argv) try {
   if(argc>1)digest=argv[1];
-  generated();context_and_bounds();mate_races();real_rules();memory_and_lifetime();cancellation_inside_tt_verification();cancellation_and_errors();ordered_trap_and_certification();
+  generated();context_and_bounds();mate_races();real_rules();memory_and_lifetime();cancellation_inside_tt_verification();cancellation_and_errors();ordered_trap_and_certification();hintless_storage_retains_hints();
   std::cout<<"M5 transposition table passed\n";
 } catch(const std::exception&e){std::cerr<<"M5 failure: "<<e.what()<<'\n';return 1;}

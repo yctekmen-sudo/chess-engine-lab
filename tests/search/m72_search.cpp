@@ -140,7 +140,7 @@ void leaf_ordering_regressions() {
           check(r.status==IterativeSearchStatus::depth_reached&&r.completed,"horizon depth committed");
           same(r.completed->best,{ {DecisionKind::play,"a1a2"},score,{"a1a2"},end,kind==1?"a1a2":""});
           const auto &s=r.statistics;const auto &tt=s.transposition;
-          check(s.visited_nodes==2&&tt.stores==1,"one actual horizon node/store; root remains PLAY-only");
+          check(s.visited_nodes==2&&tt.stores==(mode==1?0U:1U),"hintless horizon skips only hint-only writes; numeric stores and PLAY-only root remain intact");
           check(tt.lookups==(kind>=3?0U:1U)&&tt.hint_hits==(kind<3&&valid?1U:0U),"horizon hints validated and counted exactly, after terminal checks");
           check(s.evaluator_calls==(kind>=3||mode==2&&pass?0U:1U),"horizon evaluation only absent terminal or warm exact result");
           check(tt.exact_hits==(kind<3&&mode==2&&pass?1U:0U)&&tt.bound_hits==0&&tt.bound_cutoffs==0,"warm exact horizon/claim reuse and hint-only isolation");
