@@ -1,6 +1,49 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-## Current local checkpoint — 2026-10-26: M7.5f.1 experimental annotations
+## Current local checkpoint — 2026-10-26: M7.5g.1b review pending
+
+Variant F is merged through PR #29 at
+`a59dc752de40bffe43caba9cf7b8f0d46cb87b77`. G1b is an uncommitted independent
+worktree on `feature/m7.5g1b-boolean-history`, based directly on that commit.
+The rejected map-based G1 primary worktree and its evidence remain unchanged;
+they were not used as production source. Linux primary remains clean on main.
+
+G1b initializes one duplicate-history Boolean at the root, reuses terminal()'s
+existing current occurrence count for child state, restores the parent scalar
+by noexcept RAII and uses linear prospective membership only when parent history
+is distinct. No per-edge map/hash bookkeeping, new cleanup allocation, history
+cutoff, generic count() change or Variant E/F/TT policy change is included.
+Early terminal and synthetic claim-only paths consume no pending child flag.
+Root initialization remains a one-time pairwise scan; extreme-history setup
+latency beyond measured fixtures is not claimed solved. Internal polls change
+from pairwise scan polls to boundary/linear-membership polls.
+
+Ignored local evidence: `work/m7.5g1b/experiment-20261026T162959Z/`.
+All 1,600 canonical processes, 6,784 general completed-depth records and
+286,624 measured long-batch searches preserve exact results and deterministic
+work. Initial d6 off improves 4.62%/4.05%; tactical d4 off 0.96%/1.97%;
+distinct49 d2 off 57.88%/57.83%, distinct97 81.29%/81.17%, distinct129
+90.62%/90.70%. Middlegame and persistent sequence improve. Repeated113 is
+near-neutral or faster; it does not show G1's large regression. Retained adverse
+observations include repetition d4 hint-warm -0.30%/-1.15% (paired added
+0.097/0.388 ms), and small early-duplicate controls. No universal neutrality,
+speedup, significance or playing-strength claim. Recommendation: advance as-is
+for ChatGPT review with these performance caveats, not automatic adoption.
+
+Windows baseline/candidate Release 12/12 each. Candidate Full CI-equivalent
+54/54 gates pass (Windows24/24, Linux30/30); Debug/Release/Profile12/12 per
+platform, controller107/107, GUI14/14, harness54/54 per platform, desktop2/2,
+Playwright5/5 and pinned WASM11/11. Workers0/0; coordinator2;
+`non_authoritative`, authoritative=false, because candidate source is dirty.
+86 diagnostic records and 6,528 interruption trials pass, including roots where
+a child first introduces a duplicate and restores a false parent on unwind.
+Final documentation was added after the tested snapshots; production/tests
+remain frozen and identical to tested sources. No commit, push, PR or merge;
+authoritative same-clean-commit Full acceptance requires separate authorization.
+GUI npm audit still reports one moderate and one critical vulnerability on both
+platforms; unchanged dependencies remain a separate security follow-up.
+
+## Historical checkpoint — 2026-10-26: M7.5f.1 experimental annotations
 
 Variant E merged through PR #28 at
 `bb93b263fe9af4145cfb8f7296dbdcbd22d7a0bd`. Windows is on
