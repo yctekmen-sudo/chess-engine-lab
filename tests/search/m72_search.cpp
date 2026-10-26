@@ -521,6 +521,93 @@ void hint_count_leaf_regressions() {
   }
   group.finish();
 }
+void repetition_annotation_regressions() {
+  Checkpoint group("group M7.5f.1 repetition annotations");
+  auto c=create_chess_core();tree_values=false;constant=0;fail_at=0;eval_hook={};
+  std::uint64_t identities=0;
+  auto identity=[&](const Position &p){
+    check(detail::native_has_legal_en_passant(*c,p)==bool(repetition_signature(*c,p).legal_ep),
+          "list-free native effective EP matches full legal-list identity");
+    ++identities;
+  };
+  for(const auto fen:{
+      "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2",
+      "k3r3/8/8/3pP3/8/8/8/4K3 w - d6 0 2",
+      "4k3/8/8/8/3Pp3/8/8/4K3 b - d3 0 2",
+      "4k3/8/8/8/3Pp3/8/8/K3R3 b - d3 0 2",
+      "4k3/8/8/2PpP3/8/8/8/4K3 w - d6 0 2",
+      "7k/8/8/r4pPK/8/8/8/8 w - f6 0 2",
+      "8/8/8/8/R4Ppk/8/8/7K b - f3 0 2",
+      "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1",
+      "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+      "1r2k3/P7/8/8/8/8/7p/4K3 w - - 0 1"}) {
+    auto p=c->load_fen(fen);const auto before=c->export_fen(*p);identity(*p);
+    for(const auto &m:c->legal_moves(*p)) {
+      auto u=c->make_move(*p,*m);identity(*p);c->undo_move(*p,*u);
+      check(c->export_fen(*p)==before,"EP identity helper does not mutate parent or child");
+    }
+    native_leaf_case(*c,*p,GameHistory::starting_at(*c,*p,false));
+  }
+  for(bool complete:{false,true}){
+    auto p=c->initial_position();auto h=GameHistory::starting_at(*c,*p,complete);
+    const std::vector<std::string> cycle={"g1f3","g8f6","f3g1","f6g8"};
+    for(int ply=0;ply<=16;++ply){
+      if(ply==0||ply==3||ply==4||ply==7||ply==8||ply==15||ply==16)
+        native_leaf_case(*c,*p,h);
+      if(ply<16){const auto &text=cycle[ply%4];h=h.after_move(*c,*p,text);auto m=c->decode_move(*p,text);auto u=c->make_move(*p,*m);}
+    }
+  }
+  {
+    auto p=c->load_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+    auto h=GameHistory::starting_at(*c,*p,true);
+    const std::vector<std::string> cycle={"h1h2","h8h7","h2h1","h7h8"};
+    for(int ply=0;ply<8;++ply){const auto &text=cycle[ply%4];h=h.after_move(*c,*p,text);auto m=c->decode_move(*p,text);auto u=c->make_move(*p,*m);
+      if(ply==3){check(h.occurrences().front().pieces==h.occurrences().back().pieces&&h.occurrences().front()!=h.occurrences().back(),"castling rights distinguish identical piece placement");native_leaf_case(*c,*p,h);}
+      if(ply==7)native_leaf_case(*c,*p,h);
+    }
+  }
+  // An imported valid prefix can contain two distinct intended targets twice
+  // while the current position itself has occurred only twice.
+  {
+    auto p=c->initial_position();{auto m=c->decode_move(*p,"b1c3");auto u=c->make_move(*p,*m);}
+    auto h=GameHistory::starting_at(*c,*p,false);
+    for(const auto text:{"g8f6","g1f3","f6g8","f3g1","g8f6","c3b1","f6g8",
+                         "g1f3","b8c6","b1c3","c6b8","c3b1","b8c6","f3g1","c6b8"}){
+      h=h.after_move(*c,*p,text);auto m=c->decode_move(*p,text);auto u=c->make_move(*p,*m);
+    }
+    const auto before=c->export_fen(*p);int eligible=0;
+    for(const auto &m:c->legal_moves(*p)){
+      auto u=c->make_move(*p,*m);auto sig=repetition_signature(*c,*p);
+      eligible+=std::count(h.occurrences().begin(),h.occurrences().end(),sig)>=2;
+      c->undo_move(*p,*u);
+    }
+    check(eligible==2&&c->export_fen(*p)==before,"two legal intended repetition targets, restored board");
+    constant=-3;auto e=evaluator();++search_count;auto r=search(*c,*p,h,*e,{1,true});
+    check(r.status==SearchStatus::complete&&r.decision&&
+          r.decision->kind==DecisionKind::claim_draw_with_intended_move&&r.decision->move=="b1c3",
+          "multiple intended claims retain canonical move tie");
+    native_leaf_case(*c,*p,h);
+  }
+  // A real native counter overflow occurs on the hypothetical Black move,
+  // after the ordinary White child was made. No production observer is needed.
+  for(int mode:{0,1,2}){
+    auto p=c->load_fen(std::string("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 ")+std::to_string(UINT32_MAX-4));
+    auto h=GameHistory::starting_at(*c,*p,false);
+    const std::vector<std::string> cycle={"g1f3","g8f6","f3g1","f6g8"};
+    for(int i=0;i<8;++i){const auto &text=cycle[i%4];h=h.after_move(*c,*p,text);auto m=c->decode_move(*p,text);auto u=c->make_move(*p,*m);}
+    const auto before=c->export_fen(*p);auto actual=h.occurrences();auto e=evaluator();
+    TranspositionTable table(mode?256*1024:0);TranspositionTableUse use;
+    if(mode)use={&table,mode==1?EvaluatorCacheCompatibility::not_certified:EvaluatorCacheCompatibility::deterministic_position,1};
+    ++search_count;auto r=iterative_search(*c,*p,h,*e,{1,true,1,true,true},{},{},use);
+    check(r.status==IterativeSearchStatus::search_error&&!r.completed&&!r.unevaluated_fallback&&
+          r.statistics.visited_nodes==2&&r.statistics.evaluator_calls==0&&
+          r.statistics.transposition.lookups==0&&r.statistics.transposition.stores==0&&
+          c->export_fen(*p)==before&&h.occurrences()==actual&&h.matches_root(*c,*p),
+          "native hypothetical annotation overflow restores outer search frame in every TT mode");
+  }
+  std::cout<<"M7.5f.1 exact effective-EP identities="<<identities<<std::endl;
+  group.finish();
+}
 int main(int argc,char **argv)try {
   for(int i=1;i<argc;++i) {
     std::string arg=argv[i];
@@ -600,6 +687,6 @@ int main(int argc,char **argv)try {
   check(retained.completed&&retained.completed->depth==1&&retained.status==IterativeSearchStatus::cancelled,"committed depth retained on cancellation");
   ++search_count;auto failed=iterative_search(*c,*root,hist,*e,{3,true,1,true},{},[&](CompletedDepth){fail_at=calls+1;});
   check(failed.status==IterativeSearchStatus::evaluator_failed&&!failed.completed&&!failed.unevaluated_fallback,"late failure invalidates provisional depths");
-  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();native_batch_regressions();hint_count_leaf_regressions();total.finish();
+  failures.finish();leaf_ordering_regressions();guarded_leaf_regressions();native_count_regressions();native_batch_regressions();hint_count_leaf_regressions();repetition_annotation_regressions();total.finish();
   std::cout<<"M7.2 single-PV exact references, TT cross-policy, draw history, cancellation and failure passed"<<std::endl;
 }catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}

@@ -1,6 +1,48 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-## Current local checkpoint — 2026-10-25: M7.5e.3 production candidate
+## Current local checkpoint — 2026-10-26: M7.5f.1 experimental annotations
+
+Variant E merged through PR #28 at
+`bb93b263fe9af4145cfb8f7296dbdcbd22d7a0bd`. Windows is on
+`feature/m7.5f1-repetition-annotations` at that frozen baseline with uncommitted
+Variant F changes. Linux's primary checkout remains on merged `main`;
+cross-platform validation uses separate worktrees. Older checkpoints below
+remain historical and retain their measured evidence.
+
+F reuses the existing per-move `claim_threefold` Boolean and once-per-prepared
+node annotation pass. Native hypothetical identities use a snapshot and a
+private, list-free legal-EP check rather than preparing hypothetical child
+move lists. The no-duplicate fast rejection, ordinary child preparation,
+synthetic fallback, Variant E guard, TT policy/layout, public interfaces and
+search ordering remain unchanged. The synthetic fallback exception was
+documented before benchmarking in local `DESIGN.md`.
+
+Ignored local evidence: `work/m7.5f1/experiment-20261026T043522Z/`.
+Focused Windows Release tests pass, with 1,462 additional regression searches
+(6,053 native M7.2 searches total), 98 exact EP identities, 2,000 generated
+position identity checks and 1,632 deterministic annotation cancellation/error
+trials across E/F. All interruption statuses, work and restoration match.
+Canonical timings use uninstrumented E/F Release binaries and the same frozen
+material evaluator. The repetition depth-four paired time reductions are about
+90.5–90.9% in both sessions for off/cold/warm, with F favored in every block.
+E's 91,252 cold-search hypothetical child legal lists become zero in F, with
+identical useful search work. These are workload-specific findings, not
+universal speedup or playing-strength claims.
+
+General controls include mixed/adverse initial and tactical observations;
+the report retains all distributions. Focused results justify broader
+correctness validation, not a claim that every performance criterion is
+unconditionally satisfied. All 54 local Full CI-equivalent gates passed (Windows 24/24, Linux 30/30),
+with both worker exits 0. The combined verdict is `non_authoritative`, combine
+exit 2, because source is uncommitted. Native Debug/Release/Profile were 12/12
+on each platform; controller 107/107 and GUI 14/14 each; harness 54/54 each,
+desktop smoke 2/2, Linux Playwright 5/5 and pinned WASM 11/11. Final
+documentation results were added after the isolated source snapshots closed;
+the tested production code and regression tests remain identical.
+Uncommitted source cannot receive authoritative clean-commit acceptance.
+No commit, push, PR or merge is authorized. ChatGPT review remains the stop point.
+
+## Historical checkpoint — 2026-10-25: M7.5e.3 production candidate
 
 M7.5d.3 merged through PR #27 at
 `02d1a3453f81d97f32c485681969f0be6f45818c`. Windows is now on

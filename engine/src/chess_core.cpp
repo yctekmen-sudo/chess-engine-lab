@@ -231,6 +231,26 @@ std::size_t native_legal_move_count(const ChessCore& c, const Position& p) {
     return moves(cast<Pos>(p)).size();
 }
 namespace detail {
+bool native_has_legal_en_passant(const ChessCore& core, const Position& position) {
+    (void)cast<Core>(core);
+    const auto& p = cast<Pos>(position);
+    if (!p.meta.ep) return false;
+    const auto ep = chess::Square(*p.meta.ep);
+    const bool white = p.board.sideToMove() == chess::Color::WHITE;
+    for (int file_delta : {-1, 1}) {
+        const int from = int(*p.meta.ep) + (white ? -8 : 8) + file_delta;
+        if (from < 0 || from >= 64 || std::abs(from % 8 - int(*p.meta.ep) % 8) != 1)
+            continue;
+        const auto square = chess::Square(from);
+        if (p.board.at(square) != chess::Piece(chess::PieceType::PAWN, p.board.sideToMove()))
+            continue;
+        // Single-move legality checks pins, check evasion and exposed sliders;
+        // it does not invoke the complete legal-move generator.
+        if (p.board.isLegal(chess::Move::make<chess::Move::ENPASSANT>(square, ep)))
+            return true;
+    }
+    return false;
+}
 struct NativeMoveBatch {
     std::shared_ptr<const int> owner;
     std::uint64_t top = 0;
