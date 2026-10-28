@@ -1,0 +1,30 @@
+# CTest runs this with the same compiler/toolchain, including pinned WASM.
+foreach(policy IN ITEMS B2 P1 NONE)
+  set(build "${BINARY_DIR}/${policy}")
+  set(args -S "${SOURCE_DIR}" -B "${build}" -G "${GENERATOR}"
+    "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}" "-DCHESS_LAB_ORDERING_POLICY=${policy}"
+    -DBUILD_TESTING=ON -DCHESS_LAB_POLICY_SMOKE_CHILD=ON)
+  if(TOOLCHAIN)
+    list(APPEND args "-DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN}" "-DCHESS_LAB_NODE_EXECUTABLE=${NODE}")
+  else()
+    list(APPEND args "-DCMAKE_C_COMPILER=${C_COMPILER}" "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}")
+  endif()
+  execute_process(COMMAND "${CMAKE_COMMAND}" ${args} RESULT_VARIABLE result)
+  if(NOT result EQUAL 0)
+    message(FATAL_ERROR "${policy} configure failed: ${result}")
+  endif()
+  set(targets m76_policy_smoke)
+  if(NOT policy STREQUAL "NONE")
+    list(APPEND targets m76_ordering)
+  endif()
+  execute_process(COMMAND "${CMAKE_COMMAND}" --build "${build}" --config "${CONFIG}"
+    --parallel 2 --target ${targets} RESULT_VARIABLE result)
+  if(NOT result EQUAL 0)
+    message(FATAL_ERROR "${policy} build failed: ${result}")
+  endif()
+  execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${build}" -C "${CONFIG}"
+    --output-on-failure --no-tests=error -R "^m76_(policy_smoke|ordering)$" RESULT_VARIABLE result)
+  if(NOT result EQUAL 0)
+    message(FATAL_ERROR "${policy} correctness failed: ${result}")
+  endif()
+endforeach()

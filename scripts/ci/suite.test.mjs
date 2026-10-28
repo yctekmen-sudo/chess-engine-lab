@@ -57,6 +57,12 @@ check('controller-only Quick plans select and order fresh GUI asset prerequisite
   }
 });
 check('bounded WASM timeout is not overridden',()=>{const p=plan('linux','full');assert(!p.some(s=>s.command.includes('--timeout')));assert(p.some(s=>s.id==='wasm-inventory'&&s.inventory.includes('m72_search')));});
+check('production ordering smoke and alternate builds remain required on native and WASM',()=>{
+  for(const os of ['windows','linux'])for(const step of plan(os,'full').filter(s=>s.inventory)){
+    assert(step.inventory.includes('m76_policy_smoke'),step.id);
+    assert(step.inventory.includes('m76_policy_build'),step.id);
+  }
+});
 check('CTest must execute the entire inventory',()=>{assert.equal(testEvidence('wasm-ctest','100% tests passed, 0 tests failed out of 11',11).passed,11);assert.throws(()=>testEvidence('wasm-ctest','100% tests passed, 0 tests failed out of 10',11),/Incomplete/);});
 check('CTest Windows success summary is recognized',()=>assert.equal(testEvidence('native-debug-ctest','100% tests passed out of 12',12).passed,12));
 check('skipped CTest cannot pass',()=>assert.throws(()=>testEvidence('native-debug-ctest','***Skipped\n100% tests passed, 0 tests failed out of 12',12),/Incomplete/));
