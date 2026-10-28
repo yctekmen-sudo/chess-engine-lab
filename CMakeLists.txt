@@ -3,6 +3,15 @@ project(ChessEngineLab VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
+
+# Reversible production policy; the algorithm and public search API are shared.
+set(CHESS_LAB_ORDERING_POLICY "B2" CACHE STRING "Persistent ordering: B2, P1, NONE")
+set_property(CACHE CHESS_LAB_ORDERING_POLICY PROPERTY STRINGS B2 P1 NONE)
+if(NOT CHESS_LAB_ORDERING_POLICY MATCHES "^(B2|P1|NONE)$")
+  message(FATAL_ERROR "CHESS_LAB_ORDERING_POLICY must be B2, P1 or NONE")
+endif()
+message(STATUS "CELab ordering policy: ${CHESS_LAB_ORDERING_POLICY}")
+file(WRITE "${CMAKE_BINARY_DIR}/ordering-policy.txt" "${CHESS_LAB_ORDERING_POLICY}\n")
 option(CHESS_LAB_PROFILE "Preserve native sampling-profiler frame pointers" OFF)
 if(CHESS_LAB_PROFILE AND NOT EMSCRIPTEN)
   if(MSVC)
@@ -102,10 +111,15 @@ endif()
 add_library(chess_search STATIC engine/src/search/search.cpp engine/src/search/transposition_table.cpp)
 add_library(ChessEngineLab::Search ALIAS chess_search)
 target_link_libraries(chess_search PUBLIC chess_evaluation)
+target_compile_definitions(chess_search PUBLIC "CHESS_LAB_ORDERING_${CHESS_LAB_ORDERING_POLICY}")
 if(EMSCRIPTEN)
   # Uniform depth 64 plus exception-safe traversal exceeds Emscripten's
   # default 64 KiB stack in Debug. Export the search runtime requirement to
   # linked consumers; keep the full depth-cap test on WASM as well as native.
+  # Retention can grow to its bounded ceiling on either active policy.
+  if(NOT CHESS_LAB_ORDERING_POLICY STREQUAL "NONE")
+    target_link_options(chess_search INTERFACE -sALLOW_MEMORY_GROWTH=1)
+  endif()
   target_link_options(chess_search INTERFACE -sSTACK_SIZE=2097152
     "$<$<CONFIG:Debug>:-sSTACK_OVERFLOW_CHECK=2>")
 endif()
@@ -241,5 +255,34 @@ if(BUILD_TESTING)
         target_compile_definitions(m7_${kind}_evaluator PRIVATE M7_LEGACY)
       endif()
     endforeach()
+  endif()
+endif()
+
+# Both retained implementations remain buildable in normal native/WASM CTest.
+if(BUILD_TESTING)
+  set(ordering_tests m76_policy_smoke)
+  if(NOT CHESS_LAB_ORDERING_POLICY STREQUAL "NONE")
+    list(APPEND ordering_tests m76_ordering)
+  endif()
+  foreach(test_name IN LISTS ordering_tests)
+    add_executable(${test_name} tests/search/${test_name}.cpp)
+    target_link_libraries(${test_name} PRIVATE chess_search evaluation_support material_provider)
+    if(EMSCRIPTEN)
+      set_target_properties(${test_name} PROPERTIES SUFFIX ".js")
+      target_link_options(${test_name} PRIVATE -sENVIRONMENT=node -sEXIT_RUNTIME=1)
+      add_test(NAME ${test_name} COMMAND "${CHESS_LAB_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/evaluation/run_wasm.cjs" "$<TARGET_FILE:${test_name}>")
+    else()
+      add_test(NAME ${test_name} COMMAND ${test_name})
+    endif()
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT 300)
+  endforeach()
+  if(NOT CHESS_LAB_POLICY_SMOKE_CHILD)
+    add_test(NAME m76_policy_build COMMAND "${CMAKE_COMMAND}"
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DBINARY_DIR=${CMAKE_BINARY_DIR}/policy-smoke"
+      "-DGENERATOR=${CMAKE_GENERATOR}" "-DBUILD_TYPE=${CMAKE_BUILD_TYPE}" "-DCONFIG=$<CONFIG>"
+      "-DC_COMPILER=${CMAKE_C_COMPILER}" "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DTOOLCHAIN=${CMAKE_TOOLCHAIN_FILE}" "-DNODE=${CHESS_LAB_NODE_EXECUTABLE}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/search/order_policy_build.cmake")
+    set_tests_properties(m76_policy_build PROPERTIES TIMEOUT 300)
   endif()
 endif()

@@ -1,5 +1,6 @@
 #include "transposition_table_internal.hpp"
 #include "history_duplicates.hpp"
+#include "persistent_ordering.hpp"
 #include "../native_move_batch.hpp"
 #include <algorithm>
 #include <cassert>
@@ -241,7 +242,7 @@ GameHistory GameHistory::replay(const ChessCore &c, const Position &start,
 namespace {
 // A prepared node owns one legal list and its position-specific facts.
 enum class PreparationMode { eager, native_claim_free_leaf, native_tt_leaf_batch };
-enum class PreparationPurpose { eager, search_horizon };
+enum class PreparationPurpose { eager, search_horizon, search_inner };
 struct PreparedNode {
   std::unique_ptr<const PositionSnapshot> snapshot;
   std::vector<OrderedMove> legal;
@@ -345,6 +346,9 @@ struct Traversal {
   std::vector<std::string> path{};
   detail::TTSession *cache = nullptr;
   bool has_duplicate = detail::initial_history_has_duplicates(history);
+  detail::OrderingTree *ordering = nullptr;
+  detail::OrderingTree::Index ordering_node = 0;
+  int ordering_ply = 0;
   void poll() const {
     detail::tt_poll(cancellation);
   }
@@ -354,7 +358,13 @@ struct Traversal {
     // Iterative-deepening root preparation is reused with canonical reset.
     std::sort(result.begin(), result.end(),
               [](const auto &a, const auto &b) { return a.text < b.text; });
-    if (hints) prefer_previous(result);
+    if (hints) {
+      if (ordering) {
+        ordering->prepare(ordering_node,result);
+        ordering->apply(ordering_node,result,[&]{poll();});
+      }
+      prefer_previous(result);
+    }
     return result;
   }
   void prefer_previous(std::vector<OrderedMove> &result) {
@@ -400,6 +410,11 @@ struct Traversal {
       // A child inherits the parent flag until terminal() observes its count.
       // Synthetic claim-only lookahead never consumes the flag or descends.
       detail::RestoreDuplicateFlag duplicate_frame(has_duplicate);
+#if defined(CHESS_LAB_ORDERING_B2)
+      detail::OrderingFrame ordering_frame(ordering,ordering_node,ordering_ply,m.text,purpose==PreparationPurpose::search_inner);
+#else
+      detail::OrderingFrame ordering_frame(ordering,ordering_node,ordering_ply,m.text);
+#endif
       if (track_path) path.push_back(m.text); // Already encoded.
       std::optional<PreparedNode> prepared;
       try {
@@ -563,7 +578,7 @@ struct Traversal {
     // Outside the previous-PV prefix all descendants retain M3's canonical
     // order, so a full-window traversal already supplies its canonical PV.
     // Only a subtree that can actually receive a hint needs tie refinement.
-    if (exact && !cache) {
+    if (exact && !cache && (!ordering || !ordering->can_reorder(ordering_node))) {
       const auto *pv = previous ? &previous->best.principal_variation : nullptr;
       exact = pv && path.size() < pv->size() &&
               std::equal(path.begin(), path.end(), pv->begin());
@@ -576,6 +591,7 @@ struct Traversal {
     const auto original_alpha = alpha, original_beta = beta;
     const auto &s = prepared.snapshot;
     auto finish = [&](Line line) {
+      if (ordering && depth > 0) ordering->seal(ordering_node);
       if (cache && !root_play_only && raw_leaf) poll(); // Preserve the skipped store boundary.
       if (cache && !root_play_only && !raw_leaf) {
         poll();
@@ -595,7 +611,13 @@ struct Traversal {
     if (!root_play_only && !raw_leaf) annotate_claims(prepared);
     // The raw-leaf guard proves both immediate and intended claims unavailable.
     auto best = root_play_only || raw_leaf ? std::optional<Line>{} : claim(prepared);
-    if (depth > 0) prefer_previous(moves_here);
+    if (depth > 0) {
+      if (ordering) {
+        ordering->prepare(ordering_node,moves_here);
+        ordering->apply(ordering_node,moves_here,[&]{poll();});
+      }
+      prefer_previous(moves_here);
+    }
     if (raw_leaf && cache && !root_play_only) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
@@ -660,27 +682,42 @@ struct Traversal {
     for (std::size_t i = 0; i < moves_here.size(); ++i) {
       const auto &m = moves_here[i];
       poll();
+      const auto child_alpha = alpha, child_beta = beta;
+      bool refined = false;
       bool direct_exact = exact && (!options.alpha_beta_enabled || (!alpha && !beta));
       auto line = child(m, [&](PreparedNode &next) {
         return node(depth - 1, ply + 1, next, alpha, beta, direct_exact);
-      }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::eager);
+      }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
       ChessDecision action{DecisionKind::play, m.text};
       auto competitive = [&] {
         return !best || better(line.score, best->score) ||
                (line.score == best->score && canonical_before(action, best->action));
       };
+      bool improved = false;
       if (competitive()) {
-        if (exact && !direct_exact)
+        if (exact && !direct_exact) {
+          refined = true;
+          if (ordering) ordering->refinement();
           line = child(m, [&](PreparedNode &next) {
             return node(depth - 1, ply + 1, next, {}, {}, true);
-          }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::eager);
+          }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
+        }
         if (competitive()) {
           line.action = std::move(action);
           line.pv.insert(line.pv.begin(), m.text);
           best = std::move(line);
+          improved = true;
         }
       }
+      if (ordering) {
+        const bool score_exact = !options.alpha_beta_enabled || refined ||
+          detail::classify_bound(line.score,child_alpha,child_beta)==detail::TTBound::exact;
+        ordering->observe(ordering_node,m.text,score_exact?(improved?3:2):1,i+1);
+      }
       if (update() && i + 1 < moves_here.size()) {
+        if (ordering) {
+          ordering->observe(ordering_node,m.text,4,i+1);
+        }
         ++stats.alpha_beta_cutoffs;
         break;
       }
@@ -774,9 +811,18 @@ IterativeSearchResult iterative_search(
     r.provenance.tt_numeric_certified = session &&
         table_use.evaluator == EvaluatorCacheCompatibility::deterministic_position;
     r.provenance.tt_value_policy = table_use.value_policy;
+    // Compile-time selection changes only the representation. Normal callers need
+    // no experimental activation scope; each iterative invocation owns its tree.
+#if defined(CHESS_LAB_ORDERING_NONE)
+    detail::OrderingTree ordering(nullptr);
+#else
+    const detail::OrderingControl defaults{detail::production_ordering_config, nullptr};
+    detail::OrderingTree ordering(detail::ordering_control ? detail::ordering_control : &defaults);
+#endif
     auto p = c.clone(root);
     Traversal t{c, *p, e, {1, options.alpha_beta_enabled}, r.statistics,
                 h.occurrences()};
+    if (ordering.enabled()) t.ordering = &ordering;
     // Validation/terminal detection and safe fallback enumeration precede
     // attaching the observer: a cancelled terminal never becomes a fallback.
     auto root_prepared = prepare_node(c, *p);
@@ -803,6 +849,7 @@ IterativeSearchResult iterative_search(
       };
       for (int depth = 1; depth <= options.max_depth.value_or(64); ++depth) {
         t.poll();
+        if (t.ordering) t.ordering->begin();
         t.options.nominal_depth = depth;
         t.previous = options.previous_pv_ordering_enabled && r.completed
                          ? &*r.completed : nullptr;
@@ -818,18 +865,25 @@ IterativeSearchResult iterative_search(
         t.annotate_claims(root_prepared);
         if (auto claim = t.claim(root_prepared))
           ranking.push_back(variation(std::move(*claim)));
-        for (const auto &m : t.moves(root_prepared, true)) {
+        auto &root_moves=t.moves(root_prepared, true);
+        for (const auto &m : root_moves) {
           t.poll();
           // Independent full-window search: every candidate is exact. The
           // shared traversal refines internal ordering ties before publishing.
           auto line = t.child(m, [&](PreparedNode &next) {
             return t.node(depth - 1, 1, next, {}, {}, true);
-          }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::eager);
+          }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
+          if (t.ordering) {
+            const bool improving = std::all_of(ranking.begin(),ranking.end(),[&](const auto &v){
+              return snapshot->side_to_move()==Side::white?line.score>v.score:line.score<v.score;});
+            t.ordering->observe(t.ordering_node,m.text,improving?3:2,ranking.size()+1);
+          }
           line.action = {DecisionKind::play, m.text};
           line.pv.insert(line.pv.begin(), m.text);
           ranking.push_back(variation(std::move(line)));
         }
         }
+        if (t.ordering) t.ordering->seal(t.ordering_node);
         bool white = snapshot->side_to_move() == Side::white;
         std::sort(ranking.begin(), ranking.end(), [&](const auto &a, const auto &b) {
           if (a.score != b.score)
@@ -847,6 +901,7 @@ IterativeSearchResult iterative_search(
         // detached snapshot into committed storage. A later request retains it.
         t.poll();
         t.previous = nullptr;
+        if (t.ordering) t.ordering->commit();
         r.completed = std::move(next);
         if (progress) {
           try {

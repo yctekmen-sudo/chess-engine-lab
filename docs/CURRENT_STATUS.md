@@ -1,6 +1,29 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-## Current local checkpoint — 2026-10-26: M7.5g.1b review pending
+## Current local checkpoint — 2026-10-28: M7.6 reversible ordering candidate
+
+Primary Windows main is clean at `bc3f465f8d236a2cdb9cb27f3e30c520fd621040`
+(merged G1b); Linux primary remains clean on its preserved Variant F main.
+The M7.6 integration lives in an isolated feature worktree, uncommitted and not
+published. B2 is the default, P1 and NONE are selectable by one CMake setting;
+no new heuristic is included. See [the policy guide](m7.6-ordering.md).
+
+The user accepted B2 after the completed adoption evaluation at
+`work/m7.6-adoption-evaluation/experiment-20261028T024738Z/` (ignored/local-only).
+B2 broad d4 geometric/aggregate reductions were 11.48%/15.43%; original d5 subset
+47.96%/60.66%. Accepted adverse results remain C17 d5 off 32.42% slower and broad
+d4 hint-cold 1.78% slower; hint-warm is near neutral. P1 remains functional and
+retained for easy switching, despite its larger footprint and aggregate cost.
+No playing-strength or universal speedup claim is made.
+
+Integration evidence is local-only under
+`work/m7.6-production/integration-20261028T162633Z/`. Its final report separates
+fresh correctness, exact frozen work-record parity and performance from prior
+experiments. Any dirty-tree Full run is non-authoritative regardless of passed
+gates; clean-commit acceptance, commit and publication need separate approval.
+Historical evidence below is unchanged and is not current Git/PR status.
+
+## Historical local checkpoint — 2026-10-26: M7.5g.1b review pending
 
 Variant F is merged through PR #29 at
 `a59dc752de40bffe43caba9cf7b8f0d46cb87b77`. G1b is an uncommitted independent

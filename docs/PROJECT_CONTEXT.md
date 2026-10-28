@@ -107,3 +107,13 @@ Open a new conversation inside the **Chess Engine Lab** ChatGPT Project, attach 
 > We are continuing Chess Engine Lab. Read `PROJECT_CONTEXT.md` and `CURRENT_STATUS.md` as the handoff. Preserve the approved architecture, rule-correctness and exact-PV constraints, and my preference for Codex implementation prompts rather than direct repository edits. Verify the latest GitHub `main`, open PRs and CI before relying on status snapshots. Continue with the pending work listed in `CURRENT_STATUS.md`.
 
 The ChatGPT Project and memory can improve context recovery, but should not be treated as exact copies of every earlier turn. These repository documents are intended as the explicit portable handoff.
+
+## M7.6 ordering decision — 2026-10-28
+
+The user approved B2 as the preferred production ordering implementation, with
+its documented C17 d5 TT-off and shallow hint-cold tradeoffs accepted. The
+architectural condition is reversible compile-time selection: B2 (default), P1
+(full categorical), or NONE (G1b behavior), using one shared search traversal.
+P1 must remain built and tested in routine native/WASM validation. See
+[m7.6-ordering.md](m7.6-ordering.md). This decision authorizes integration work,
+not a commit, publication or merge; current candidate status is in CURRENT_STATUS.

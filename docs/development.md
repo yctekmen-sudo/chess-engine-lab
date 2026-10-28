@@ -1,5 +1,14 @@
 # Development workflow
 
+## M7.6 production ordering candidate
+
+B2 is the production build default; select P1 or NONE with the single
+`CHESS_LAB_ORDERING_POLICY` CMake setting. See [the switching and validation
+guide](m7.6-ordering.md) for executable commands, compiled-policy diagnostics,
+memory requirements, retained frozen provenance and accepted regressions.
+This candidate is uncommitted and awaits review; historical checkpoints below
+retain their original source and validation scope.
+
 ## M7.5f.1 experimental repetition annotations
 
 Variant F on merged E reuses `OrderedMove::claim_threefold` and `claims_ready`;

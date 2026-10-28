@@ -119,7 +119,7 @@ function markdown(report){
     (report.steps??[]).map(s=>`| ${s.id} | ${s.status} | ${((s.durationMs??0)/1000).toFixed(3)} | ${JSON.stringify(s.command??s.reason??'').replaceAll('|','\\|')} |`).join('\n')+'\n';
 }
 function publish(path,r){save(path,r);writeFileSync(path.replace(/\.json$/,'.md'),markdown(r));}
-const nativeTests=['m0_smoke','m1_core','m2_evaluation','abi_c','abi_cpp','m3_search','m4_search','m5_search','m72_search','m6_uci','m7_calibration','m7_layout'];
+const nativeTests=['m0_smoke','m1_core','m2_evaluation','abi_c','abi_cpp','m3_search','m4_search','m5_search','m72_search','m6_uci','m7_calibration','m7_layout','m76_policy_smoke','m76_policy_build'];
 export function plan(os,mode,areas=[]){
   const steps=[];const selected=area=>mode==='full'||areas.includes(area);
   const add=(id,command,cwd='',dependencies=[],area='infrastructure',extra={})=>steps.push({id,command,cwd,dependencies,selected:selected(area),...extra});
