@@ -1,6 +1,43 @@
 # Chess Engine Lab — Current Status and Next Actions
 
-## Current local checkpoint — 2026-10-28: M7.6 reversible ordering candidate
+## Current checkpoint — 2026-10-29: B2 per-node A+B production candidate
+
+The user approved freezing the exact screened A+B implementation for a feature
+commit, one authoritative Full local CI run, and a draft PR conditional on all
+54 command gates passing. Merge is not authorized. The baseline is merged M7.6
+at `cbb3eb9db8c4ef037433978611e177f92d1d4e2a`; primary Windows/Linux main
+checkouts remain clean there while isolated feature/validation worktrees are used.
+B2 remains the default; P1/NONE remain selectable and covered by the local suite.
+
+A reuses count one only at certified native claim-free leaves and retains the
+count-boundary cancellation poll. B skips native claim scans only with distinct
+supplied history and halfmove clock below 99. The production candidate is the
+exact union of the accepted patches: no additional heuristic, TT change,
+claim-summary flag, public-interface or evaluator change is included.
+
+Ignored/local-only screening evidence:
+`work/b2-per-node-ab/screen-20261029T034249Z/`. Six relevant native suites and
+27 focused cases per image passed; 25 completed-depth/retention comparisons and
+72 timing invocations (392 depth records) preserved exact results and deterministic
+work. These are Tier 1 results, not an authoritative Full CI pass.
+
+Contemporaneous two-block paired reductions versus frozen B2 were Initial d6
+off 4.91%, Tactical d6 off 3.54%, and Middlegame d4 hint-warm 3.10%.
+Direct comparisons against A alone were 3.40%/4.40% for Initial/Tactical;
+against B alone 2.05%/1.64%, with a near-neutral block in each, so sufficient
+incremental value over B remains unconfirmed. C17 d5 hint-cold was 1.48% slower
+and adverse in both blocks; Repetition's short inactive control was 5.14% faster
+and cannot be attributed to either shortcut. These are single-machine screening
+observations, not universal gains or playing-strength claims. The review
+recommended investigation; the user subsequently selected this exact combination
+as the production candidate for Full CI and final PR review. Correctness acceptance
+does not resolve the timing uncertainties.
+
+At this checkpoint, authoritative Full CI and draft publication are pending.
+The post-commit results and exact tested SHA will be recorded in the draft PR and
+local publication/CI reports without rewriting this pre-validation checkpoint.
+
+## Historical local checkpoint — 2026-10-28: M7.6 reversible ordering candidate
 
 Primary Windows main is clean at `bc3f465f8d236a2cdb9cb27f3e30c520fd621040`
 (merged G1b); Linux primary remains clean on its preserved Variant F main.
