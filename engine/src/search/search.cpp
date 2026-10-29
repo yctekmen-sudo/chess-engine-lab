@@ -477,7 +477,13 @@ struct Traversal {
     if (status == PositionStatus::stalemate ||
         core.known_dead_position(position))
       return terminal(SearchScore::finite(0), TerminalOutcome::draw);
-    auto occurrences = count(history.back());
+    const auto occurrences = [&] {
+      if (prepared.mode == PreparationMode::native_claim_free_leaf) {
+        poll(); // Preserve cancellation at the original counting boundary.
+        return std::size_t{1}; // Certified absent before this child was pushed.
+      }
+      return count(history.back());
+    }();
     has_duplicate = has_duplicate || occurrences >= 2;
     // Earlier mate/stalemate/dead returns cannot annotate or descend.
     if (occurrences >= 5 || s.halfmove_clock() >= 150)
@@ -491,6 +497,8 @@ struct Traversal {
     prepared.claim_now_threefold = count(history.back()) >= 3;
     prepared.claim_now_fifty = s.halfmove_clock() >= 100;
     if (prepared.claim_now_threefold || prepared.claim_now_fifty) return;
+    // Distinct supplied history and this clock exclude all native claims.
+    if (!has_duplicate && s.halfmove_clock() < 99) return;
     // For an intended threefold claim, the destination must already occur
     // twice. Avoid all hypothetical child work when this is impossible.
     const bool repeated_target = has_duplicate;
@@ -533,6 +541,8 @@ struct Traversal {
   std::optional<Line> claim(const PreparedNode &prepared) {
     poll();
     const auto &s = *prepared.snapshot;
+    if (native_chess_core(core) && !has_duplicate && s.halfmove_clock() < 99)
+      return {};
     const auto &canonical_moves = prepared.legal;
     auto occurrences = native_chess_core(core)
         ? (prepared.claim_now_threefold ? 3U : 0U) : count(history.back());
