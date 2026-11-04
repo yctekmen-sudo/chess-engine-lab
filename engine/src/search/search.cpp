@@ -80,9 +80,14 @@ std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
                                        const CancellationToken *token = nullptr,
                                        const PositionSnapshot *snapshot = nullptr) {
   std::vector<OrderedMove> result;
-  for (auto &m : c.legal_moves(p)) {
-    if (token) detail::tt_poll(*token);
-    result.push_back({c.encode_move(p, *m), std::move(m)});
+  {
+    auto legal = c.legal_moves(p);
+    if (token && !legal.empty()) detail::tt_poll(*token);
+    result.reserve(legal.size());
+    for (auto &m : legal) {
+      if (token) detail::tt_poll(*token);
+      result.push_back({c.encode_move(p, *m), std::move(m)});
+    }
   }
     // Legal en-passant captures are already members of this list.
   if (snapshot) {
@@ -119,7 +124,10 @@ std::vector<OrderedMove> batch_ordered_moves(
     const ChessCore &c, const Position &p, const detail::NativeMoveBatch &batch,
     const CancellationToken *token, const PositionSnapshot &snapshot) {
   std::vector<OrderedMove> result;
-  for (std::size_t i = 0; i < detail::native_move_batch_size(batch); ++i) {
+  const auto count = detail::native_move_batch_size(batch);
+  if (token && count) detail::tt_poll(*token);
+  result.reserve(count);
+  for (std::size_t i = 0; i < count; ++i) {
     if (token) detail::tt_poll(*token);
     OrderedMove move{detail::encode_native_batch_member(c, p, batch, i), {}};
     move.native_ordinal = static_cast<std::uint16_t>(i);
@@ -241,7 +249,7 @@ GameHistory GameHistory::replay(const ChessCore &c, const Position &start,
 }
 namespace {
 // A prepared node owns one legal list and its position-specific facts.
-enum class PreparationMode { eager, native_claim_free_leaf, native_tt_leaf_batch };
+enum class PreparationMode { eager, native_claim_free_leaf, native_tt_leaf_batch, native_inner_batch };
 enum class PreparationPurpose { eager, search_horizon, search_inner };
 struct PreparedNode {
   std::unique_ptr<const PositionSnapshot> snapshot;
@@ -281,7 +289,8 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
                           const CancellationToken *token = nullptr,
                           std::optional<std::span<const RepetitionSignature>> leaf_history = {},
                           bool tt_search_horizon = false,
-                          bool parent_has_duplicate = false) {
+                          bool parent_has_duplicate = false,
+                          bool native_search_inner = false) {
   PreparedNode node;
   node.snapshot = c.snapshot(p);
   if (leaf_history && native_chess_core(c) &&
@@ -300,12 +309,13 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
       return node;
     }
   }
-  if (tt_search_horizon && native_chess_core(c)) {
+  if ((tt_search_horizon || native_search_inner) && native_chess_core(c)) {
     if (token) detail::tt_poll(*token);
     node.batch = detail::prepare_native_move_batch(c, p);
     if (token) detail::tt_poll(*token); // Including zero-legal terminal positions.
     node.legal = batch_ordered_moves(c, p, *node.batch, token, *node.snapshot);
-    node.mode = PreparationMode::native_tt_leaf_batch;
+    node.mode = tt_search_horizon ? PreparationMode::native_tt_leaf_batch
+                                  : PreparationMode::native_inner_batch;
   } else {
     node.legal = ordered_moves(c, p, token, node.snapshot.get());
   }
@@ -402,11 +412,27 @@ struct Traversal {
     }
     return n;
   }
-  template <class F> auto child(const OrderedMove &m, F f,
+  void invalidate_inner_batch(PreparedNode &parent) noexcept {
+    if (parent.mode != PreparationMode::native_inner_batch) return;
+    detail::invalidate_native_move_batch(*parent.batch);
+    for (auto &move : parent.legal) move.move.reset();
+  }
+  const Move &executable(PreparedNode &parent, OrderedMove &move) {
+    if (parent.mode != PreparationMode::native_inner_batch) return move.executable();
+    poll();
+    if (!move.move) {
+      move.move = detail::materialize_native_batch_member(
+          core, position, *parent.batch, move.native_ordinal);
+      poll();
+    }
+    return move.executable();
+  }
+  template <class F> auto child(PreparedNode &parent, OrderedMove &m, F f,
                                 PreparationPurpose purpose = PreparationPurpose::eager) {
     poll();
     const bool track_path = previous != nullptr;
-    return with_move(core, position, m.executable(), [&] {
+    try {
+    return with_move(core, position, executable(parent, m), [&] {
       // A child inherits the parent flag until terminal() observes its count.
       // Synthetic claim-only lookahead never consumes the flag or descends.
       detail::RestoreDuplicateFlag duplicate_frame(has_duplicate);
@@ -422,7 +448,8 @@ struct Traversal {
         if (purpose == PreparationPurpose::search_horizon && (!cache || !cache->numeric()))
           leaf_history.emplace(history);
         prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
-            purpose == PreparationPurpose::search_horizon && cache, has_duplicate));
+            purpose == PreparationPurpose::search_horizon && cache, has_duplicate,
+            purpose == PreparationPurpose::search_inner));
         history.push_back(prepared->repetition);
       } catch (...) {
         if (track_path) path.pop_back();
@@ -451,6 +478,10 @@ struct Traversal {
       if (track_path) path.pop_back();
       return std::move(*result);
     });
+    } catch (...) {
+      invalidate_inner_batch(parent);
+      throw;
+    }
   }
   std::optional<Line> terminal(std::uint64_t ply, const PreparedNode &prepared) {
     const auto &s = *prepared.snapshot;
@@ -518,7 +549,7 @@ struct Traversal {
         }
         try {
           m.claim_threefold = with_move(core, position,
-              batched ? *materialized : m.executable(), [&] {
+              batched ? *materialized : executable(prepared, m), [&] {
             // This once-per-prepared-node pass retains eligibility on the
             // move through every later reorder. Hypothetical identities do
             // not require child move lists or affect actual history/TT state.
@@ -533,17 +564,18 @@ struct Traversal {
           });
         } catch (...) {
           if (batched) detail::invalidate_native_move_batch(*prepared.batch);
+          invalidate_inner_batch(prepared);
           throw;
         }
       }
     }
   }
-  std::optional<Line> claim(const PreparedNode &prepared) {
+  std::optional<Line> claim(PreparedNode &prepared) {
     poll();
     const auto &s = *prepared.snapshot;
     if (native_chess_core(core) && !has_duplicate && s.halfmove_clock() < 99)
       return {};
-    const auto &canonical_moves = prepared.legal;
+    auto &canonical_moves = prepared.legal;
     auto occurrences = native_chess_core(core)
         ? (prepared.claim_now_threefold ? 3U : 0U) : count(history.back());
     std::optional<Line> best;
@@ -556,13 +588,13 @@ struct Traversal {
                   PVEnd::claim_draw,
                   {}};
     else
-      for (const auto &m : canonical_moves) {
+      for (auto &m : canonical_moves) {
         poll();
         // Preserve synthetic-adapter custom clock behavior: only the native
         // rules adapter derives intended claims from prepared metadata.
         bool eligible = native_chess_core(core)
             ? (m.claim_threefold || m.claim_fifty)
-            : child(m, [&](PreparedNode &next) {
+            : child(prepared, m, [&](PreparedNode &next) {
                 return count(history.back()) >= 3 ||
                        next.snapshot->halfmove_clock() >= 100;
               });
@@ -598,6 +630,8 @@ struct Traversal {
     assert(!raw_leaf || (depth == 0 && (!cache || !cache->numeric()) && native_chess_core(core)));
     assert(prepared.mode != PreparationMode::native_tt_leaf_batch ||
            (depth == 0 && cache && native_chess_core(core) && prepared.batch));
+    assert(prepared.mode != PreparationMode::native_inner_batch ||
+           (depth > 0 && native_chess_core(core) && prepared.batch));
     const auto original_alpha = alpha, original_beta = beta;
     const auto &s = prepared.snapshot;
     auto finish = [&](Line line) {
@@ -690,12 +724,12 @@ struct Traversal {
       return finish(*best);
     }
     for (std::size_t i = 0; i < moves_here.size(); ++i) {
-      const auto &m = moves_here[i];
+      auto &m = moves_here[i];
       poll();
       const auto child_alpha = alpha, child_beta = beta;
       bool refined = false;
       bool direct_exact = exact && (!options.alpha_beta_enabled || (!alpha && !beta));
-      auto line = child(m, [&](PreparedNode &next) {
+      auto line = child(prepared, m, [&](PreparedNode &next) {
         return node(depth - 1, ply + 1, next, alpha, beta, direct_exact);
       }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
       ChessDecision action{DecisionKind::play, m.text};
@@ -708,7 +742,7 @@ struct Traversal {
         if (exact && !direct_exact) {
           refined = true;
           if (ordering) ordering->refinement();
-          line = child(m, [&](PreparedNode &next) {
+          line = child(prepared, m, [&](PreparedNode &next) {
             return node(depth - 1, ply + 1, next, {}, {}, true);
           }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
         }
@@ -876,11 +910,11 @@ IterativeSearchResult iterative_search(
         if (auto claim = t.claim(root_prepared))
           ranking.push_back(variation(std::move(*claim)));
         auto &root_moves=t.moves(root_prepared, true);
-        for (const auto &m : root_moves) {
+        for (auto &m : root_moves) {
           t.poll();
           // Independent full-window search: every candidate is exact. The
           // shared traversal refines internal ordering ties before publishing.
-          auto line = t.child(m, [&](PreparedNode &next) {
+          auto line = t.child(root_prepared, m, [&](PreparedNode &next) {
             return t.node(depth - 1, 1, next, {}, {}, true);
           }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
           if (t.ordering) {

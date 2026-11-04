@@ -131,6 +131,20 @@ void require_legal(const Pos& p, chess::Move m) {
     for (auto legal:list) if (legal==m) return;
     invalid();
 }
+// Match the vendored non-Chess960 UCI conversion without coordinate strings.
+std::string native_move_to_uci(chess::Move move) {
+    const auto from = move.from();
+    auto to = move.to();
+    // Native castling targets the rook square; UCI targets the king destination.
+    if (move.typeOf() == chess::Move::CASTLING)
+        to = chess::Square(to > from ? chess::File::FILE_G : chess::File::FILE_C,
+                           from.rank());
+    char text[5] = {char('a' + from.index() % 8), char('1' + from.index() / 8),
+                    char('a' + to.index() % 8), char('1' + to.index() / 8), 0};
+    const bool promotion = move.typeOf() == chess::Move::PROMOTION;
+    if (promotion) text[4] = "pnbrqk"[int(move.promotionType())];
+    return std::string(text, promotion ? 5 : 4);
+}
 class Core final : public ChessCore {
 public:
     std::unique_ptr<Position> initial_position() const override { return load_fen(chess::constants::STARTPOS); }
@@ -158,6 +172,7 @@ public:
         std::vector<std::unique_ptr<Move>> result;
         const auto& p=cast<Pos>(position);
         auto list=moves(p);
+        result.reserve(list.size());
         for (auto m:list) result.push_back(std::make_unique<Mv>(m, p));
         return result;
     }
@@ -188,7 +203,7 @@ public:
     std::string encode_move(const Position& position,const Move& move) const override {
         const auto& p=cast<Pos>(position); const auto& supplied=cast<Mv>(move);
         if (!certified(p,supplied)) require_legal(p,supplied.value);
-        return chess::uci::moveToUci(supplied.value);
+        return native_move_to_uci(supplied.value);
     }
     std::unique_ptr<Move> decode_move(const Position& position,std::string_view coordinate) const override {
         for (auto m:moves(cast<Pos>(position)))
@@ -288,7 +303,7 @@ std::string encode_native_batch_member(const ChessCore& core,
                                        const Position& position,
                                        const NativeMoveBatch& batch,
                                        std::size_t ordinal) {
-    return chess::uci::moveToUci(checked_batch_member(core, position, batch, ordinal));
+    return native_move_to_uci(checked_batch_member(core, position, batch, ordinal));
 }
 std::unique_ptr<Move> materialize_native_batch_member(
     const ChessCore& core, const Position& position, const NativeMoveBatch& batch,

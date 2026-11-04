@@ -1,5 +1,34 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## Experimental publication checkpoint — 2026-11-04: A+B+D
+
+Feature `feature/implementation-efficiency-abd` is based on production ancestry
+`90e30a29921fe5566f0de329af0c34c772de0bb0` for draft experimental review.
+A reserves move-list capacity; B batches eligible positive-depth native nodes
+unconditionally and caches checked move materialization; D formats native UCI
+text directly in the eager and batch paths. Only the two implementation files
+change. Rejected history-aware variant C is excluded; interfaces, sorting,
+ordering policy and TT logic retain the frozen behavior.
+
+Publication verification executed 2026-11-04 on Windows x64/MSVC
+19.44.35229.0 Release, B2: all six search suites passed once (6/6, 8.47 s).
+The implementation matches the tested A+B+D experiment byte-for-byte; combined
+patch SHA-256 `fdbbf69d82a374606b7d3bf76bb2420f66b825f791432b5549cb8feeb3622715`.
+The A+B intermediate matches recorded patch SHA-256
+`1ba6cfe6bc98d763aaf8900451f5745476f6f58e21c55cf2c3556a4c6ec5d2f0`.
+
+Historical Tier 1 reports remain ignored/local-only under
+`work/implementation-efficiency/{reserve-capacity,positive-depth-batch,native-uci-formatting}/`.
+Their separate incremental timing sessions are not additive or a direct
+A+B+D-versus-production measurement. B's Repetition regression remains a known
+tradeoff; short-control timing uncertainty and the existing unrelated GUI audit
+findings remain unresolved. No authoritative Full CI or cross-platform
+qualification of the combination has run; production acceptance is pending.
+Final feature SHA and draft PR URL are recorded in the PR and ignored/local-only
+`work/implementation-efficiency/publication-abd-20261104/publication.json`.
+This publication does not authorize merge or marking the PR ready for review.
+
+
 ## Current checkpoint — 2026-10-29: B2 per-node A+B production candidate
 
 The user approved freezing the exact screened A+B implementation for a feature
