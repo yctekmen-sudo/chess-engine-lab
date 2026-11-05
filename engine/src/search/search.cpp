@@ -1,5 +1,6 @@
 #include "transposition_table_internal.hpp"
 #include "history_duplicates.hpp"
+#include "repeated_claim_targets.hpp"
 #include "persistent_ordering.hpp"
 #include "../native_move_batch.hpp"
 #include <algorithm>
@@ -533,10 +534,18 @@ struct Traversal {
     // For an intended threefold claim, the destination must already occur
     // twice. Avoid all hypothetical child work when this is impossible.
     const bool repeated_target = has_duplicate;
+    std::optional<detail::RepeatedClaimTargets> targets;
+    if (repeated_target)
+      targets.emplace(history, prepared.repetition, [&] { poll(); });
     for (auto &m : prepared.legal) {
       poll();
       m.claim_fifty = s.halfmove_clock() == 99 && !m.pawn_move && !m.capture;
       if (repeated_target) {
+        if (!targets->possible(prepared.repetition, m.text, m.legal_ep, m.capture,
+                               [&] { poll(); }) &&
+            detail::native_try_skip_claim_probe(core, position, prepared.batch.get(),
+                                               m.native_ordinal, m.move.get()))
+          continue;
         // Read-only lookahead. Never insert a hypothetical occurrence into
         // the actual history or the table's history-interning structure.
         std::unique_ptr<Move> materialized;
