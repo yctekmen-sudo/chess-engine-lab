@@ -119,7 +119,7 @@ std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
   }
   return result;
 }
-// The generic eager path above stays the reference/fallback. Native TT leaves
+// The generic eager path above stays the reference/fallback. Native horizon leaves
 // keep the same text/fact/validation rules without allocating unused Mv owners.
 std::vector<OrderedMove> batch_ordered_moves(
     const ChessCore &c, const Position &p, const detail::NativeMoveBatch &batch,
@@ -250,7 +250,7 @@ GameHistory GameHistory::replay(const ChessCore &c, const Position &start,
 }
 namespace {
 // A prepared node owns one legal list and its position-specific facts.
-enum class PreparationMode { eager, native_claim_free_leaf, native_tt_leaf_batch, native_inner_batch };
+enum class PreparationMode { eager, native_claim_free_leaf, native_horizon_batch, native_inner_batch };
 enum class PreparationPurpose { eager, search_horizon, search_inner };
 struct PreparedNode {
   std::unique_ptr<const PositionSnapshot> snapshot;
@@ -310,12 +310,13 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
       return node;
     }
   }
-  if ((tt_search_horizon || native_search_inner) && native_chess_core(c)) {
+  const bool native_search_horizon = tt_search_horizon || leaf_history.has_value();
+  if ((native_search_horizon || native_search_inner) && native_chess_core(c)) {
     if (token) detail::tt_poll(*token);
     node.batch = detail::prepare_native_move_batch(c, p);
     if (token) detail::tt_poll(*token); // Including zero-legal terminal positions.
     node.legal = batch_ordered_moves(c, p, *node.batch, token, *node.snapshot);
-    node.mode = tt_search_horizon ? PreparationMode::native_tt_leaf_batch
+    node.mode = native_search_horizon ? PreparationMode::native_horizon_batch
                                   : PreparationMode::native_inner_batch;
   } else {
     node.legal = ordered_moves(c, p, token, node.snapshot.get());
@@ -549,7 +550,7 @@ struct Traversal {
         // Read-only lookahead. Never insert a hypothetical occurrence into
         // the actual history or the table's history-interning structure.
         std::unique_ptr<Move> materialized;
-        const bool batched = prepared.mode == PreparationMode::native_tt_leaf_batch;
+        const bool batched = prepared.mode == PreparationMode::native_horizon_batch;
         if (batched) {
           poll();
           materialized = detail::materialize_native_batch_member(
@@ -637,8 +638,8 @@ struct Traversal {
     ++stats.visited_nodes;
     const bool raw_leaf = prepared.mode == PreparationMode::native_claim_free_leaf;
     assert(!raw_leaf || (depth == 0 && (!cache || !cache->numeric()) && native_chess_core(core)));
-    assert(prepared.mode != PreparationMode::native_tt_leaf_batch ||
-           (depth == 0 && cache && native_chess_core(core) && prepared.batch));
+    assert(prepared.mode != PreparationMode::native_horizon_batch ||
+           (depth == 0 && native_chess_core(core) && prepared.batch));
     assert(prepared.mode != PreparationMode::native_inner_batch ||
            (depth > 0 && native_chess_core(core) && prepared.batch));
     const auto original_alpha = alpha, original_beta = beta;
