@@ -30,6 +30,7 @@ public:
     targets_.reserve(history.size());
     for (std::size_t i = 0; i < history.size(); ++i) {
       poll();
+      if (history[i].side == parent.side) continue;
       bool earlier = false;
       for (std::size_t j = 0; j < i; ++j) {
         poll();
