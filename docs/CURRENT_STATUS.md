@@ -1,5 +1,21 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## Approach B local validation — 2026-11-06: B2 qualified, tooling PR proposed
+
+Production source SHA `bcfe5082d67a5bfc78f6c763f47897673633ee09` and Git tree
+`934b5733357ce1c6274c6a3a0fb0fdb12ea508f1` remain frozen.
+The optional deterministic runner and evidence analyzer in `scripts/validation/`
+reuse the unchanged `scripts/ci/` Full policy. B1 passed 45/45 focused tests.
+A2 Codex-directed and B2 model-free runs each passed authoritative 54/54 Full CI;
+B2 matched all seven reference deterministic fingerprint sets, with zero
+model calls in its runner, zero automatic retries and zero interventions.
+A1's failed no-gate attempt is preserved separately. B3 cost accounting
+is maintained as local evidence; API-rate proxies are not actual Codex credits.
+
+The new scripts are proposed for a **tooling-only review PR**, not yet merged.
+Keep historical validation evidence local, and run future Full CI on clean
+independent Windows/WSL worktrees. G remains excluded from production.
+
 ## Experimental publication checkpoint — 2026-11-04: A+B+D
 
 Feature `feature/implementation-efficiency-abd` is based on production ancestry
