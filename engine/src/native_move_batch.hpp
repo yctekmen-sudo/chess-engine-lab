@@ -22,4 +22,9 @@ std::unique_ptr<Move> materialize_native_batch_member(
 void invalidate_native_move_batch(NativeMoveBatch &) noexcept;
 // Exact effective EP availability without constructing a legal-move list.
 bool native_has_legal_en_passant(const ChessCore &, const Position &);
+// Omit a proven claim-ineligible make/undo while retaining its serial advance.
+// False requires the original exact path (counter boundary or stale certificate).
+// A batch member needs no boxed Move; eager members use their existing owner.
+bool native_try_skip_claim_probe(const ChessCore &, Position &,
+    const NativeMoveBatch *, std::size_t ordinal, const Move *eager);
 } // namespace chess_lab::detail

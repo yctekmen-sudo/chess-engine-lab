@@ -290,6 +290,31 @@ NativeMoveBatchOwner prepare_native_move_batch(const ChessCore& core,
 std::size_t native_move_batch_size(const NativeMoveBatch& batch) noexcept {
     return batch.size;
 }
+bool native_try_skip_claim_probe(const ChessCore& core, Position& position,
+                                const NativeMoveBatch* batch, std::size_t ordinal,
+                                const Move* eager) {
+    (void)cast<Core>(core);
+    auto& p = cast<Pos>(position);
+    chess::Move move;
+    if (batch) {
+        if (batch->invalidated || batch->owner != p.identity || batch->top != p.top ||
+            ordinal >= batch->size) return false;
+        move = chess::Move(batch->identities[ordinal]);
+    } else {
+        const auto* m = dynamic_cast<const Mv*>(eager);
+        if (!m || !certified(p, *m)) return false;
+        move = m->value;
+    }
+    const bool zero = p.board.at<chess::PieceType>(move.from()) == chess::PieceType::PAWN ||
+                      p.board.isCapture(move);
+    if ((!zero && p.meta.half == UINT32_MAX) ||
+        (p.board.sideToMove() == chess::Color::BLACK && p.meta.full == UINT32_MAX) ||
+        p.serial == UINT64_MAX) return false;
+    // make_move followed by strict undo restores top/meta/board, but not serial.
+    // Preserve that progression so removing probes cannot postpone exhaustion.
+    ++p.serial;
+    return true;
+}
 // Batch ordinals can never fall through to public stale-move revalidation.
 static chess::Move checked_batch_member(const ChessCore& core, const Position& position,
                                 const NativeMoveBatch& batch, std::size_t ordinal) {
