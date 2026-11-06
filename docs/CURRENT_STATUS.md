@@ -1,5 +1,23 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## Approach B default-workflow follow-up — 2026-11-06: draft implementation
+
+PR #39 is proposed (not merged) on production main
+`9eaccba8dfbdeab786f37f5edc1bc1b0eaa1183c`. Adds the single-command
+PowerShell launcher, clean per-commit Windows/WSL validation clone selection,
+reference revision/tree verification, and explicit
+`reference_review_required` status for passing Full CI whose
+cross-revision fingerprints need human review. Corrects the original analyzer
+assumption that the historical reference Git tree must equal the candidate.
+Changes AGENTS.md, docs/local-ci.md and validation README accordingly.
+Existing 54-gate CI policy and engine code remain untouched.
+
+Offline focused workflow tests: **22/22 passed** on Linux using mocks; B1's
+historical captured-evidence suite and live Windows PowerShell/WSL tests
+were **not rerun** in this review. The new one-command workflow must be
+qualified in the user's physical environment before relying on it as default.
+No Full CI invocation, source reset, GitHub CI or production merge occurred.
+
 ## Approach B local validation — 2026-11-06: B2 qualified, tooling PR proposed
 
 Production source SHA `bcfe5082d67a5bfc78f6c763f47897673633ee09` and Git tree

@@ -1,5 +1,32 @@
 # Deterministic local validation
 
+## Default Full CI entry point
+
+The maintained user-facing command, from a committed clean CELab checkout in
+a regular Windows PowerShell terminal, is:
+
+```powershell
+.\scripts\validation\full-ci.ps1 -PlanOnly
+.\scripts\validation\full-ci.ps1
+```
+
+The first line checks source identity, reference availability and Windows/WSL
+toolchains **without creating clones or executing CI**. The second discovers or
+creates isolated clean Windows/WSL Git clones for the selected commit, runs the
+original Full coordinator once through `run.py --execute-full`, and writes
+a unique evidence package beneath `work/validation-efficiency/routine/`.
+No Codex calls, network fetches, repair operations or automatic retries occur.
+
+A **new feature revision** is compared against the earlier approved reference
+without pretending its Git tree should equal the historical tree. An otherwise
+passed coordinator may yield exit 2 (`reference_review_required`) if
+deterministic/source/toolchain fingerprints differ. This is **not** an
+authoritative fingerprint match or permission to update the baseline. Approve
+changes separately before promoting a reference. Missing evidence, dirty
+source, skipped tests and nonzero worker/coordinator exits remain failures.
+See [local CI](../../docs/local-ci.md). The underlying runner still has a
+plan-only default for advanced callers; it has not changed its CI policy.
+
 This optional wrapper reads the existing CI policy; it does not replace it.
 `scripts/ci/run-all.ps1`, its 54-gate matrix, fixtures, test floors and verdict
 rules remain unchanged. Python 3.11+ (standard library), application Node 24,

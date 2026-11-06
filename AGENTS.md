@@ -27,6 +27,18 @@ check implementation and current contracts before treating a feature as present.
   implements, tests, and prepares changes. GitHub hosts version control, pull
   requests, code review, and integration. Validation uses local Windows 11 +
   WSL2 Ubuntu 24.04 CI; see [docs/local-ci.md](docs/local-ci.md).
+- **Default Full CI**: after explicitly authorizing a Full validation of a
+  committed revision, use the deterministic Windows PowerShell entry point
+  `scripts/validation/full-ci.ps1` from the source repository. Do not
+  use Codex to orchestrate or interpret routine validation; allow Codex to run
+  focused development tests and to investigate exceptions when requested.
+  The wrapper reads the same approved CI policy and invokes the unchanged
+  54-gate coordinator exactly once. Planning uses `-PlanOnly` and starts no
+  tests or clones. A nonmatching historical reference with passing CI is
+  **review required**, never a fingerprint pass; never auto-approve new
+  baselines, repair checkout state, rerun Full CI, or waive missing gates.
+  Preserve run evidence. The original `scripts/ci/run-all.ps1` remains
+  an explicitly chosen diagnostic fallback; no fallback occurs automatically.
 - Inspect Git status and existing changes first. Work on feature branches based
   on `main`, not directly on `main`; preserve unrelated and user-authored changes.
 - Commit, push, create a PR, or merge only with explicit user authorization for

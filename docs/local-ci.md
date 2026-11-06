@@ -1,5 +1,53 @@
 # Local CI on Windows 11 and WSL2 Ubuntu 24.04
 
+## Default deterministic Full CI (Approach B)
+
+After checking out a **committed, clean** revision, use an ordinary Windows
+PowerShell terminal in the CELab repository root (not a Codex session):
+
+```powershell
+.\scripts\validation\full-ci.ps1 -PlanOnly    # Read-only preflight and source/target plan
+.\scripts\validation\full-ci.ps1              # One real 54-gate Full CI run
+```
+
+The wrapper verifies the selected commit/tree, refuses dirty or flagged source,
+checks the approved reference, discovers the WSL user/toolchains, and creates or
+reuses **separate clean validation clones** at that exact commit. It never
+fetches from the network, resets unrelated checkouts, modifies source code or
+automatically retries. Existing conflicting directories are rejected. This
+normal workflow can create substantial ignored work directories under
+`work/ci-validation/` on Windows and
+`~/work/celab-ci-validation/` in WSL. The first execution on a
+new commit will generally rebuild artifacts. Its report is written beneath
+`work/validation-efficiency/routine/` with a unique run ID.
+
+The default approved reference is the existing sealed local package
+`work/validation-efficiency/production-readiness-20261106T064606Z`.
+If it is absent, the wrapper **stops**; specify a separately reviewed evidence
+reference with `-ReferenceRoot` rather than fabricating one. The reference must
+belong to an ancestor revision and its Git tree must match the recorded SHA.
+Different-source revisions may finish with **exit 2**
+(`reference_review_required`): the coordinator itself passed all gates, but
+source or deterministic output changed relative to the accepted reference.
+This is **not** an authoritative reference match. Review differences and
+explicitly approve a new reference through the normal code-review process;
+the wrapper cannot automatically approve fingerprints. Exit 0 denotes a full
+authoritative pass including evidence comparison; exit 1 denotes validation
+failure or incomplete evidence. Evidence remains available for investigation.
+
+The workflow uses the merged `scripts/validation/workflow.py` and
+`run.py`. Run its focused mock-based tests without Full CI using
+`python scripts/validation/test_workflow.py`. First live Windows/WSL
+preflight and cross-revision acceptance behavior remain subject to separate
+physical-environment qualification. See
+[the deterministic validation README](../scripts/validation/README.md).
+
+### Explicit diagnostic fallback
+
+The historical commands below still invoke the original Full coordinator
+directly for troubleshooting; they are not the default and must not be launched
+automatically after a wrapper failure.
+
 `scripts/ci/run-all.ps1` is the validation entrypoint, retaining the former hosted
 test coverage in a 54-command Full matrix. Hosted workflow definitions are retired;
 their historical definitions remain in Git. Run it in Windows PowerShell 5.1 from
