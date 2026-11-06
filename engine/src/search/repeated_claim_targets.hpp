@@ -34,12 +34,14 @@ public:
       bool earlier = false;
       for (std::size_t j = 0; j < i; ++j) {
         poll();
+        if (history[j].side != history[i].side) continue;
         if (history[i] == history[j]) { earlier = true; break; }
       }
       if (earlier) continue;
       bool repeated = false;
       for (std::size_t j = i + 1; j < history.size(); ++j) {
         poll();
+        if (history[j].side != history[i].side) continue;
         if (history[i] == history[j]) { repeated = true; break; }
       }
       if (!repeated || history[i].side == parent.side) continue;
