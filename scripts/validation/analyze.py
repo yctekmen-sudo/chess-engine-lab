@@ -60,6 +60,18 @@ class Analyzer:
                      actual={k: v for k, v in counts.items() if v != 1})
         return [s for s in steps if isinstance(s, dict)]
 
+    def verify_tree(self, fingerprints, expected_commit, label, candidate):
+        # Reference and candidate revisions can legitimately have distinct Git
+        # trees. Reject corruption of either recorded tree and pin the selected
+        # candidate to its explicitly supplied expected tree.
+        if candidate:
+            self.equal(fingerprints.get('tree'), self.tree, 'git_tree', label)
+        try:
+            recorded_tree = git(self.repo, 'rev-parse', expected_commit + '^{tree}')
+            self.equal(fingerprints.get('tree'), recorded_tree, 'git_object_tree', label)
+        except subprocess.SubprocessError as error:
+            self.issue('evidence_incomplete', 'git_object_unavailable', label, actual=str(error))
+
     def verify_bundle(self, root, report_dir, expected_commit, label, candidate):
         root, report_dir = Path(root).resolve(), Path(report_dir).resolve()
         self.require(report_dir.is_relative_to(root), 'unsealed_external_report', report_dir,
@@ -205,11 +217,9 @@ class Analyzer:
         if not isinstance(fingerprints, dict):
             fingerprints = {}
         self.equal(fingerprints.get('frozenCommit'), expected_commit, 'fingerprint_commit', label)
-        self.equal(fingerprints.get('tree'), self.tree, 'git_tree', label)
-        try:
-            self.equal(git(self.repo, 'rev-parse', expected_commit + '^{tree}'), self.tree, 'git_object_tree', label)
-        except subprocess.SubprocessError as error:
-            self.issue('evidence_incomplete', 'git_object_unavailable', label, actual=str(error))
+        # Different approved reference revisions must not be mistaken for a
+        # candidate's corrupt tree. Cross-revision changes remain review-gated.
+        self.verify_tree(fingerprints, expected_commit, label, candidate)
         sources = fingerprints.get('sourceEvaluatorConfigurationFiles')
         if self.require(isinstance(sources, dict) and bool(sources), 'missing_evaluator_source', label):
             for name, value in sources.items():
