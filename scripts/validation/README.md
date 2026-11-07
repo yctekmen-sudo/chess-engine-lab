@@ -17,13 +17,19 @@ original Full coordinator once through `run.py --execute-full`, and writes
 a unique evidence package beneath `work/validation-efficiency/routine/`.
 No Codex calls, network fetches, repair operations or automatic retries occur.
 
-A **new feature revision** is compared against the earlier approved reference
-without pretending its Git tree should equal the historical tree. An otherwise
-passed coordinator may yield exit 2 (`reference_review_required`) if
-deterministic/source/toolchain fingerprints differ. This is **not** an
-authoritative fingerprint match or permission to update the baseline. Approve
-changes separately before promoting a reference. Missing evidence, dirty
-source, skipped tests and nonzero worker/coordinator exits remain failures.
+Each candidate and reference is independently checked against its own committed
+Git tree and clean before/after/final source states. Whole-tree tracked/index
+fingerprints are compared strictly for the **same commit**, but are not compared
+across **different commits**. Instead, a Git source-delta inventory requires
+review when any path outside `AGENTS.md`, `docs/`, and `scripts/validation/` changed.
+Engine, controller, GUI, tests, fixtures, or existing CI policy changes require
+review even if all seven deterministic output sets happen to match.
+Evaluator configuration, toolchain and deterministic fingerprints remain strict.
+Passing validation with documentation/tooling-only changes and identical
+deterministic evidence can be accepted without inventing a new baseline.
+Other mismatches yield exit 2 (`reference_review_required`), not permission
+to update the accepted reference automatically. Missing evidence, dirty source,
+skipped tests and nonzero worker/coordinator exits remain failures.
 See [local CI](../../docs/local-ci.md). The underlying runner still has a
 plan-only default for advanced callers; it has not changed its CI policy.
 

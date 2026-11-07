@@ -34,9 +34,11 @@ check implementation and current contracts before treating a feature as present.
   focused development tests and to investigate exceptions when requested.
   The wrapper reads the same approved CI policy and invokes the unchanged
   54-gate coordinator exactly once. Planning uses `-PlanOnly` and starts no
-  tests or clones. A nonmatching historical reference with passing CI is
-  **review required**, never a fingerprint pass; never auto-approve new
-  baselines, repair checkout state, rerun Full CI, or waive missing gates.
+  tests or clones. Strict source fingerprint equality applies to the same
+  commit. Across revisions, verify both source identities independently and
+  require review for non-documentation, non-validation-tooling Git changes,
+  even if deterministic outputs match. Never auto-approve new baselines,
+  repair checkout state, rerun Full CI, or waive missing gates.
   Preserve run evidence. The original `scripts/ci/run-all.ps1` remains
   an explicitly chosen diagnostic fallback; no fallback occurs automatically.
 - Inspect Git status and existing changes first. Work on feature branches based
