@@ -45,6 +45,8 @@ def wsl(sysapi, distro, *args):
 def validate_revision(sysapi, root):
     if not (root / 'scripts/validation/run.py').is_file():
         raise WorkflowError('Call the installed wrapper from a complete CELab tooling checkout.')
+    if not ((root / '.git').is_dir() or (root / '.git').is_file()):
+        raise WorkflowError('Source Git metadata is missing or invalid.')
     if Path(git(sysapi, root, 'rev-parse', '--show-toplevel')).resolve() != root.resolve():
         raise WorkflowError('The validation tooling must be located in the Git repository root.')
     if git(sysapi, root, 'status', '--porcelain=v1', '--untracked-files=all'):
@@ -155,13 +157,17 @@ def execute(source, reference, distro='Ubuntu-24.04', plan_only=False, sysapi=No
                      'source "$HOME/.nvm/nvm.sh" 2>/dev/null || true; node --version').strip().lstrip('v')
     if not re.fullmatch(r'24\.\d+\.\d+', linux_node):
         raise WorkflowError('Expected WSL Node.js 24 (resolved ' + linux_node + ').')
-    source_wsl = wsl(sysapi, distro, 'wslpath', '-a', '-u', str(source))
     win = source / 'work' / 'ci-validation' / sha / 'windows-ci'
+    # WSL Git cannot follow a Windows gitdir: pointer in a linked worktree.
+    # The isolated Windows clone contains the selected commit (even detached),
+    # independently of the common repository's HEAD or advertised branches.
+    linux_origin = win if (source / '.git').is_file() else source
+    source_wsl = wsl(sysapi, distro, 'wslpath', '-a', '-u', str(linux_origin))
     linux = home.rstrip('/') + '/work/celab-ci-validation/' + sha + '/linux-ci'
     out = source / 'work' / 'validation-efficiency' / 'routine' / (
         dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ') + '-' + uuid.uuid4().hex[:8])
     plan = dict(source=str(source), commit=sha, tree=tree, approvedReferenceCommit=ref_commit,
-                windowsCheckout=str(win), linuxCheckout=linux, distro=distro,
+                windowsCheckout=str(win), linuxCheckout=linux, linuxCloneOrigin=str(linux_origin), distro=distro,
                 emsdk=emsdk, linuxNode=linux_node, evidenceDirectory=str(out),
                 executeFull=not plan_only)
     print(json.dumps(plan, sort_keys=True, indent=2), flush=True)
@@ -169,6 +175,8 @@ def execute(source, reference, distro='Ubuntu-24.04', plan_only=False, sysapi=No
         print('PLAN ONLY: no validation clones, tests or coordinator invocations.', flush=True)
         return 0
     ensure_windows(sysapi, source, win, sha, tree)
+    if linux_origin == win and not (win / '.git').is_dir():
+        raise WorkflowError('WSL clone origin must be an ordinary Windows validation clone with a .git directory.')
     ensure_linux(sysapi, distro, source_wsl, linux, sha, tree)
     argv = [sys.executable, '-u', str(source / 'scripts/validation/run.py'),
             '--windows-repo', str(win), '--linux-repo', linux,
