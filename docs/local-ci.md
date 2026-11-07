@@ -26,14 +26,18 @@ The default approved reference is the existing sealed local package
 If it is absent, the wrapper **stops**; specify a separately reviewed evidence
 reference with `-ReferenceRoot` rather than fabricating one. The reference must
 belong to an ancestor revision and its Git tree must match the recorded SHA.
-Different-source revisions may finish with **exit 2**
-(`reference_review_required`): the coordinator itself passed all gates, but
-source or deterministic output changed relative to the accepted reference.
-This is **not** an authoritative reference match. Review differences and
-explicitly approve a new reference through the normal code-review process;
-the wrapper cannot automatically approve fingerprints. Exit 0 denotes a full
-authoritative pass including evidence comparison; exit 1 denotes validation
-failure or incomplete evidence. Evidence remains available for investigation.
+Different-source revisions compare each committed tree and its clean before/after/
+final source state independently. Cross-revision whole-tree working fingerprints
+are not expected to match. A Git source-delta inventory **requires review** for
+any changes outside `AGENTS.md`, `docs/`, and `scripts/validation/` (including
+engine, controller, GUI, tests, fixtures or original CI). All existing
+evaluator, toolchain, test-inventory and deterministic-output comparisons remain
+strict. Passing tooling-only changes with identical evidence may be accepted.
+An otherwise passed coordinator with material differences yields **exit 2**
+(`reference_review_required`), not automatic baseline approval; review and
+explicitly approve any new reference through the normal code-review process.
+Exit 0 denotes a full authoritative pass including evidence comparison; exit 1
+denotes failed or incomplete validation. Evidence is preserved.
 
 The workflow uses the merged `scripts/validation/workflow.py` and
 `run.py`. Run its focused mock-based tests without Full CI using

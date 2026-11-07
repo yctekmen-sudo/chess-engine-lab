@@ -307,6 +307,24 @@ class Analyzer:
             self.require(row.get('bytes') == path.stat().st_size and row.get('sha256') == digest(path),
                          'evidence_hash_mismatch', path, row, dict(bytes=path.stat().st_size, sha256=digest(path)))
 
+    def compare_source_working_fingerprints(self, candidate, reference, platform,
+                                           candidate_commit, reference_commit):
+        # Integrity of EACH source revision is independently checked in
+        # verify_bundle: clean tracked/untracked/index flags, identical
+        # before/after/final fingerprints, matching commit and Git tree.
+        # Whole-tree fingerprints from DIFFERENT committed revisions are
+        # not comparable; they encode deliberate committed source changes.
+        fields = ('trackedFingerprint', 'indexFingerprint', 'untrackedFingerprint')
+        if candidate_commit == reference_commit:
+            for field in fields:
+                self.equal(candidate['sourceBefore'].get(field), reference['sourceBefore'].get(field),
+                           'source_working_fingerprint', platform + '/' + field)
+        else:
+            self.comparisons.append(dict(scope='source working fingerprints', platform=platform,
+                                         comparison='not_comparable_across_commits',
+                                         candidateCommit=candidate_commit, referenceCommit=reference_commit,
+                                         fields=list(fields), integrityCheck='verify_bundle'))
+
     def compare(self, current, approved):
         c, a = current['fingerprints'], approved['fingerprints']
         def actions(rows):
@@ -320,6 +338,29 @@ class Analyzer:
             return result
         self.equal(actions(current.get('invocations')), actions(approved.get('invocations')),
                    'coordinator_invocation_inventory', 'comparison', 'evidence_incomplete')
+        # Distinguish documentation/validation-tooling changes from candidate
+        # implementation changes. The latter always require human review,
+        # even when today's deterministic record inventory happens to match.
+        if c['frozenCommit'] != a['frozenCommit']:
+            try:
+                delta = git(self.repo, 'diff', '--name-only', '--no-renames', '-z',
+                            a['frozenCommit'], c['frozenCommit'], '--')
+                changed_paths = sorted(path for path in delta.split('\0') if path)
+                review_paths = [path for path in changed_paths if not (
+                    path == 'AGENTS.md' or path.startswith('docs/') or
+                    path.startswith('scripts/validation/'))]
+                self.comparisons.append(dict(scope='cross-revision Git source delta',
+                                             referenceCommit=a['frozenCommit'],
+                                             candidateCommit=c['frozenCommit'],
+                                             changedPaths=changed_paths,
+                                             implementationChangesRequiringReview=review_paths))
+                if review_paths:
+                    self.issue('fingerprint_mismatch', 'source_revision_requires_review',
+                               'comparison/source_delta', expected='Documentation and validation tooling only',
+                               actual=review_paths)
+            except subprocess.SubprocessError as error:
+                self.issue('evidence_incomplete', 'source_delta_unavailable',
+                           'comparison/source_delta', actual=str(error))
         current_sources = c.get('sourceEvaluatorConfigurationFiles') or {}
         approved_sources = a.get('sourceEvaluatorConfigurationFiles') or {}
         for name, value in approved_sources.items():
@@ -338,9 +379,8 @@ class Analyzer:
                     candidate_step = next((s for s in cp['steps'] if s.get('id') == step['id']), {})
                     self.equal(candidate_step.get('discoveredTests'), step['discoveredTests'],
                                'reference_ctest_inventory', platform + '/' + step['id'])
-            for field in ['trackedFingerprint', 'indexFingerprint', 'untrackedFingerprint']:
-                self.equal(cp['sourceBefore'].get(field), ap['sourceBefore'].get(field),
-                           'source_working_fingerprint', platform + '/' + field)
+            self.compare_source_working_fingerprints(cp, ap, platform,
+                                                     c['frozenCommit'], a['frozenCommit'])
             key = platform + 'BuildArtifacts'
             artifacts, prior = c.get(key), a.get(key)
             self.require(isinstance(artifacts, dict) and bool(artifacts) and isinstance(prior, dict),

@@ -1,5 +1,26 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## Approach B cross-revision comparison correction — 2026-11-06: proposed
+
+The first live one-command Full CI run at production SHA
+`0e4ed6827907b0ce9f21515c15552b2c2a59f2c3` completed 54/54 gates with
+both worker exits zero, seven matching deterministic sets (7,797 records),
+no model calls/retries/interventions, and clean before/after/final source on
+both platforms. The original sealed analysis recorded
+`reference_review_required` with four whole-tree tracked/index fingerprint
+differences against the older approved reference
+`90b6e32ab1e3793d3d69782b2cf06909b74a59bc`.
+Those differences arise from committed documentation/validation-tooling
+changes, not source mutation. Original classification and evidence are retained.
+
+A tooling-only analyzer correction is proposed: same-commit fingerprints stay
+strict; cross-commit source identities are each verified independently; Git
+diff paths outside `AGENTS.md`, `docs/`, `scripts/validation/` require
+explicit review; evaluator/toolchain/deterministic comparisons remain strict.
+Nine focused synthetic comparison tests passed offline; historical sealed
+evidence still requires reanalysis using the corrected analyzer on Windows.
+No Full CI rerun or automatic reference promotion is authorized.
+
 ## Approach B default-workflow follow-up — 2026-11-06: draft implementation
 
 PR #39 is proposed (not merged) on production main
