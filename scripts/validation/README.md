@@ -17,6 +17,17 @@ original Full coordinator once through `run.py --execute-full`, and writes
 a unique evidence package beneath `work/validation-efficiency/routine/`.
 No Codex calls, network fetches, repair operations or automatic retries occur.
 
+For a Windows linked worktree, WSL Git cannot follow the Windows `gitdir:` path
+in its `.git` file. The Linux clone therefore uses the isolated Windows
+validation clone as its origin, after verifying that clone's exact selected
+commit/tree and clean state. This origin must have an ordinary `.git` directory;
+an existing linked-worktree destination is refused. No common-repository HEAD
+or branch is assumed to contain the selected revision, including a detached
+commit absent from common refs. Ordinary source checkouts keep their direct
+Linux clone origin. Missing/invalid source Git metadata fails closed through
+the metadata and Git identity checks. `-PlanOnly` reports `linuxCloneOrigin`
+without creating the Windows origin, Linux checkout or evidence directory.
+
 Each candidate and reference is independently checked against its own committed
 Git tree and clean before/after/final source states. Whole-tree tracked/index
 fingerprints are compared strictly for the **same commit**, but are not compared
@@ -162,6 +173,22 @@ invented zero. Implementation-session tokens and any later anomaly investigation
 remain separate from routine B2 execution and shared allowance observations.
 
 ## Focused B1 tests
+
+Deterministic workflow and comparison regressions (no archived evidence or WSL
+required; temporary local Git repositories test detached linked-worktree commits):
+
+```powershell
+python -m unittest discover -s scripts/validation -p test_workflow.py -v
+python -m unittest discover -s scripts/validation -p test_cross_revision.py -v
+```
+
+The workflow regressions cover origin selection, unchanged plan-mode files,
+missing/malformed pointers, exact commit/tree and cleanliness checks, and two
+local clone stages with a selected commit absent from the common repository's
+refs. Their Linux stage adapts WSL argv to local Git; real WSL cloning remains a
+separate integration check, and neither check is Full CI qualification.
+
+Captured-evidence regressions:
 
 ```powershell
 $env:CELAB_VALIDATION_EVIDENCE = $base

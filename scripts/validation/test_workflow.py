@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from analyze import Analyzer
 from workflow import (WorkflowError, classify_run, ensure_linux, ensure_windows,
-                      execute, validate_revision, verify_reference)
+                      execute, System, validate_revision, verify_reference)
 
 SHA = '1' * 40
 TREE = '2' * 40
@@ -27,6 +27,8 @@ class FakeSystem:
         self.bad_status = False
         self.index_flags = ''
         self.other_head = False
+        self.other_tree = False
+        self.dirty_checkout = False
         self.ancestor = True
         self.linux_exists = False
         self.sdk_exists = True
@@ -56,7 +58,8 @@ class FakeSystem:
             elif arg[:3] == ['bash', '-lc', 'source "$HOME/.nvm/nvm.sh" 2>/dev/null || true; node --version']:
                 out = 'v24.10.0'
             elif arg[:3] == ['wslpath', '-a', '-u']:
-                out = '/mnt/c/CELab'
+                out = '/mnt/c/CELab' + ('/work/ci-validation/' + SHA + '/windows-ci'
+                                       if arg[-1] != str(self.source) else '')
             elif arg[:2] == ['test', '-f']:
                 code = 0 if self.sdk_exists else 1
             elif arg[:2] == ['test', '-e']:
@@ -65,16 +68,20 @@ class FakeSystem:
                 if arg[-1] == 'HEAD':
                     out = '0' * 40 if self.other_head else SHA
                 elif arg[-1] == 'HEAD^{tree}':
-                    out = TREE
+                    out = '0' * 40 if self.other_tree else TREE
+                elif '--porcelain=v1' in arg:
+                    out = ' M tracked\n' if self.dirty_checkout else ''
                 else:
                     out = ''
         elif argv[:2] == ['git', 'clone']:
-            pass
+            (Path(argv[-1]) / '.git').mkdir(parents=True)
         elif len(argv) > 2 and argv[0:2] == ['git', '-C'] and 'ci-validation' in argv[2]:
             if argv[-1] == 'HEAD':
                 out = '0' * 40 if self.other_head else SHA
             elif argv[-1] == 'HEAD^{tree}':
-                out = TREE
+                out = '0' * 40 if self.other_tree else TREE
+            elif '--porcelain=v1' in argv:
+                out = ' M tracked\n' if self.dirty_checkout else ''
             else:
                 out = ''
         p = subprocess.CompletedProcess(argv, code, out, '' if code == 0 else 'simulated failure')
@@ -94,6 +101,7 @@ class WorkflowTests(unittest.TestCase):
         self.root = Path(self.temp.name) / 'checkout'
         (self.root / 'scripts/validation').mkdir(parents=True)
         (self.root / 'scripts/validation/run.py').write_text('# test fixture\n')
+        (self.root / '.git').mkdir()
         self.reference = self.root / 'work/validation-efficiency/production-readiness-20261106T064606Z'
         self.reference.mkdir(parents=True)
         (self.reference / 'fingerprints.json').write_text(json.dumps({'frozenCommit': REF, 'tree': REF_TREE}))
@@ -153,6 +161,46 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(any('clone' in args for args in self.sys.calls))
         self.assertFalse(self.sys.invocations)
 
+    def linked_source(self):
+        (self.root / '.git').rmdir()
+        (self.root / '.git').write_text('gitdir: C:/common repo/.git/worktrees/selected\n')
+
+    def test_linked_plan_uses_windows_clone_without_writes(self):
+        self.linked_source()
+        def snapshot():
+            return {str(p.relative_to(self.root)): p.read_bytes() if p.is_file() else None
+                    for p in self.root.rglob('*')}
+        before = snapshot()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(execute(self.root, self.reference, sysapi=self.sys, plan_only=True), 0)
+        plan = json.JSONDecoder().raw_decode(out.getvalue())[0]
+        self.assertEqual(plan['linuxCloneOrigin'], plan['windowsCheckout'])
+        self.assertFalse(Path(plan['windowsCheckout']).exists())
+        self.assertEqual(before, snapshot())
+        self.assertFalse(any('clone' in args or 'mkdir' in args or 'checkout' in args for args in self.sys.calls))
+        self.assertFalse(self.sys.invocations)
+
+    def test_ordinary_plan_keeps_source_origin(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            execute(self.root, self.reference, sysapi=self.sys, plan_only=True)
+        self.assertEqual(json.JSONDecoder().raw_decode(out.getvalue())[0]['linuxCloneOrigin'], str(self.root))
+
+    def test_missing_metadata_stops_before_clones(self):
+        (self.root / '.git').rmdir()
+        with self.assertRaisesRegex(WorkflowError, 'Git metadata'):
+            execute(self.root, self.reference, sysapi=self.sys, plan_only=True)
+        self.assertFalse(self.sys.calls)
+
+    def test_linked_windows_origin_must_have_git_directory(self):
+        self.linked_source()
+        dst = self.root / 'work/ci-validation' / SHA / 'windows-ci'
+        dst.mkdir(parents=True)
+        (dst / '.git').write_text('gitdir: C:/another/worktree\n')
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(WorkflowError, 'ordinary Windows'):
+            execute(self.root, self.reference, sysapi=self.sys)
+        self.assertFalse(any(args[4:6] == ['git', 'clone'] for args in self.sys.calls))
+        self.assertFalse(self.sys.invocations)
+
     def test_linux_checkout_wrong_revision_never_reset(self):
         self.sys.linux_exists = True
         self.sys.other_head = True
@@ -173,7 +221,36 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(any(args[4:6] == ['git', 'clone'] for args in self.sys.calls))
         self.assertFalse(any('fetch' in args or 'pull' in args for args in self.sys.calls))
 
+    def test_checkout_tree_and_cleanliness_checks_remain_strict(self):
+        dst = self.root / 'work/ci-validation' / SHA / 'windows-ci'
+        dst.mkdir(parents=True)
+        self.sys.linux_exists = True
+        for platform in ('windows', 'linux'):
+            for failure in ('other_tree', 'dirty_checkout'):
+                with self.subTest(platform=platform, failure=failure):
+                    setattr(self.sys, failure, True)
+                    with self.assertRaisesRegex(WorkflowError, 'wrong revision|not clean'):
+                        if platform == 'windows':
+                            ensure_windows(self.sys, self.root, dst, SHA, TREE)
+                        else:
+                            ensure_linux(self.sys, D, '/mnt/c/CELab',
+                                         '/home/test/work/celab-ci-validation/' + SHA + '/linux-ci', SHA, TREE)
+                    setattr(self.sys, failure, False)
+        self.assertFalse(any('clone' in args or 'reset' in args for args in self.sys.calls))
+
+    def test_linked_runner_uses_verified_windows_clone(self):
+        self.linked_source()
+        self.run_once()
+        linux_clone = next(args for args in self.sys.calls if args[4:6] == ['git', 'clone'])
+        self.assertEqual(linux_clone[-2], '/mnt/c/CELab/work/ci-validation/' + SHA + '/windows-ci')
+        checks = [args for args in self.sys.calls if args[:2] == ['git', '-C'] and 'windows-ci' in args[2]]
+        self.assertEqual([args[-1] for args in checks], [SHA, 'HEAD', 'HEAD^{tree}', '--untracked-files=all'])
+        self.assertLess(self.sys.calls.index(checks[-1]), self.sys.calls.index(linux_clone))
+
     def test_runner_invoked_once_with_exact_revision(self):
+        self.run_once()
+
+    def run_once(self):
         def fake_invoke(argv):
             self.sys.invocations.append(argv)
             out = Path(argv[argv.index('--out') + 1]);out.mkdir(parents=True)
@@ -191,6 +268,78 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('--execute-full', argv)
         self.assertEqual(argv[argv.index('--expected-commit')+1], SHA)
         self.assertNotIn('-ReportRoot', argv)
+
+
+class LocalGitTests(unittest.TestCase):
+    """Real local objects: selected detached commit is absent from common refs."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='CELab linked source ')
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.common = self.base / 'common repo'
+        self.common.mkdir()
+        self.system = System()
+        self.command('init', '-b', 'main')
+        self.command('config', 'user.name', 'CELab fixture')
+        self.command('config', 'user.email', 'fixture@example.invalid')
+        (self.common / 'scripts/validation').mkdir(parents=True)
+        (self.common / 'scripts/validation/run.py').write_text('# fixture\n')
+        self.command('add', '.')
+        self.command('-c', 'commit.gpgsign=false', 'commit', '-m', 'base fixture')
+        self.common_sha = self.command('rev-parse', 'HEAD')
+        self.command('checkout', '--detach')
+        (self.common / 'selected.txt').write_text('selected detached tree\n')
+        self.command('add', '.')
+        self.command('-c', 'commit.gpgsign=false', 'commit', '-m', 'selected fixture')
+        self.sha = self.command('rev-parse', 'HEAD')
+        self.tree = self.command('rev-parse', 'HEAD^{tree}')
+        self.source = self.base / 'linked source'
+        self.command('worktree', 'add', '--detach', str(self.source), self.sha)
+        self.command('checkout', 'main')
+
+    def command(self, *args):
+        return self.system.command(['git', '-C', str(self.common), *args]).stdout.strip()
+
+    def test_detached_selected_commit_survives_both_local_clones(self):
+        self.assertNotEqual(self.command('rev-parse', 'HEAD'), self.sha)
+        self.assertEqual(self.command('for-each-ref', '--contains', self.sha), '')
+        self.assertTrue((self.source / '.git').is_file())
+        self.assertEqual(validate_revision(self.system, self.source), (self.sha, self.tree))
+        win = self.base / 'windows clone'
+        ensure_windows(self.system, self.source, win, self.sha, self.tree)
+        self.assertTrue((win / '.git').is_dir())
+
+        class LocalLinux(System):
+            # Exercise the exact WSL clone/checkout/check argv with local Git,
+            # without requiring WSL in the deterministic regression suite.
+            def command(inner, argv, **kwargs):
+                self.assertEqual(argv[:4], ['wsl.exe', '-d', D, '--exec'])
+                args = argv[4:]
+                if args[:2] == ['test', '-e']:
+                    return subprocess.CompletedProcess(argv, 0 if Path(args[-1]).exists() else 1, '', '')
+                if args[:2] == ['mkdir', '-p']:
+                    Path(args[-1]).mkdir(parents=True, exist_ok=True)
+                    return subprocess.CompletedProcess(argv, 0, '', '')
+                return super().command(args, **kwargs)
+
+        linux = self.base / 'linux clone'
+        ensure_linux(LocalLinux(), D, str(win), str(linux), self.sha, self.tree)
+        self.assertEqual(self.system.command(['git', '-C', str(linux), 'rev-parse', 'HEAD']).stdout.strip(), self.sha)
+        self.assertEqual(self.system.command(['git', '-C', str(linux), 'rev-parse', 'HEAD^{tree}']).stdout.strip(), self.tree)
+        self.assertEqual(self.command('rev-parse', 'HEAD'), self.common_sha)
+
+    def test_invalid_or_missing_linked_metadata_fails_closed(self):
+        for pointer in ('invalid metadata\n', 'gitdir: C:/missing/repository/worktrees/source\n', ''):
+            with self.subTest(pointer=pointer):
+                # Git marks this file hidden on Windows; replace it instead of
+                # opening the hidden file with CREATE_ALWAYS through write_text.
+                (self.source / '.git').unlink()
+                (self.source / '.git').write_text(pointer)
+                with self.assertRaises(WorkflowError):
+                    validate_revision(self.system, self.source)
+        (self.source / '.git').unlink()
+        with self.assertRaisesRegex(WorkflowError, 'Git metadata'):
+            validate_revision(self.system, self.source)
 
 
 def full_report():
