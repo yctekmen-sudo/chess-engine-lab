@@ -119,6 +119,80 @@ std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
   }
   return result;
 }
+// Keep the bounded scratch frame out of recursive traversal even under /Ob2.
+// This helper changes only native batch construction; eager/reset sorts stay put.
+#if defined(_MSC_VER)
+__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+void sort_native_batch_moves(std::vector<OrderedMove> &moves) {
+  auto original_sort = [&] {
+    std::sort(moves.begin(), moves.end(),
+              [](const auto &a, const auto &b) { return a.text < b.text; });
+  };
+  const auto count = moves.size();
+  if (count < 2) return;
+  // An index occupies the low 16 bits. Do not truncate a larger list.
+  if (count - 1 > std::numeric_limits<std::uint16_t>::max()) {
+    original_sort();
+    return;
+  }
+  for (const auto &move : moves)
+    if ((move.text.size() != 4 && move.text.size() != 5) ||
+        (move.text.size() == 5 && move.text[4] == '\0')) {
+      original_sort();
+      return; // The unchanged validation below rejects malformed text.
+    }
+  std::array<std::uint64_t, 128> local;
+  std::vector<std::uint64_t> dynamic;
+  if (count > local.size()) dynamic.resize(count); // Fallible, before record mutation.
+  auto *entries = count <= local.size() ? local.data() : dynamic.data();
+  for (std::size_t i = 0; i < count; ++i) {
+    const auto &s = moves[i].text;
+    std::uint64_t key = 0;
+    for (std::size_t j = 0; j < 5; ++j)
+      key = (key << 8) | (j < s.size() ? static_cast<unsigned char>(s[j]) : 0U);
+    entries[i] = (key << 16) | static_cast<std::uint16_t>(i);
+  }
+  std::sort(entries, entries + count);
+  // All fallible preparation is complete. Whole-record cycles retain owners,
+  // facts, claims and original certificate ordinals. No polls or board mutation.
+  static_assert(std::is_nothrow_move_constructible_v<OrderedMove>);
+  static_assert(std::is_nothrow_move_assignable_v<OrderedMove>);
+  constexpr std::uint64_t visited = std::uint64_t{1} << 63;
+  auto permute = [&]() noexcept {
+    for (std::size_t start = 0; start < count; ++start) {
+      if (entries[start] & visited) continue;
+      auto source = static_cast<std::uint16_t>(entries[start]);
+      entries[start] |= visited;
+      if (source == start) continue;
+      OrderedMove saved = std::move(moves[start]);
+      auto dest = start;
+      while (source != start) {
+        moves[dest] = std::move(moves[source]);
+        dest = source;
+        source = static_cast<std::uint16_t>(entries[dest]);
+        entries[dest] |= visited;
+      }
+      moves[dest] = std::move(saved);
+    }
+  };
+  permute();
+}
+// Shared with the implementation-including regression translation unit only.
+void validate_native_batch_moves(const std::vector<OrderedMove> &result) {
+  for (std::size_t i = 0; i < result.size(); ++i) {
+    const auto &s = result[i].text;
+    auto square = [&](int n) {
+      return s[n] >= 'a' && s[n] <= 'h' && s[n + 1] >= '1' && s[n + 1] <= '8';
+    };
+    if ((s.size() != 4 && s.size() != 5) || !square(0) || !square(2) ||
+        (s.size() == 5 && std::string("bnqr").find(s[4]) == std::string::npos) ||
+        (i && result[i - 1].text == s))
+      throw std::runtime_error("ambiguous/noncanonical legal move encoding");
+  }
+}
 // The generic eager path above stays the reference/fallback. Native horizon leaves
 // keep the same text/fact/validation rules without allocating unused Mv owners.
 std::vector<OrderedMove> batch_ordered_moves(
@@ -145,18 +219,8 @@ std::vector<OrderedMove> batch_ordered_moves(
         snapshot.en_passant_square() == std::optional<std::uint8_t>(static_cast<std::uint8_t>(to));
     m.capture = squares[to] != PieceCode::empty || m.legal_ep;
   }
-  std::sort(result.begin(), result.end(),
-            [](const auto &a, const auto &b) { return a.text < b.text; });
-  for (std::size_t i = 0; i < result.size(); ++i) {
-    const auto &s = result[i].text;
-    auto square = [&](int n) {
-      return s[n] >= 'a' && s[n] <= 'h' && s[n + 1] >= '1' && s[n + 1] <= '8';
-    };
-    if ((s.size() != 4 && s.size() != 5) || !square(0) || !square(2) ||
-        (s.size() == 5 && std::string("bnqr").find(s[4]) == std::string::npos) ||
-        (i && result[i - 1].text == s))
-      throw std::runtime_error("ambiguous/noncanonical legal move encoding");
-  }
+  sort_native_batch_moves(result);
+  validate_native_batch_moves(result);
   return result;
 }
 // Explicit restoration propagates undo failures as traversal errors, even when
