@@ -17,6 +17,20 @@ NativeMoveBatchOwner prepare_native_move_batch(const ChessCore &, const Position
 std::size_t native_move_batch_size(const NativeMoveBatch &) noexcept;
 std::string encode_native_batch_member(const ChessCore &, const Position &,
                                        const NativeMoveBatch &, std::size_t ordinal);
+// Stack-only binding for synchronous batch construction. The caller must not
+// make/undo, recurse or destroy the position while this binding is in scope.
+// Runtime types are checked at binding; every encode still checks provenance.
+class NativeBatchEncoder final {
+public:
+  NativeBatchEncoder(const ChessCore &, const Position &, const NativeMoveBatch &);
+  NativeBatchEncoder(const NativeBatchEncoder &) = delete;
+  NativeBatchEncoder &operator=(const NativeBatchEncoder &) = delete;
+  std::string encode(std::size_t ordinal) const;
+
+private:
+  const Position &position_;
+  const NativeMoveBatch &batch_;
+};
 std::unique_ptr<Move> materialize_native_batch_member(
     const ChessCore &, const Position &, const NativeMoveBatch &, std::size_t ordinal);
 void invalidate_native_move_batch(NativeMoveBatch &) noexcept;

@@ -3,7 +3,11 @@
 #include <cstdint>
 #include <new>
 static bool fail_scratch = false;
+static std::size_t fail_size = 0;
+static std::size_t allocation_attempts = 0;
 void *operator new(std::size_t n) {
+  ++allocation_attempts;
+  if (fail_size && n == fail_size) { fail_size = 0; throw std::bad_alloc(); }
   if (fail_scratch && n == 129 * sizeof(std::uint64_t)) throw std::bad_alloc();
   if (auto *p = std::malloc(n ? n : 1)) return p;
   throw std::bad_alloc();
@@ -20,6 +24,84 @@ void check(bool ok, const char *why) {
   if (!ok) throw std::runtime_error(why);
 }
 struct OwnedMove final : Move { std::size_t id; explicit OwnedMove(std::size_t i) : id(i) {} };
+struct ForeignPosition final : Position {};
+// A synthetic wrapper with native public behavior must still fail native binding.
+struct ForeignCore final : ChessCore {
+  const ChessCore &c;
+  explicit ForeignCore(const ChessCore &core):c(core){}
+  std::unique_ptr<Position> initial_position()const override{return c.initial_position();}
+  std::unique_ptr<Position> load_fen(std::string_view f)const override{return c.load_fen(f);}
+  std::string export_fen(const Position &p)const override{return c.export_fen(p);}
+  std::unique_ptr<Position> clone(const Position &p)const override{return c.clone(p);}
+  std::vector<std::unique_ptr<Move>> legal_moves(const Position &p)const override{return c.legal_moves(p);}
+  std::unique_ptr<UndoToken> make_move(Position &p,const Move &m)const override{return c.make_move(p,m);}
+  void undo_move(Position &p,UndoToken &u)const override{c.undo_move(p,u);}
+  std::string encode_move(const Position &p,const Move &m)const override{return c.encode_move(p,m);}
+  std::unique_ptr<Move> decode_move(const Position &p,std::string_view m)const override{return c.decode_move(p,m);}
+  void reset(Position &p,std::string_view f)const override{c.reset(p,f);}
+  bool in_check(const Position &p)const override{return c.in_check(p);}
+  PositionStatus status(const Position &p)const override{return c.status(p);}
+  bool known_dead_position(const Position &p)const override{return c.known_dead_position(p);}
+  std::uint64_t position_key(const Position &p)const override{return c.position_key(p);}
+  std::uint64_t repetition_key(const Position &p)const override{return c.repetition_key(p);}
+  std::unique_ptr<const PositionSnapshot> snapshot(const Position &p)const override{return c.snapshot(p);}
+};
+template<class F> std::string rejected(F f) {
+  try { f(); } catch (const std::invalid_argument &e) { return e.what(); }
+  throw std::runtime_error("expected native certificate/type rejection");
+}
+void encoder_guards() {
+  ++cases;
+  static_assert(!std::is_copy_constructible_v<detail::NativeBatchEncoder>);
+  static_assert(!std::is_move_constructible_v<detail::NativeBatchEncoder>);
+  auto c=create_chess_core(); auto p=c->initial_position();
+  auto batch=detail::prepare_native_move_batch(*c,*p);
+  const auto count=detail::native_move_batch_size(*batch);
+  const auto message=rejected([&]{detail::encode_native_batch_member(*c,*p,*batch,count);});
+  auto rejects=[&](const ChessCore &core,const Position &pos,const detail::NativeMoveBatch &b,std::size_t i){
+    check(rejected([&]{detail::encode_native_batch_member(core,pos,b,i);})==message,"checked rejection message");
+    check(rejected([&]{detail::NativeBatchEncoder e(core,pos,b);(void)e.encode(i);})==message,"bound rejection matches reference");
+  };
+  ForeignCore foreign(*c); ForeignPosition position;
+  rejects(foreign,*p,*batch,0); rejects(*c,position,*batch,0);
+  rejects(foreign,position,*batch,count); rejects(*c,*p,*batch,count);
+  auto clone=c->clone(*p);rejects(*c,*clone,*batch,0);
+  auto m=detail::materialize_native_batch_member(*c,*p,*batch,0);
+  auto undo=c->make_move(*p,*m);rejects(*c,*p,*batch,0);
+  c->undo_move(*p,*undo);
+  { detail::NativeBatchEncoder e(*c,*p,*batch);
+    check(e.encode(0)==detail::encode_native_batch_member(*c,*p,*batch,0),"strict undo restores original frame"); }
+  check(rejected([&]{c->undo_move(*p,*undo);})==message,"consumed undo rejected");
+  c->reset(*p,c->export_fen(*p)); rejects(*c,*p,*batch,0);
+  batch=detail::prepare_native_move_batch(*c,*p);
+  // Adversarial invalidation between members must be checked again, not cached.
+  { detail::NativeBatchEncoder e(*c,*p,*batch);(void)e.encode(0);
+    detail::invalidate_native_move_batch(*batch);
+    check(rejected([&]{(void)e.encode(1);})==message,"per-member invalidation retained"); }
+  rejects(*c,*p,*batch,0);
+  // A destroyed owner's shared identity cannot authenticate a fresh position.
+  batch=detail::prepare_native_move_batch(*c,*p);
+  p.reset();p=c->initial_position();rejects(*c,*p,*batch,0);
+  batch=detail::prepare_native_move_batch(*c,*p);auto snapshot=c->snapshot(*p);
+  const auto fen=c->export_fen(*p);
+  // Target the reserve itself: Debug STL may allocate a container proxy in
+  // vector's noexcept default constructor before reserve is reached.
+  bool failed=false;fail_size=count*sizeof(OrderedMove);
+  try{(void)batch_ordered_moves(*c,*p,*batch,nullptr,*snapshot);}catch(const std::bad_alloc&){failed=true;}
+  fail_size=0;
+  check(failed&&c->export_fen(*p)==fen,"reserve failure restores root");
+  check(batch_ordered_moves(*c,*p,*batch,nullptr,*snapshot).size()==count,"construction immediately recovers after allocation failure");
+  // Binding allocates nothing. Encoding adds no allocations over the checked
+  // reference, including STL Debug implementations with string proxies.
+  auto before=allocation_attempts;
+  { detail::NativeBatchEncoder e(*c,*p,*batch);
+    check(allocation_attempts==before,"allocation-free binding");
+    for(std::size_t i=0;i<count;++i)(void)e.encode(i); }
+  const auto bound_allocations=allocation_attempts-before;
+  before=allocation_attempts;
+  for(std::size_t i=0;i<count;++i)(void)detail::encode_native_batch_member(*c,*p,*batch,i);
+  check(allocation_attempts-before==bound_allocations,"no additional per-member allocation over reference");
+}
 std::vector<std::string> canonical() {
   std::vector<std::string> texts;
   for (char a='a';a<='h';++a) for (char b='1';b<='8';++b)
@@ -63,6 +145,9 @@ void reject_text(std::vector<std::string> texts) {
 void native_case(const char *fen, bool castle=false, bool ep=false, bool promotion=false) {
   ++cases;auto c=create_chess_core();auto p=c->load_fen(fen);auto snapshot=c->snapshot(*p);
   auto batch=detail::prepare_native_move_batch(*c,*p);
+  { detail::NativeBatchEncoder encoder(*c,*p,*batch);
+    for(std::size_t i=0;i<detail::native_move_batch_size(*batch);++i)
+      check(encoder.encode(i)==detail::encode_native_batch_member(*c,*p,*batch,i),"bound full UCI matches checked reference"); }
   auto sorted=batch_ordered_moves(*c,*p,*batch,nullptr,*snapshot);
   auto eager=ordered_moves(*c,*p,nullptr,snapshot.get());
   check(sorted.size()==eager.size(),"complete native coverage");
@@ -105,6 +190,7 @@ void native_case(const char *fen, bool castle=false, bool ep=false, bool promoti
   }
 }
 int main() try {
+  encoder_guards();
   auto texts=canonical();std::mt19937 random(1703);
   for(std::size_t n:{0U,1U,2U,3U,127U,128U,129U,256U,257U,20480U}){
     auto subset=std::vector<std::string>(texts.begin(),texts.begin()+n);
