@@ -202,11 +202,17 @@ std::vector<OrderedMove> batch_ordered_moves(
   const auto count = detail::native_move_batch_size(batch);
   if (token && count) detail::tt_poll(*token);
   result.reserve(count);
-  for (std::size_t i = 0; i < count; ++i) {
+  if (count) {
+    // Preserve reserve/first-member poll/type-check ordering, including the
+    // empty-list path. This binding ends before facts, sorting or traversal.
     if (token) detail::tt_poll(*token);
-    OrderedMove move{detail::encode_native_batch_member(c, p, batch, i), {}};
-    move.native_ordinal = static_cast<std::uint16_t>(i);
-    result.push_back(std::move(move));
+    const detail::NativeBatchEncoder encoder(c, p, batch);
+    for (std::size_t i = 0; i < count; ++i) {
+      if (i && token) detail::tt_poll(*token);
+      OrderedMove move{encoder.encode(i), {}};
+      move.native_ordinal = static_cast<std::uint16_t>(i);
+      result.push_back(std::move(move));
+    }
   }
   const auto squares = snapshot.squares();
   for (auto &m : result) {

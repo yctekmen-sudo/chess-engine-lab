@@ -330,6 +330,20 @@ std::string encode_native_batch_member(const ChessCore& core,
                                        std::size_t ordinal) {
     return native_move_to_uci(checked_batch_member(core, position, batch, ordinal));
 }
+NativeBatchEncoder::NativeBatchEncoder(const ChessCore& core, const Position& position,
+                                       const NativeMoveBatch& batch)
+    : position_(position), batch_(batch) {
+    (void)cast<Core>(core);
+    (void)cast<Pos>(position);
+}
+std::string NativeBatchEncoder::encode(std::size_t ordinal) const {
+    // The constructor proved the final native type. No type-erased/native move
+    // values escape; do not replace these per-member certificate checks.
+    const auto& p = static_cast<const Pos&>(position_);
+    if (batch_.invalidated || batch_.owner != p.identity || batch_.top != p.top ||
+        ordinal >= batch_.size) invalid();
+    return native_move_to_uci(chess::Move(batch_.identities[ordinal]));
+}
 std::unique_ptr<Move> materialize_native_batch_member(
     const ChessCore& core, const Position& position, const NativeMoveBatch& batch,
     std::size_t ordinal) {

@@ -1,5 +1,40 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## C4-02 scoped native batch encoder — 2026-11-08: local Tier 1 passed
+
+Isolated branch `experiment/c4-02-scoped-batch-encoder`, frozen baseline
+`86f907f8aeb24a86605c3dd76e42b2db053db6fb`, tree
+`4f9f7443983ca435d488fe6ed1c1d50edaf28c8e`. The uncommitted candidate validates
+native Core/Pos types once during synchronous nonempty batch construction,
+retaining every member's invalidation/owner/frame/ordinal check and the checked
+single-member helper. Cancellation/failure ordering, formatter, J1 sorting,
+ownership, claims, history, TT and public contracts remain unchanged.
+
+Executed Windows x64 Release serial ABBA and separate BAAB confirmation showed
+paired sequence reductions of Initial d6 off **4.87% / 5.55%**, Tactical d6 off
+**5.69% / 6.26%**, C17 d5 off **7.47% / 7.85%**, and C18 d5 off
+**10.51% / 9.54%**. All control aggregates also improved; the fully inactive
+synthetic control was near neutral. Individual adverse observations remain in
+the evidence. These are finite-corpus, single-desktop results without affinity
+or thermal isolation, not universal speedups or playing-strength evidence.
+
+Exact public output/full PV/work, semantic TT state and full committed B2 nodes
+matched. Timing retained 5,360 measured invocations / 12,344 depth records across
+112 processes. Focused Windows Debug/Release, Linux Release and pinned WASM
+Debug checks passed for the affected contracts, with B2/P1/NONE coverage.
+The first Debug private-test injector caused a CRT abort/timeout; the corrected
+injector and final private test passed on all selected builds. A timing-summary
+parser error reused the four completed observations; no timing process retried.
+Original failures, corrections and slower observations are preserved.
+
+All reports/raw evidence are **ignored, local-only** under `work/c4-02/`, led by
+`report.md`, `risk-review.md`, `token-usage.md`, `source.patch`, identities and
+command manifests. C4-01 source/evidence was preserved and its investigation
+was not rerun. Token accounting includes the fresh main session and linked
+platform Guardian; active-session totals require external finalization.
+Recommend advancing this exact Tier 1 patch for independent ChatGPT review.
+No Full CI, commit, push, PR or merge was run or authorized by this result.
+
 ## Approach B cross-revision comparison correction — 2026-11-06: proposed
 
 The first live one-command Full CI run at production SHA
