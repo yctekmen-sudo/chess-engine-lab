@@ -1,5 +1,6 @@
 #include "chess_lab/chess_core.hpp"
 #include "native_move_batch.hpp"
+#include "native_undo_fastpath.hpp"
 #include "chess.hpp"
 
 #include <array>
@@ -131,6 +132,37 @@ void require_legal(const Pos& p, chess::Move m) {
     for (auto legal:list) if (legal==m) return;
     invalid();
 }
+
+// One native board-transition implementation serves both the public UndoToken
+// path and the stack-owned search path. Inspect before the fallible Undo
+// allocation or any mutation; preserve the same counter/exception boundaries.
+struct NativeMoveFacts {
+    bool pawn, zero, black;
+};
+NativeMoveFacts inspect_native_transition(const Pos& p, chess::Move move) {
+    const bool pawn=p.board.at<chess::PieceType>(move.from())==chess::PieceType::PAWN;
+    const bool zero=pawn||p.board.isCapture(move);
+    const bool black=p.board.sideToMove()==chess::Color::BLACK;
+    if ((!zero && p.meta.half==UINT32_MAX) || (black && p.meta.full==UINT32_MAX) || p.serial==UINT64_MAX)
+        throw std::overflow_error("Chess state counter exhausted");
+    return {pawn,zero,black};
+}
+void commit_native_transition(Pos& p, chess::Move move, NativeMoveFacts facts,
+                              std::uint64_t next_id) {
+    p.board.makeMove(move);
+    p.meta.ep.reset();
+    if (facts.pawn && std::abs(move.from().index()-move.to().index())==16)
+        p.meta.ep=static_cast<std::uint8_t>((move.from().index()+move.to().index())/2);
+    p.meta.half=facts.zero?0:p.meta.half+1;
+    p.meta.full+=facts.black;
+    p.serial=next_id; p.top=next_id;
+}
+void restore_native_transition(Pos& p, chess::Move move,
+                               const Metadata& saved, std::uint64_t parent) {
+    p.board.unmakeMove(move);
+    p.meta=saved; p.top=parent;
+}
+
 // Match the vendored non-Chess960 UCI conversion without coordinate strings.
 std::string native_move_to_uci(chess::Move move) {
     const auto from = move.from();
@@ -177,28 +209,20 @@ public:
         return result;
     }
     std::unique_ptr<UndoToken> make_move(Position& position,const Move& move) const override {
-        auto& p=cast<Pos>(position); auto m=cast<Mv>(move).value;
-        if (!certified(p,cast<Mv>(move))) require_legal(p,m);
-        bool pawn=p.board.at<chess::PieceType>(m.from())==chess::PieceType::PAWN;
-        bool zero=pawn||p.board.isCapture(m);
-        bool black=p.board.sideToMove()==chess::Color::BLACK;
-        if ((!zero && p.meta.half==UINT32_MAX) || (black && p.meta.full==UINT32_MAX) || p.serial==UINT64_MAX)
-            throw std::overflow_error("Chess state counter exhausted");
+        auto& p=cast<Pos>(position); const auto& supplied=cast<Mv>(move);
+        const auto m=supplied.value;
+        if (!certified(p,supplied)) require_legal(p,m);
+        const auto facts=inspect_native_transition(p,m);
         auto u=std::make_unique<Undo>();
         u->identity=p.identity; u->move=m; u->meta=p.meta; u->id=p.serial+1; u->parent=p.top;
-        p.board.makeMove(m);
-        p.meta.ep.reset();
-        if (pawn && std::abs(m.from().index()-m.to().index())==16)
-            p.meta.ep=static_cast<std::uint8_t>((m.from().index()+m.to().index())/2);
-        p.meta.half=zero?0:p.meta.half+1;
-        p.meta.full+=black;
-        p.serial=u->id; p.top=u->id;
+        commit_native_transition(p,m,facts,u->id);
         return u;
     }
     void undo_move(Position& position,UndoToken& token) const override {
         auto& p=cast<Pos>(position); auto& u=cast<Undo>(token);
         if (u.consumed || u.identity!=p.identity || p.top!=u.id) invalid();
-        p.board.unmakeMove(u.move); p.meta=u.meta; p.top=u.parent; u.consumed=true;
+        restore_native_transition(p,u.move,u.meta,u.parent);
+        u.consumed=true;
     }
     std::string encode_move(const Position& position,const Move& move) const override {
         const auto& p=cast<Pos>(position); const auto& supplied=cast<Mv>(move);
@@ -246,6 +270,43 @@ std::size_t native_legal_move_count(const ChessCore& c, const Position& p) {
     return moves(cast<Pos>(p)).size();
 }
 namespace detail {
+
+// Search-private fast path shares the same transition and restoration helpers
+// as public Core::make_move/undo_move. Only token ownership differs.
+void make_native_search_move(const ChessCore& core, Position& position,
+                             const Move& move, NativeUndoFrame& frame) {
+    (void)cast<Core>(core);
+    auto& p=cast<Pos>(position);
+    const auto& supplied=cast<Mv>(move);
+    auto m=supplied.value;
+    if (!certified(p,supplied)) require_legal(p,m);
+    const auto facts=inspect_native_transition(p,m);
+    frame.identity=p.identity; frame.native_move=m.move();
+    frame.ep=p.meta.ep; frame.half=p.meta.half; frame.full=p.meta.full;
+    frame.id=p.serial+1; frame.parent=p.top; frame.consumed=false;
+    commit_native_transition(p,m,facts,frame.id);
+}
+void undo_native_search_move(const ChessCore& core, Position& position, NativeUndoFrame& frame) {
+    (void)cast<Core>(core);
+    auto& p=cast<Pos>(position);
+    if (frame.consumed || frame.identity!=p.identity || p.top!=frame.id) invalid();
+    restore_native_transition(p,chess::Move(frame.native_move),
+                              Metadata{frame.ep,frame.half,frame.full},frame.parent);
+    frame.consumed=true;
+}
+
+// B3a: lazy canonical hint check for count-only numeric-TT horizon nodes.
+// The full legal-move generator remains the authoritative membership test.
+// No heap-owned Move objects, native batch or sorted text list is constructed.
+bool native_has_legal_uci_hint(const ChessCore& core, const Position& position,
+                               std::string_view hint) {
+    (void)cast<Core>(core);
+    const auto& p = cast<Pos>(position);
+    for (auto m : moves(p))
+        if (native_move_to_uci(m) == hint) return true;
+    return false;
+}
+
 bool native_has_legal_en_passant(const ChessCore& core, const Position& position) {
     (void)cast<Core>(core);
     const auto& p = cast<Pos>(position);
@@ -324,6 +385,18 @@ static chess::Move checked_batch_member(const ChessCore& core, const Position& p
         ordinal >= batch.size) invalid();
     return chess::Move(batch.identities[ordinal]);
 }
+// B2 experiment: inner-batch identity is bound to its originating board frame.
+// A stack-local certified Mv replaces a heap-owned materialized Mv. The existing
+// B1 state transition and validation are intentionally reused unchanged.
+void make_native_search_batch_move(const ChessCore& core, Position& position,
+                                   const NativeMoveBatch& batch, std::size_t ordinal,
+                                   NativeUndoFrame& frame) {
+    const chess::Move move = checked_batch_member(core, position, batch, ordinal);
+    const auto& p = cast<Pos>(position);
+    const Mv certified_move(move, p);
+    make_native_search_move(core, position, certified_move, frame);
+}
+
 std::string encode_native_batch_member(const ChessCore& core,
                                        const Position& position,
                                        const NativeMoveBatch& batch,
