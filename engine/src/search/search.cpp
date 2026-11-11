@@ -3,6 +3,7 @@
 #include "repeated_claim_targets.hpp"
 #include "persistent_ordering.hpp"
 #include "../native_move_batch.hpp"
+#include "../native_undo_fastpath.hpp"
 #include <algorithm>
 #include <cassert>
 #include <chess_lab/search.hpp>
@@ -233,6 +234,20 @@ std::vector<OrderedMove> batch_ordered_moves(
 // unwinding an evaluator failure. Never throw from a cleanup destructor.
 template <class F>
 auto with_move(const ChessCore &c, Position &p, const Move &m, F f) {
+  if (native_chess_core(c)) {
+    detail::NativeUndoFrame token; // Stack-owned; no per-edge Undo allocation.
+    detail::make_native_search_move(c, p, m, token);
+    using T = decltype(f());
+    std::optional<T> result;
+    try {
+      result.emplace(f());
+    } catch (...) {
+      detail::undo_native_search_move(c, p, token);
+      throw;
+    }
+    detail::undo_native_search_move(c, p, token);
+    return std::move(*result);
+  }
   auto token = c.make_move(p, m);
   using T = decltype(f());
   std::optional<T> result;
@@ -245,6 +260,26 @@ auto with_move(const ChessCore &c, Position &p, const Move &m, F f) {
   c.undo_move(p, *token);
   return std::move(*result);
 }
+// B2 experiment: native inner batches need no heap-owned executable move.
+// The adapter checks the same owner/frame/ordinal certificate as materialization.
+template <class F>
+auto with_native_batch_move(const ChessCore &c, Position &p,
+                            const detail::NativeMoveBatch &batch,
+                            std::size_t ordinal, F f) {
+  detail::NativeUndoFrame frame;
+  detail::make_native_search_batch_move(c, p, batch, ordinal, frame);
+  using T = decltype(f());
+  std::optional<T> result;
+  try {
+    result.emplace(f());
+  } catch (...) {
+    detail::undo_native_search_move(c, p, frame);
+    throw;
+  }
+  detail::undo_native_search_move(c, p, frame);
+  return std::move(*result);
+}
+
 bool same_snapshot(const ChessEvalPosition &a, const ChessEvalPosition &b) {
   // Compare fields, never padding bytes.
   return std::equal(std::begin(a.bitboards), std::end(a.bitboards),
@@ -504,7 +539,7 @@ struct Traversal {
     poll();
     const bool track_path = previous != nullptr;
     try {
-    return with_move(core, position, executable(parent, m), [&] {
+    auto visit = [&] {
       // A child inherits the parent flag until terminal() observes its count.
       // Synthetic claim-only lookahead never consumes the flag or descends.
       detail::RestoreDuplicateFlag duplicate_frame(has_duplicate);
@@ -517,7 +552,7 @@ struct Traversal {
       std::optional<PreparedNode> prepared;
       try {
         std::optional<std::span<const RepetitionSignature>> leaf_history;
-        if (purpose == PreparationPurpose::search_horizon && (!cache || !cache->numeric()))
+        if (purpose == PreparationPurpose::search_horizon)
           leaf_history.emplace(history);
         prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
             purpose == PreparationPurpose::search_horizon && cache, has_duplicate,
@@ -549,7 +584,14 @@ struct Traversal {
       history.pop_back();
       if (track_path) path.pop_back();
       return std::move(*result);
-    });
+    };
+    if (parent.mode == PreparationMode::native_inner_batch) {
+      // Match the two cancellation boundaries around original materialization.
+      poll();
+      poll();
+      return with_native_batch_move(core, position, *parent.batch, m.native_ordinal, visit);
+    }
+    return with_move(core, position, executable(parent, m), visit);
     } catch (...) {
       invalidate_inner_batch(parent);
       throw;
@@ -707,7 +749,7 @@ struct Traversal {
     }
     ++stats.visited_nodes;
     const bool raw_leaf = prepared.mode == PreparationMode::native_claim_free_leaf;
-    assert(!raw_leaf || (depth == 0 && (!cache || !cache->numeric()) && native_chess_core(core)));
+    assert(!raw_leaf || (depth == 0 && native_chess_core(core)));
     assert(prepared.mode != PreparationMode::native_horizon_batch ||
            (depth == 0 && native_chess_core(core) && prepared.batch));
     assert(prepared.mode != PreparationMode::native_inner_batch ||
@@ -716,8 +758,8 @@ struct Traversal {
     const auto &s = prepared.snapshot;
     auto finish = [&](Line line) {
       if (ordering && depth > 0) ordering->seal(ordering_node);
-      if (cache && !root_play_only && raw_leaf) poll(); // Preserve the skipped store boundary.
-      if (cache && !root_play_only && !raw_leaf) {
+      if (cache && !root_play_only && raw_leaf && !cache->numeric()) poll(); // Preserve hint-only skipped store boundary.
+      if (cache && !root_play_only && (!raw_leaf || cache->numeric())) {
         poll();
         cache->store(evaluation_snapshot(*s), history.back(), depth, line.score,
           detail::classify_bound(line.score, original_alpha, original_beta), line.action, ply);
@@ -742,19 +784,27 @@ struct Traversal {
       }
       prefer_previous(moves_here);
     }
-    if (raw_leaf && cache && !root_play_only) {
+    if (raw_leaf && cache && !root_play_only && !cache->numeric()) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
     }
-    if (cache && !root_play_only && !raw_leaf) {
+    if (cache && !root_play_only && (!raw_leaf || cache->numeric())) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
       auto hit = cache->probe(evaluation_snapshot(*s), history.back(), depth, ply);
       if (!hit.hint.empty()) {
-        auto found = std::find_if(moves_here.begin(), moves_here.end(), [&](const auto &m) { return m.text == hit.hint; });
-        if (found != moves_here.end()) {
-          if (depth > 0) std::rotate(moves_here.begin(), found, found + 1);
-          ++stats.transposition.hint_hits;
+        if (raw_leaf) {
+          // The table may still report a move hint for a previously searched
+          // position. Preserve the exact legal-hint statistic without constructing
+          // a complete boxed/sorted/encoded batch. Depth zero never reorders.
+          if (detail::native_has_legal_uci_hint(core, position, hit.hint))
+            ++stats.transposition.hint_hits;
+        } else {
+          auto found = std::find_if(moves_here.begin(), moves_here.end(), [&](const auto &m) { return m.text == hit.hint; });
+          if (found != moves_here.end()) {
+            if (depth > 0) std::rotate(moves_here.begin(), found, found + 1);
+            ++stats.transposition.hint_hits;
+          }
         }
       }
       poll();

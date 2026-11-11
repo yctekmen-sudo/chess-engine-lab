@@ -301,3 +301,29 @@ if(BUILD_TESTING)
   endif()
   set_tests_properties(j1_native_sort PROPERTIES TIMEOUT 120)
 endif()
+
+if(BUILD_TESTING AND NOT EMSCRIPTEN)
+# B1 experiment only: private native stack undo regression.
+add_executable(b1_native_undo tests/search/b1_native_undo.cpp)
+target_link_libraries(b1_native_undo PRIVATE chess_search evaluation_support material_provider)
+target_include_directories(b1_native_undo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/engine/src")
+add_test(NAME b1_native_undo COMMAND b1_native_undo)
+set_tests_properties(b1_native_undo PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING AND NOT EMSCRIPTEN)
+# B2 experiment only: private native inner-batch execution test.
+add_executable(b2_native_batch tests/search/b2_native_batch.cpp)
+target_link_libraries(b2_native_batch PRIVATE chess_search evaluation_support material_provider)
+target_include_directories(b2_native_batch PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/engine/src")
+add_test(NAME b2_native_batch COMMAND b2_native_batch)
+set_tests_properties(b2_native_batch PROPERTIES TIMEOUT 120)
+endif()
+
+if(BUILD_TESTING AND NOT EMSCRIPTEN)
+# B3a experiment: numeric-TT horizon leaves, ordinary vs claims/EP exceptions.
+add_executable(b3_numeric_horizon tests/search/b3_numeric_horizon.cpp)
+target_link_libraries(b3_numeric_horizon PRIVATE chess_search evaluation_support material_provider)
+add_test(NAME b3_numeric_horizon COMMAND b3_numeric_horizon "$<TARGET_FILE:material_evaluator>")
+set_tests_properties(b3_numeric_horizon PROPERTIES TIMEOUT 120)
+endif()
