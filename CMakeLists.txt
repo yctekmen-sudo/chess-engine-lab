@@ -327,3 +327,39 @@ target_link_libraries(b3_numeric_horizon PRIVATE chess_search evaluation_support
 add_test(NAME b3_numeric_horizon COMMAND b3_numeric_horizon "$<TARGET_FILE:material_evaluator>")
 set_tests_properties(b3_numeric_horizon PROPERTIES TIMEOUT 120)
 endif()
+
+# B4.1: dense contiguous move-text storage regression (native only).
+if(BUILD_TESTING AND NOT EMSCRIPTEN)
+  add_executable(b41_compact_uci tests/search/b41_compact_uci.cpp)
+  target_include_directories(b41_compact_uci PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/engine/src/search")
+  target_compile_features(b41_compact_uci PRIVATE cxx_std_20)
+  add_test(NAME b41_compact_uci COMMAND b41_compact_uci)
+  set_tests_properties(b41_compact_uci PROPERTIES TIMEOUT 120)
+endif()
+
+# B4.1b: per-ply contiguous move-list capacity reuse; native focused regression.
+if(BUILD_TESTING AND NOT EMSCRIPTEN)
+  add_executable(b41b_reuse tests/search/b41b_reuse.cpp engine/src/search/transposition_table.cpp)
+  target_link_libraries(b41b_reuse PRIVATE chess_evaluation)
+  target_compile_definitions(b41b_reuse PRIVATE "CHESS_LAB_ORDERING_${CHESS_LAB_ORDERING_POLICY}")
+  add_test(NAME b41b_reuse COMMAND b41b_reuse)
+  set_tests_properties(b41b_reuse PROPERTIES TIMEOUT 120)
+endif()
+
+# B4.2: flat contiguous TT repetition-count storage regression.
+if(BUILD_TESTING AND NOT EMSCRIPTEN)
+  add_executable(b42_flat_occurrences tests/search/b42_flat_occurrences.cpp)
+  target_link_libraries(b42_flat_occurrences PRIVATE chess_search)
+  target_include_directories(b42_flat_occurrences PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/engine/src/search")
+  add_test(NAME b42_flat_occurrences COMMAND b42_flat_occurrences)
+  set_tests_properties(b42_flat_occurrences PROPERTIES TIMEOUT 120)
+endif()
+
+# B4.4: private inline packed principal-variation regression.
+if(BUILD_TESTING AND NOT EMSCRIPTEN)
+  add_executable(b44_pv tests/search/b44_pv.cpp)
+  target_include_directories(b44_pv PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/engine/src/search")
+  target_compile_features(b44_pv PRIVATE cxx_std_20)
+  add_test(NAME b44_pv COMMAND b44_pv)
+  set_tests_properties(b44_pv PROPERTIES TIMEOUT 120)
+endif()
