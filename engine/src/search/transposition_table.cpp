@@ -340,12 +340,20 @@ TTSession::~TTSession() {
 }
 void TTSession::increment(const RepetitionSignature &s) {
   auto &n = counts_[s].total;
+  // Hint-only sessions need exact occurrence counts, not the numeric TT
+  // history fingerprint. Preserve the numeric path byte-for-byte.
+  if (!numeric_) { ++n; return; }
   auto h = signature_hash(s);
   if (n) history_hash_ ^= mix(h ^ mix(n));
   ++n; history_hash_ ^= mix(h ^ mix(n));
 }
 void TTSession::decrement(const RepetitionSignature &s) noexcept {
-  auto it = counts_.find(s); auto h = signature_hash(s);
+  auto it = counts_.find(s);
+  if (!numeric_) {
+    if (--it->second.total == 0) counts_.erase(it);
+    return;
+  }
+  auto h = signature_hash(s);
   history_hash_ ^= mix(h ^ mix(it->second.total));
   if (--it->second.total) history_hash_ ^= mix(h ^ mix(it->second.total));
   else counts_.erase(it);

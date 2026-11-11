@@ -1,5 +1,27 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## TT1-02 hint-only history fingerprint guard — 2026-11-09: draft, unvalidated
+
+Frozen base `13052bc654633a4a21d1c4f1150d95d6494ab0cb` (merged C4-02).
+Scoped feature branch `experiment/tt1-02-hint-history-hash` tests skipping
+`history_hash_` updates in hint-only `TTSession::increment/decrement`, while
+retaining exact occurrence-map counts and the original numeric code path.
+The focused M5 regression covers duplicate nested push/pop, hint retention,
+mixed hint/numeric sessions, history mismatch rejection, and numeric reuse.
+
+Rationale: local-only TT1-01 profiling, reportedly 1,962 observations and
+6/6 focused suites, attributed approximately 14–17% of sampled hint CPU to
+occurrence-map maintenance and 7–10% to history hashing. These CPU shares
+are not forecast speedups; full raw evidence remains ignored locally under
+`work/tt1-01/20261109T201624Z/`.
+
+**Status:** The branch is prepared for local build, exact-work checks,
+ABBA/BAAB Release benchmarking and later Full CI. No current-branch tests
+or benchmark runs have been executed in this ChatGPT environment. No speedup,
+clean committed Full CI, acceptance or merge is claimed. TT-off and numeric
+policy controls must remain exact, and source/behavior beyond this guard
+is intentionally unchanged.
+
 ## C4-02 scoped native batch encoder — 2026-11-08: local Tier 1 passed
 
 Isolated branch `experiment/c4-02-scoped-batch-encoder`, frozen baseline

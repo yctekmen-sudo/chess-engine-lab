@@ -131,6 +131,77 @@ void context_and_bounds() {
   check(!to_root_score(SearchScore::white_mate(UINT64_MAX),1) && !to_root_score(SearchScore::black_mate(UINT64_MAX),1),"mate overflow refused");
   std::cout<<"exact count/snapshot/depth/evaluator/policy verification, forced collisions, original bounds and mate transforms passed\n";
 }
+void hint_history_hash_and_mixed_reuse() {
+  auto core = create_chess_core();
+  auto root = core->initial_position();
+  const auto signature = repetition_signature(*core, *root);
+  auto other = signature;
+  other.castling[0] = !other.castling[0];
+  const auto snapshot = evaluation_snapshot(*core->snapshot(*root));
+  const std::vector<RepetitionSignature> history{signature, other, signature};
+  const std::string fingerprint(64, 'a');
+  const ChessDecision move{DecisionKind::play, "e2e4"};
+  TranspositionTable table(256 * 1024);
+  TranspositionStatistics hint_stats, numeric_stats;
+  {
+    TTSession hint({&table, EvaluatorCacheCompatibility::not_certified, 1},
+                   fingerprint, true, hint_stats, {});
+    hint.start(history);
+    check(hint.count(signature) == 2 && hint.count(other) == 1,
+          "hint-only retains exact duplicate occurrence counts");
+    auto first = hint.push(other);
+    check(hint.count(signature) == 2 && hint.count(other) == 2,
+          "hint-only push retains distinct counts");
+    auto second = hint.push(signature);
+    check(hint.count(signature) == 3 && hint.count(other) == 2,
+          "hint-only nested push retains exact counts");
+    hint.pop(signature, second);
+    hint.pop(other, first);
+    check(hint.count(signature) == 2 && hint.count(other) == 1,
+          "hint-only nested pop restores counts");
+    hint.store(snapshot, signature, 2, SearchScore::finite(5),
+               TTBound::exact, move, 0);
+    const auto result = hint.probe(snapshot, signature, 2, 0);
+    check(!result.score && result.hint == "e2e4",
+          "hint-only stores legal move hints but not numeric scores");
+  }
+  {
+    TTSession numeric(certified(table), fingerprint, true, numeric_stats, {});
+    numeric.start(history);
+    const auto prior = numeric.probe(snapshot, signature, 2, 0);
+    check(!prior.score && prior.hint == "e2e4",
+          "numeric session can reuse hint-only ordering information");
+    numeric.store(snapshot, signature, 2, SearchScore::finite(5),
+                  TTBound::exact, move, 0);
+    check(numeric.probe(snapshot, signature, 2, 0).score == SearchScore::finite(5),
+          "numeric scores verified after hint-only session");
+    auto old = numeric.push(other);
+    check(!numeric.probe(snapshot, signature, 2, 0).score,
+          "numeric history mismatch rejects cached score");
+    numeric.pop(other, old);
+    check(numeric.probe(snapshot, signature, 2, 0).score == SearchScore::finite(5),
+          "numeric score restored after history pop");
+  }
+  {
+    TTSession hint({&table, EvaluatorCacheCompatibility::not_certified, 1},
+                   fingerprint, true, hint_stats, {});
+    hint.start(history);
+    const auto result = hint.probe(snapshot, signature, 2, 0);
+    check(!result.score && result.hint == "e2e4" &&
+          hint.count(signature) == 2 && hint.count(other) == 1,
+          "hint-only after numeric retains hints and counts, never numeric reuse");
+  }
+  {
+    TTSession numeric(certified(table), fingerprint, true, numeric_stats, {});
+    numeric.start(history);
+    check(numeric.probe(snapshot, signature, 2, 0).score == SearchScore::finite(5),
+          "numeric scores survive intervening hint-only probe");
+  }
+  check(hint_stats.exact_hits == 0 && hint_stats.bound_hits == 0 &&
+        numeric_stats.exact_hits > 0,
+        "mixed-policy counters preserve numeric certification");
+  std::cout << "hint-only count preservation and mixed hint/numeric history reuse passed\n";
+}
 void mate_races() {
   tree_values=true;
   for(Side side:{Side::white,Side::black})for(bool winning:{false,true}) {
@@ -414,6 +485,6 @@ void hintless_storage_retains_hints() {
 }
 int main(int argc,char**argv) try {
   if(argc>1)digest=argv[1];
-  generated();context_and_bounds();mate_races();real_rules();memory_and_lifetime();cancellation_inside_tt_verification();cancellation_and_errors();ordered_trap_and_certification();hintless_storage_retains_hints();
+  generated();context_and_bounds();hint_history_hash_and_mixed_reuse();mate_races();real_rules();memory_and_lifetime();cancellation_inside_tt_verification();cancellation_and_errors();ordered_trap_and_certification();hintless_storage_retains_hints();
   std::cout<<"M5 transposition table passed\n";
 } catch(const std::exception&e){std::cerr<<"M5 failure: "<<e.what()<<'\n';return 1;}
