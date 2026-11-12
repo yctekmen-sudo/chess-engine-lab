@@ -1,6 +1,9 @@
 #pragma once
 #include <chess_lab/search.hpp>
 #include <map>
+#include <algorithm>
+#include <vector>
+#include <utility>
 #include <string_view>
 #include <tuple>
 
@@ -18,7 +21,44 @@ struct SignatureLess {
 struct OccurrenceCount {
   std::uint64_t total = 0, verified = 0;
 };
-using OccurrenceCounts = std::map<RepetitionSignature, OccurrenceCount, SignatureLess>;
+// B4.2: small repetition maps live in a single contiguous buffer.
+// At the observed ~5 entries a sequential lookup avoids tree pointer chasing.
+// Insertion keeps SignatureLess order so numeric TT history verification
+// visits the same signatures as the original std::map.
+class OccurrenceCounts {
+public:
+  using value_type = std::pair<RepetitionSignature, OccurrenceCount>;
+  using container_type = std::vector<value_type>;
+  using iterator = container_type::iterator;
+  using const_iterator = container_type::const_iterator;
+private:
+  container_type entries_;
+public:
+  iterator begin() noexcept { return entries_.begin(); }
+  iterator end() noexcept { return entries_.end(); }
+  const_iterator begin() const noexcept { return entries_.begin(); }
+  const_iterator end() const noexcept { return entries_.end(); }
+  std::size_t size() const noexcept { return entries_.size(); }
+  std::size_t capacity() const noexcept { return entries_.capacity(); }
+  iterator find(const RepetitionSignature &s) noexcept {
+    return std::find_if(entries_.begin(), entries_.end(),
+                        [&](const value_type &v) { return v.first == s; });
+  }
+  const_iterator find(const RepetitionSignature &s) const noexcept {
+    return std::find_if(entries_.begin(), entries_.end(),
+                        [&](const value_type &v) { return v.first == s; });
+  }
+  OccurrenceCount &operator[](const RepetitionSignature &s) {
+    if (auto found = find(s); found != end()) return found->second;
+    // Keep the tree's comparator-defined iteration order; only new keys shift.
+    const auto insertion = std::lower_bound(entries_.begin(), entries_.end(), s,
+       [](const value_type &v, const RepetitionSignature &key) {
+         return SignatureLess{}(v.first,key);
+       });
+    return entries_.insert(insertion,value_type{s,{}})->second;
+  }
+  void erase(iterator it) noexcept { entries_.erase(it); }
+};
 enum class TTBound { exact, lower, upper };
 TTBound classify_bound(SearchScore, std::optional<SearchScore> original_alpha,
                        std::optional<SearchScore> original_beta);

@@ -1,3 +1,5 @@
+#include "packed_pv.hpp"
+#include "compact_uci_text.hpp"
 #include "transposition_table_internal.hpp"
 #include "history_duplicates.hpp"
 #include "repeated_claim_targets.hpp"
@@ -5,6 +7,7 @@
 #include "../native_move_batch.hpp"
 #include "../native_undo_fastpath.hpp"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chess_lab/search.hpp>
 #include <cmath>
@@ -65,7 +68,7 @@ bool SearchScore::operator==(const SearchScore &b) const noexcept {
 
 namespace {
 struct OrderedMove {
-  std::string text;
+  detail::CompactUciText text;
   std::unique_ptr<Move> move;
   bool pawn_move = false;
   bool capture = false;
@@ -78,10 +81,11 @@ struct OrderedMove {
     return *move;
   }
 };
-std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
-                                       const CancellationToken *token = nullptr,
-                                       const PositionSnapshot *snapshot = nullptr) {
-  std::vector<OrderedMove> result;
+static_assert(sizeof(OrderedMove) <= 24, "B4.1 search move records must remain compact");
+void ordered_moves_into(std::vector<OrderedMove> &result, const ChessCore &c, const Position &p,
+                        const CancellationToken *token,
+                        const PositionSnapshot *snapshot) {
+  result.clear();
   {
     auto legal = c.legal_moves(p);
     if (token && !legal.empty()) detail::tt_poll(*token);
@@ -118,6 +122,13 @@ std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
         (i && result[i - 1].text == s))
       throw std::runtime_error("ambiguous/noncanonical legal move encoding");
   }
+  // B4.1b retains the contiguous allocation for the next sibling.
+}
+std::vector<OrderedMove> ordered_moves(const ChessCore &c, const Position &p,
+                                       const CancellationToken *token = nullptr,
+                                       const PositionSnapshot *snapshot = nullptr) {
+  std::vector<OrderedMove> result;
+  ordered_moves_into(result,c,p,token,snapshot);
   return result;
 }
 // Keep the bounded scratch frame out of recursive traversal even under /Ob2.
@@ -196,10 +207,11 @@ void validate_native_batch_moves(const std::vector<OrderedMove> &result) {
 }
 // The generic eager path above stays the reference/fallback. Native horizon leaves
 // keep the same text/fact/validation rules without allocating unused Mv owners.
-std::vector<OrderedMove> batch_ordered_moves(
-    const ChessCore &c, const Position &p, const detail::NativeMoveBatch &batch,
+void batch_ordered_moves_into(
+    std::vector<OrderedMove> &result, const ChessCore &c, const Position &p,
+    const detail::NativeMoveBatch &batch,
     const CancellationToken *token, const PositionSnapshot &snapshot) {
-  std::vector<OrderedMove> result;
+  result.clear();
   const auto count = detail::native_move_batch_size(batch);
   if (token && count) detail::tt_poll(*token);
   result.reserve(count);
@@ -228,6 +240,12 @@ std::vector<OrderedMove> batch_ordered_moves(
   }
   sort_native_batch_moves(result);
   validate_native_batch_moves(result);
+}
+std::vector<OrderedMove> batch_ordered_moves(
+    const ChessCore &c, const Position &p, const detail::NativeMoveBatch &batch,
+    const CancellationToken *token, const PositionSnapshot &snapshot) {
+  std::vector<OrderedMove> result;
+  batch_ordered_moves_into(result,c,p,batch,token,snapshot);
   return result;
 }
 // Explicit restoration propagates undo failures as traversal errors, even when
@@ -396,8 +414,14 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
                           std::optional<std::span<const RepetitionSignature>> leaf_history = {},
                           bool tt_search_horizon = false,
                           bool parent_has_duplicate = false,
-                          bool native_search_inner = false) {
+                          bool native_search_inner = false,
+                          std::vector<OrderedMove> *recycled = nullptr) {
   PreparedNode node;
+  if (recycled) {
+    assert(recycled->empty());
+    node.legal.swap(*recycled); // Take capacity, no copy or allocation.
+  }
+  try {
   node.snapshot = c.snapshot(p);
   if (leaf_history && native_chess_core(c) &&
       !node.snapshot->en_passant_square() && node.snapshot->halfmove_clock() < 99) {
@@ -420,11 +444,11 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
     if (token) detail::tt_poll(*token);
     node.batch = detail::prepare_native_move_batch(c, p);
     if (token) detail::tt_poll(*token); // Including zero-legal terminal positions.
-    node.legal = batch_ordered_moves(c, p, *node.batch, token, *node.snapshot);
+    batch_ordered_moves_into(node.legal, c, p, *node.batch, token, *node.snapshot);
     node.mode = native_search_horizon ? PreparationMode::native_horizon_batch
                                   : PreparationMode::native_inner_batch;
   } else {
-    node.legal = ordered_moves(c, p, token, node.snapshot.get());
+    ordered_moves_into(node.legal, c, p, token, node.snapshot.get());
   }
   node.repetition = snapshot_repetition(*node.snapshot);
   auto &r = node.repetition;
@@ -432,6 +456,12 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
     for (const auto &move : node.legal)
       if (move.legal_ep) { r.legal_ep = ep; break; }
   return node;
+  } catch (...) {
+    // A failed prepare must not lose the retained capacity. No board
+    // state, TT state, or cancellation boundary is modified here.
+    if (recycled) { node.legal.clear(); recycled->swap(node.legal); }
+    throw;
+  }
 }
 // All recursive values AND bounds use root-relative mate distances: a terminal
 // at ply P is Mate(P). This is the order-preserving coordinate transform of
@@ -439,7 +469,7 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
 struct Line {
   SearchScore score;
   ChessDecision action;
-  std::vector<std::string> pv;
+  detail::PackedPV pv;
   PVEnd end;
   std::string intended;
 };
@@ -451,6 +481,15 @@ bool canonical_before(const ChessDecision &a, const ChessDecision &b) {
   return rank(a.kind) != rank(b.kind) ? rank(a.kind) < rank(b.kind)
                                      : a.move < b.move;
 }
+struct ReclaimPreparedMoves {
+  std::optional<PreparedNode> &prepared;
+  std::vector<OrderedMove> &spare;
+  ~ReclaimPreparedMoves() noexcept {
+    if (!prepared) return;
+    prepared->legal.clear(); // Destroy owners before reusing capacity.
+    spare.swap(prepared->legal);
+  }
+};
 struct Traversal {
   const ChessCore &core;
   Position &position;
@@ -462,6 +501,10 @@ struct Traversal {
   const CompletedDepth *previous = nullptr;
   std::vector<std::string> path{};
   detail::TTSession *cache = nullptr;
+  // Each recursive ply owns exactly one currently active prepared list.
+  // Retain capacity by ply between siblings; no globally shared storage.
+  std::size_t root_history_size = history.size();
+  std::array<std::vector<OrderedMove>,65> recycled_moves{};
   bool has_duplicate = detail::initial_history_has_duplicates(history);
   detail::OrderingTree *ordering = nullptr;
   detail::OrderingTree::Index ordering_node = 0;
@@ -548,15 +591,20 @@ struct Traversal {
 #else
       detail::OrderingFrame ordering_frame(ordering,ordering_node,ordering_ply,m.text);
 #endif
-      if (track_path) path.push_back(m.text); // Already encoded.
+      if (track_path) path.push_back(m.text.str()); // Already encoded.
+      if (history.size() < root_history_size ||
+          history.size() - root_history_size >= recycled_moves.size())
+        throw std::logic_error("search recursion exceeds move-storage frames");
+      auto &spare = recycled_moves[history.size() - root_history_size];
       std::optional<PreparedNode> prepared;
+      ReclaimPreparedMoves reclaim{prepared,spare};
       try {
         std::optional<std::span<const RepetitionSignature>> leaf_history;
         if (purpose == PreparationPurpose::search_horizon)
           leaf_history.emplace(history);
         prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
             purpose == PreparationPurpose::search_horizon && cache, has_duplicate,
-            purpose == PreparationPurpose::search_inner));
+            purpose == PreparationPurpose::search_inner, &spare));
         history.push_back(prepared->repetition);
       } catch (...) {
         if (track_path) path.pop_back();
@@ -722,10 +770,10 @@ struct Traversal {
               });
         if (eligible) {
           best = Line{SearchScore::finite(0),
-                      {DecisionKind::claim_draw_with_intended_move, m.text},
+                      {DecisionKind::claim_draw_with_intended_move, m.text.str()},
                       {},
                       PVEnd::claim_draw_with_intended_move,
-                      m.text};
+                      m.text.str()};
           break;
         }
       }
@@ -862,7 +910,7 @@ struct Traversal {
       auto line = child(prepared, m, [&](PreparedNode &next) {
         return node(depth - 1, ply + 1, next, alpha, beta, direct_exact);
       }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
-      ChessDecision action{DecisionKind::play, m.text};
+      ChessDecision action{DecisionKind::play, m.text.str()};
       auto competitive = [&] {
         return !best || better(line.score, best->score) ||
                (line.score == best->score && canonical_before(action, best->action));
@@ -878,7 +926,7 @@ struct Traversal {
         }
         if (competitive()) {
           line.action = std::move(action);
-          line.pv.insert(line.pv.begin(), m.text);
+          line.pv.prepend(m.text);
           best = std::move(line);
           improved = true;
         }
@@ -927,7 +975,7 @@ SearchResult search(const ChessCore &c, const Position &root,
         r.status == SearchStatus::terminal ? 0 : options.nominal_depth;
     r.decision = std::move(line.action);
     r.score = line.score;
-    r.principal_variation = std::move(line.pv);
+    r.principal_variation = line.pv.expand();
     r.pv_end = line.end;
     r.pv_intended_move = std::move(line.intended);
   } catch (const EvaluationError &ex) {
@@ -1010,7 +1058,7 @@ IterativeSearchResult iterative_search(
       auto &legal = root_prepared.legal;
       if (legal.empty())
         throw std::runtime_error("ongoing root has no legal moves");
-      fallback = ChessDecision{DecisionKind::play, legal.front().text};
+      fallback = ChessDecision{DecisionKind::play, legal.front().text.str()};
       t.cancellation = std::move(cancellation);
       t.poll();
       if (session) {
@@ -1019,7 +1067,7 @@ IterativeSearchResult iterative_search(
       }
       auto variation = [](Line line) {
         return SearchVariation{std::move(line.action), line.score,
-             std::move(line.pv), line.end, std::move(line.intended)};
+             line.pv.expand(), line.end, std::move(line.intended)};
       };
       for (int depth = 1; depth <= options.max_depth.value_or(64); ++depth) {
         t.poll();
@@ -1052,8 +1100,8 @@ IterativeSearchResult iterative_search(
               return snapshot->side_to_move()==Side::white?line.score>v.score:line.score<v.score;});
             t.ordering->observe(t.ordering_node,m.text,improving?3:2,ranking.size()+1);
           }
-          line.action = {DecisionKind::play, m.text};
-          line.pv.insert(line.pv.begin(), m.text);
+          line.action = {DecisionKind::play, m.text.str()};
+          line.pv.prepend(m.text);
           ranking.push_back(variation(std::move(line)));
         }
         }
