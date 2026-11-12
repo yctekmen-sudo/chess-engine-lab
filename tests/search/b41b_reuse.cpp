@@ -4,11 +4,25 @@
 #include <cstdlib>
 #include <new>
 #include <cstddef>
+#include <cstdio>
 static std::size_t allocation_attempts=0;
-static bool fail_next_allocation=false;
+static std::size_t fail_allocation_size=0;
+static std::size_t injected_allocation_failures=0;
+// Measure exact move-vector reserve requests independently of ordinary
+// C++ allocations, including MSVC Debug STL bookkeeping.
+static std::size_t tracked_move_buffer_bytes=0;
+static std::size_t tracked_move_buffer_allocations=0;
 void* operator new(std::size_t n) {
   ++allocation_attempts;
-  if (fail_next_allocation) { fail_next_allocation=false; throw std::bad_alloc(); }
+  if (tracked_move_buffer_bytes && n==tracked_move_buffer_bytes)
+    ++tracked_move_buffer_allocations;
+  // Only inject failure into the requested contiguous move-vector buffer.
+  // Failing the next arbitrary allocation can hit MSVC Debug STL bookkeeping.
+  if (fail_allocation_size && n==fail_allocation_size) {
+    fail_allocation_size=0;
+    ++injected_allocation_failures;
+    throw std::bad_alloc();
+  }
   if (void* p=std::malloc(n?n:1)) return p;
   throw std::bad_alloc();
 }
@@ -64,13 +78,30 @@ void one_position(const char* fen){
   catch(const detail::SearchCancelled&){was_cancelled=true;}
   check(was_cancelled,"cancelled preparation not propagated");
   check(spare.data()==location && spare.empty(),"cancelled prepare lost spare capacity");
-  // Explicit allocation failure during snapshot acquisition also restores capacity.
-  bool bad_alloc=false;fail_next_allocation=true;
-  try{(void)prepare_node(*core,*pos,nullptr,{},false,false,true,&spare);}
+  // Deliberately trigger the fallible vector reserve in native batch preparation.
+  // This targets the production operation rather than an arbitrary Debug-only
+  // allocator/proxy allocation (whose failure can terminate a noexcept path).
+  std::vector<OrderedMove> undersized;
+  undersized.reserve(1);
+  auto* undersized_location=undersized.data();
+  auto undersized_capacity=undersized.capacity();
+  check(expected_batch.size()>undersized_capacity,"reserve-failure fixture needs growth");
+  std::fprintf(stderr,"B41B_CHECK before_targeted_reserve_failure count=%zu\n",expected_batch.size());
+  std::fflush(stderr);
+  const auto failures_before=injected_allocation_failures;
+  const auto requested_bytes=expected_batch.size()*sizeof(OrderedMove);
+  bool bad_alloc=false;
+  fail_allocation_size=requested_bytes;
+  try{(void)prepare_node(*core,*pos,nullptr,{},false,false,true,&undersized);}
   catch(const std::bad_alloc&){bad_alloc=true;}
-  fail_next_allocation=false;
-  check(bad_alloc,"forced allocation failure not propagated");
-  check(spare.data()==location && spare.empty(),"failed prepare lost spare capacity");
+  fail_allocation_size=0;
+  check(bad_alloc,"targeted vector reserve failure not propagated");
+  check(injected_allocation_failures==failures_before+1,"targeted vector buffer allocation was not reached");
+  check(undersized.data()==undersized_location && undersized.capacity()==undersized_capacity &&
+        undersized.empty(),"failed vector reserve did not restore original capacity");
+  check(spare.data()==location && spare.empty(),"failed reserve disturbed independent spare");
+  std::fprintf(stderr,"B41B_CHECK targeted_reserve_failure_complete bytes=%zu\n",requested_bytes);
+  std::fflush(stderr);
   // An exception AFTER successful preparation must also unwind through the guard.
   bool thrown=false;
   try{
@@ -96,24 +127,40 @@ void one_position(const char* fen){
     }
     check(spare.data()==location && spare.empty(),"claim-free path lost buffer");
   }
-  // Measure actual C++ allocations for fresh versus reused native search-node
-  // preparation. Both perform the same move generation and validation.
+  // Track the actual move-vector reserve allocations. Broad global-new
+  // counts include Debug-only STL proxies, so retain those totals for
+  // diagnosis but do not use them as an allocation-reuse correctness gate.
   constexpr int rounds=40;
-  std::size_t begin=allocation_attempts;
+  const auto requested_move_buffer_bytes=expected_batch.size()*sizeof(OrderedMove);
+  check(requested_move_buffer_bytes>0 && expected_batch.size()<=spare.capacity(),
+        "move-buffer allocation fixture invalid");
+  const auto fresh_all_before=allocation_attempts;
+  const auto fresh_move_before=tracked_move_buffer_allocations;
+  tracked_move_buffer_bytes=requested_move_buffer_bytes;
   for(int i=0;i<rounds;++i){(void)prepare_node(*core,*pos,nullptr,{},false,false,true);}
-  const auto fresh=allocation_attempts-begin;
-  begin=allocation_attempts;
+  const auto fresh_all=allocation_attempts-fresh_all_before;
+  const auto fresh_move=tracked_move_buffer_allocations-fresh_move_before;
+  const auto reused_all_before=allocation_attempts;
+  const auto reused_move_before=tracked_move_buffer_allocations;
   for(int i=0;i<rounds;++i){
     std::optional<PreparedNode> prepared;
     ReclaimPreparedMoves reclaim{prepared,spare};
     prepared.emplace(prepare_node(*core,*pos,nullptr,{},false,false,true,&spare));
   }
-  const auto reused=allocation_attempts-begin;
-  check(reused<fresh,"recycled vector did not reduce allocation calls");
+  const auto reused_all=allocation_attempts-reused_all_before;
+  const auto reused_move=tracked_move_buffer_allocations-reused_move_before;
+  tracked_move_buffer_bytes=0;
+  std::fprintf(stderr,
+    "B41B_ALLOC requested_bytes=%zu rounds=%d all_fresh=%zu all_reused=%zu move_fresh=%zu move_reused=%zu\n",
+    requested_move_buffer_bytes,rounds,fresh_all,reused_all,fresh_move,reused_move);
+  std::fflush(stderr);
+  check(fresh_move>=rounds,"fresh preparation did not allocate expected move buffers");
+  check(fresh_move>reused_move,"recycling did not eliminate tracked move-buffer allocations");
   check(spare.data()==location && spare.empty(),"allocation comparison changed storage owner");
   check(core->export_fen(*pos)==fen,"list recycling mutated board");
-  std::cout<<"B4.1b fixture allocations fresh="<<fresh<<" reused="<<reused
-           <<" saved="<<(fresh-reused)<<" capacity="<<capacity<<"\n";
+  std::cout<<"B4.1b fixture all_fresh="<<fresh_all<<" all_reused="<<reused_all
+           <<" move_fresh="<<fresh_move<<" move_reused="<<reused_move
+           <<" capacity="<<capacity<<"\n";
 }
 } // namespace
 int main()try{
@@ -122,4 +169,4 @@ int main()try{
   one_position("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
   one_position("1r2k3/P7/8/8/8/8/7p/4K3 w - - 0 1");
   std::cout<<"b41b_reuse PASS\n";return 0;
-}catch(const std::exception& e){fail_next_allocation=false;std::cerr<<"b41b_reuse FAIL: "<<e.what()<<"\n";return 1;}
+}catch(const std::exception& e){fail_allocation_size=0;tracked_move_buffer_bytes=0;std::cerr<<"b41b_reuse FAIL: "<<e.what()<<"\n";return 1;}
