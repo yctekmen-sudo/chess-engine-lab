@@ -1,4 +1,5 @@
 #pragma once
+#include <limits>
 #include <chess_lab/search.hpp>
 #include <map>
 #include <algorithm>
@@ -59,6 +60,35 @@ public:
   }
   void erase(iterator it) noexcept { entries_.erase(it); }
 };
+// Draw eligibility is maintained by Traversal::history; no duplicate
+// count vector or TT-adjacent push/pop state is needed.
+// PositionSnapshot clocks are uint32_t; store only exact ABI-relevant fields
+// that can differ between equal repetition signatures. 12 bytes, not a full
+// historical context or evaluator snapshot.
+struct EvaluationExtras {
+  std::uint32_t halfmove_clock = 0, fullmove_number = 0;
+  std::uint8_t raw_ep = 64;
+  bool operator==(const EvaluationExtras &) const = default;
+};
+inline EvaluationExtras evaluation_extras(const ChessEvalPosition &s) {
+  if (s.halfmove_clock > UINT32_MAX || s.fullmove_number > UINT32_MAX ||
+      (s.en_passant_square != CHESS_EVAL_EP_NONE && s.en_passant_square > 63))
+    throw std::invalid_argument("TT evaluator snapshot outside chess ABI range");
+  return {static_cast<std::uint32_t>(s.halfmove_clock),
+          static_cast<std::uint32_t>(s.fullmove_number),
+          static_cast<std::uint8_t>(s.en_passant_square == CHESS_EVAL_EP_NONE
+                                    ? 64 : s.en_passant_square)};
+}
+inline EvaluationExtras evaluation_extras(const PositionSnapshot &s) noexcept {
+  return {s.halfmove_clock(), s.fullmove_number(),
+          static_cast<std::uint8_t>(s.en_passant_square().value_or(64))};
+}
+// An optional claim is a locally attainable result of zero. A TT return
+// cannot cause the claimant to accept an immediately worse estimate.
+inline bool cached_score_worse_than_claim(SearchScore score, Side side) {
+  auto draw = SearchScore::finite(0);
+  return side == Side::white ? score < draw : score > draw;
+}
 enum class TTBound { exact, lower, upper };
 TTBound classify_bound(SearchScore, std::optional<SearchScore> original_alpha,
                        std::optional<SearchScore> original_beta);
@@ -71,36 +101,35 @@ struct TTProbe {
   TTBound bound = TTBound::exact;
   std::optional<ChessDecision> decision;
   std::string hint;
+  std::size_t selected_slot=std::numeric_limits<std::size_t>::max(); // reward only a score actually returned by search
 };
 // Private access also supports deliberate collision/bound fixtures, without
 // exposing injectable hashing or raw entry mutation in the public API.
 struct TTAccess {
-  // Private deterministic fixture seam, per table and configured only while idle.
-  // The observer runs inside exact history verification before its next poll.
   static void observe_verification(TranspositionTable &, void (*)(std::uint64_t) noexcept);
   static bool acquire(TranspositionTable &);
   static void release(TranspositionTable &) noexcept;
   static void force_collisions(TranspositionTable &, bool);
-  static std::uint32_t append(TranspositionTable &, std::uint32_t,
-                              const RepetitionSignature &, TranspositionStatistics &,
-                              const CancellationToken &);
-  static void drop(TranspositionTable &, std::uint32_t) noexcept;
-  static TTProbe probe(TranspositionTable &, const ChessEvalPosition &,
-                       const RepetitionSignature &, OccurrenceCounts &,
-                       std::uint64_t history_hash, bool complete, int depth,
+  static void begin_generation(TranspositionTable &) noexcept;
+  static void reward(TranspositionTable &,const TTProbe &) noexcept;
+  static TTProbe probe(TranspositionTable &, const RepetitionSignature &,
+                       std::uint64_t signature_hash_value, int depth,
                        std::string_view evaluator, std::uint64_t policy,
+                       EvaluatorCacheCompatibility compatibility,
+                       std::optional<EvaluationExtras> extras,
                        bool numeric, std::uint64_t ply, TranspositionStatistics &,
                        const CancellationToken &);
-  static void store(TranspositionTable &, const ChessEvalPosition &,
-                     const RepetitionSignature &, std::uint64_t history_hash,
-                     bool complete, int depth, std::string_view evaluator,
-                     std::uint64_t policy, std::uint32_t tail, bool numeric,
-                     SearchScore score, TTBound, const ChessDecision &,
-                     std::uint64_t ply, TranspositionStatistics &);
+  static void store(TranspositionTable &, const RepetitionSignature &,
+                    std::uint64_t signature_hash_value, int depth,
+                    std::string_view evaluator, std::uint64_t policy,
+                    EvaluatorCacheCompatibility compatibility,
+                    std::optional<EvaluationExtras> extras,
+                    bool numeric, SearchScore score, TTBound,
+                    const ChessDecision &, std::uint64_t ply,
+                    TranspositionStatistics &);
 };
 class TTSession {
 public:
-  static constexpr std::uint32_t invalid = UINT32_MAX;
   TTSession(TranspositionTableUse use, std::string_view evaluator, bool complete,
             TranspositionStatistics &stats, CancellationToken cancellation);
   ~TTSession();
@@ -108,24 +137,39 @@ public:
   bool numeric() const noexcept { return numeric_; }
   bool enabled() const noexcept { return table_ != nullptr; }
   void start(const std::vector<RepetitionSignature> &);
-  std::uint32_t push(const RepetitionSignature &);
-  void pop(const RepetitionSignature &, std::uint32_t old_tail) noexcept;
-  std::size_t count(const RepetitionSignature &) const;
-  TTProbe probe(const ChessEvalPosition &, const RepetitionSignature &, int depth,
-                std::uint64_t ply);
-  void store(const ChessEvalPosition &, const RepetitionSignature &, int depth,
-             SearchScore, TTBound, const ChessDecision &, std::uint64_t ply);
+  void reward(const TTProbe &hit) noexcept {
+    if(table_) TTAccess::reward(*table_,hit);
+  }
+  // Optional node-local cache avoids rehashing on the probe/store pair.
+  // Never stored in TTSession: recursive search shares one session.
+  TTProbe probe(const RepetitionSignature &, int depth, std::uint64_t ply,
+                const PositionSnapshot &,
+                std::optional<std::uint64_t> *node_hash = nullptr);
+  void store(const RepetitionSignature &, int depth,
+             SearchScore, TTBound, const ChessDecision &, std::uint64_t ply,
+             const PositionSnapshot &,
+             std::optional<std::uint64_t> *node_hash = nullptr);
+  // Private direct-fixture overloads: ABI extras matter only for deterministic
+  // complete-snapshot evaluators, never for position-only certification.
+  TTProbe probe(const ChessEvalPosition &s, const RepetitionSignature &r,
+                int depth, std::uint64_t ply);
+  void store(const ChessEvalPosition &s, const RepetitionSignature &r, int depth,
+             SearchScore score, TTBound bound, const ChessDecision &action,
+             std::uint64_t ply);
 private:
-  void increment(const RepetitionSignature &);
-  void decrement(const RepetitionSignature &) noexcept;
   TranspositionTable *table_ = nullptr;
   TranspositionTableUse use_;
   std::string_view evaluator_;
-  bool complete_, numeric_;
+  bool numeric_;
+  EvaluatorCacheCompatibility compatibility_;
+  TTProbe probe_impl(const RepetitionSignature &, int, std::uint64_t,
+                     std::optional<EvaluationExtras>,
+                     std::optional<std::uint64_t> *node_hash = nullptr);
+  void store_impl(const RepetitionSignature &, int, SearchScore, TTBound,
+                  const ChessDecision &, std::uint64_t,
+                  std::optional<EvaluationExtras>,
+                  std::optional<std::uint64_t> *node_hash = nullptr);
   TranspositionStatistics &stats_;
   CancellationToken cancellation_;
-  OccurrenceCounts counts_;
-  std::uint64_t history_hash_ = 0;
-  std::uint32_t tail_ = 0;
 };
 } // namespace chess_lab::detail

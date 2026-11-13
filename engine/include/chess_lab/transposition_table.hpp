@@ -31,7 +31,13 @@ private:
 };
 enum class EvaluatorCacheCompatibility {
   not_certified,
-  deterministic_position // explicit controller certification, NOT inferred
+  // Deterministic on the complete evaluator ABI snapshot. Clock/raw-EP
+  // fields must still match for numeric reuse; TT history is never compared.
+  deterministic_position,
+  // Stronger explicit certification: evaluator ignores the ABI snapshot fields
+  // not determined by RepetitionSignature (halfmove/fullmove clocks, raw EP).
+  // Only use this for a verified position-only evaluator, e.g. material-v1.
+  history_independent_position
 };
 struct TranspositionTableUse {
   TranspositionTable *table = nullptr;

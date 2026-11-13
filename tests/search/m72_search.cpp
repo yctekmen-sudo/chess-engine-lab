@@ -78,7 +78,8 @@ void same(const SearchVariation &a,const SearchVariation &b) {
   check(a.decision==b.decision && a.score==b.score && a.principal_variation==b.principal_variation &&
         a.pv_end==b.pv_end && a.pv_intended_move==b.pv_intended_move,"single-PV exact PLAY/score/canonical PV/termination");
 }
-void compare(const ChessCore &c,const Position &p,const GameHistory &h,int depth,bool ci_tt=false) {
+void compare(const ChessCore &c,const Position &p,const GameHistory &h,int depth,
+             bool ci_tt=false, bool expect_numeric_reuse=true) {
   Checkpoint comparison("compare depth="+std::to_string(depth));
   auto reference_evaluator=evaluator();std::vector<CompletedDepth> reference;
   Checkpoint reference_time("legacy exhaustive reference");++search_count;
@@ -89,7 +90,13 @@ void compare(const ChessCore &c,const Position &p,const GameHistory &h,int depth
     auto r=iterative_search(c,p,h,e,{depth,true,1,ordering},{},[&](CompletedDepth d){
       const auto &rank=reference.at(commits++).multipv;
       auto play=std::find_if(rank.begin(),rank.end(),[](const auto &v){return v.decision.kind==DecisionKind::play;});
-      check(play!=rank.end()&&d.multipv.size()==1,"one PLAY, every completed depth");same(d.best,*play);
+      check(play!=rank.end()&&d.multipv.size()==1,"one PLAY, every completed depth");
+      // Depth-sufficient scores are a new search policy; the reference is an
+      // exact minimax result only for nonnumeric searches. Numeric paths must
+      // remain legal, complete and deterministic but may evaluate differently.
+      if(use.evaluator==EvaluatorCacheCompatibility::not_certified) same(d.best,*play);
+      else { check(d.best.decision.kind==DecisionKind::play,"numeric root still publishes PLAY");
+             check(!d.best.principal_variation.empty(),"numeric PV has root move"); }
     },use);
     if(ref.terminal_decision)check(r.terminal_decision==ref.terminal_decision && r.terminal_score==ref.terminal_score && !commits,"terminal precedence");
     else check(r.completed&&commits==depth,"all optimized depths committed");
@@ -98,7 +105,9 @@ void compare(const ChessCore &c,const Position &p,const GameHistory &h,int depth
   auto reverse=[&](Evaluator &e,bool ordering,TranspositionTableUse use) {
     ++search_count;
     auto again=legacy_iterative_search(c,p,h,e,{depth,true,256,ordering},{},{},use);
-    if(ref.completed)for(size_t i=0;i<ref.completed->multipv.size();++i)same(again.completed->multipv[i],ref.completed->multipv[i]);
+    check(bool(again.completed)==bool(ref.completed),"legacy numeric policy completes");
+    if(ref.completed && use.evaluator==EvaluatorCacheCompatibility::not_certified)
+      for(size_t i=0;i<ref.completed->multipv.size();++i)same(again.completed->multipv[i],ref.completed->multipv[i]);
   };
   if(ci_matrix) {
     // Expensive real boards need exact all-depth equivalence and both ordering
@@ -113,7 +122,23 @@ void compare(const ChessCore &c,const Position &p,const GameHistory &h,int depth
         auto warm=verify(*e,ordering,use);
         check(cold.statistics.transposition.lookups>0&&warm.statistics.transposition.lookups>0,"CI cold/warm cache exercised");
         if(mode==1)check(!warm.statistics.transposition.exact_hits&&!warm.statistics.transposition.bound_hits,"hint-only cannot use numeric hits");
-        else check(warm.statistics.transposition.exact_hits+warm.statistics.transposition.bound_hits>0,"certified warm numeric hits exercised");
+        else if (expect_numeric_reuse) {
+          // Explicit positive control: numeric entries must have been stored
+          // and must actually be reused on the warmed search.
+          check(cold.statistics.transposition.stores>0,
+                "certified numeric control stores positive-depth PLAY entries");
+          check(warm.statistics.transposition.exact_hits+warm.statistics.transposition.bound_hits>0,
+                "certified warm numeric hits exercised");
+        } else {
+          // Near the fifty-move boundary, all searched positive-depth
+          // continuations here are claim-bearing; TT stores only PLAY, and
+          // T1.1d.2 disables depth-zero stores. No numeric entry is eligible.
+          const auto &ct=cold.statistics.transposition;
+          const auto &wt=warm.statistics.transposition;
+          check(ct.stores==0 && wt.stores==0 &&
+                wt.candidate_hits==0 && wt.exact_hits==0 && wt.bound_hits==0,
+                "claim-only numeric fixture stores/reuses no ineligible TT entry");
+        }
         reverse(*e,ordering,use); // optimized -> legacy
         verify(*e,ordering,use);  // legacy -> optimized
         reverse(*e,ordering,use);
@@ -186,11 +211,11 @@ void leaf_ordering_regressions() {
           check(r.status==IterativeSearchStatus::depth_reached&&r.completed,"horizon depth committed");
           same(r.completed->best,{ {DecisionKind::play,"a1a2"},score,{"a1a2"},end,kind==1?"a1a2":""});
           const auto &s=r.statistics;const auto &tt=s.transposition;
-          check(s.visited_nodes==2&&tt.stores==(mode==1?0U:1U),"hintless horizon skips only hint-only writes; numeric stores and PLAY-only root remain intact");
-          check(tt.lookups==(kind>=3?0U:1U)&&tt.hint_hits==(kind<3&&valid?1U:0U),"horizon hints validated and counted exactly, after terminal checks");
-          check(s.evaluator_calls==(kind>=3||mode==2&&pass?0U:1U),"horizon evaluation only absent terminal or warm exact result");
-          check(tt.exact_hits==(kind<3&&mode==2&&pass?1U:0U)&&tt.bound_hits==0&&tt.bound_cutoffs==0,"warm exact horizon/claim reuse and hint-only isolation");
-          check(tt.candidate_hits==(kind>=3||mode==1?0U:pass?2U:1U)&&tt.context_rejections==(kind<3&&mode==2?1U:0U),"depth-mismatched hint never becomes numeric evidence");
+          check(s.visited_nodes==2&&tt.stores==0U,"T1.1d.2 C: no depth-zero TT stores in any mode");
+          check(tt.lookups==(mode==2||kind>=3?0U:1U)&&tt.hint_hits==(mode==1&&kind<3&&valid?1U:0U),"T1.1d.2: numeric depth-zero probe and hint bypass; hint-only unchanged");
+          check(s.evaluator_calls==(kind>=3?0U:1U),"T1.1d.2: depth-zero evaluator invoked even when warm numeric score exists");
+          check(tt.exact_hits==0U&&tt.bound_hits==0U&&tt.bound_cutoffs==0U,"T1.1d.2: no numeric depth-zero hit or cutoff");
+          check(tt.candidate_hits==0U&&tt.context_rejections==0U,"T1.1d.2: no depth-zero numeric candidate validation");
           check(t.balance==0&&t.id(*root)==0&&h.matches_root(t,*root),"horizon board/history restoration");
         }
       }
@@ -679,7 +704,11 @@ int main(int argc,char **argv)try {
     for(double value:{-3.0,0.0,3.0}){
       if(ci_matrix&&value!=0)continue;
       Checkpoint score("value="+std::to_string(value));constant=value;
-      compare(*c,*p,h,2,ci_matrix&&(case_number==5||case_number==8));score.finish();
+      // Case 5 (legal EP): positive numeric reuse control.
+      // Case 8 (99 halfmoves): only claim-bearing continuations, so no stored
+      // positive-depth PLAY entries; verify the no-reuse safety boundary.
+      compare(*c,*p,h,2,ci_matrix&&(case_number==5||case_number==8),
+              case_number!=8);score.finish();
     }
     fixture.finish();
   }
