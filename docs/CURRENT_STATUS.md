@@ -1,5 +1,34 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## T1 accepted TT integration — 2026-11-13: isolated validation passed, PR preparation authorized
+
+The eight approved optimizations (T1.1a, T1.1d.2 C, T1.1fH, T1.1h C,
+T1.1i, T1.2a.5B, T1.2a.7 Mode 3 and T1.3a B2) have been reconstructed
+on B4 merged `main` at `6e01eb17dc331261bc8fa823150f16a368920b97`.
+The user's isolated Windows/WSL integration evidence from
+`CELab-T1-integration-evidence-t1int-20261113T164656Z-49236.zip`
+reports **PASSED**: 23/23 native tests per Windows B4 Release/Debug,
+Windows candidate Release/Debug and WSL candidate Release/Debug;
+270/270 benchmark records; 90 deterministic replay checks; and 45
+cross-revision result comparisons. All tested best/PV checksums agreed.
+These are isolated native results, **not** the authoritative 54-gate Full CI.
+
+Against B4, the accepted candidate improved numeric cold time **60.81%**
+(2.55x), hint-cold **25.80%**, hint-warm **71.41%**, and same-root
+numeric-warm **99.77%**, while TT-off **regressed 2.23%** with unchanged
+node counts. The warm numeric result represents re-searching a prepopulated
+identical position, not ordinary full-game speed. See
+[`docs/t1-integration-performance.md`](t1-integration-performance.md) for
+five-mode methodology, raw-evidence provenance, full comparison, caveats and
+required pre-merge gates.
+
+The user authorized preparing a T1 integration PR. The PR publication kit
+copies the exact SHA-256-verified eight accepted source/test overlays; it
+does not include rejected T1.3b experiments or Claude's C1–C3 suggestions.
+Full committed-revision Windows/WSL CI and PR review remain mandatory before
+any merge. No production merge is authorized by this checkpoint.
+
+
 ## C4-02 scoped native batch encoder — 2026-11-08: local Tier 1 passed
 
 Isolated branch `experiment/c4-02-scoped-batch-encoder`, frozen baseline

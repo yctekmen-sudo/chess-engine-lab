@@ -1,6 +1,7 @@
 #include "packed_pv.hpp"
 #include "compact_uci_text.hpp"
 #include "transposition_table_internal.hpp"
+#include "audit_ttg.hpp"
 #include "history_duplicates.hpp"
 #include "repeated_claim_targets.hpp"
 #include "persistent_ordering.hpp"
@@ -9,6 +10,8 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstdlib>
+#include <cstdio>
 #include <chess_lab/search.hpp>
 #include <cmath>
 #include <limits>
@@ -67,6 +70,22 @@ bool SearchScore::operator==(const SearchScore &b) const noexcept {
 }
 
 namespace {
+// T1.3a experimental controls. 0=unchanged, 1=defer ordering to after TT,
+// 2=add native positive-depth batch materialization deferral.
+int t13a_mode() noexcept {
+  static const int mode = []() noexcept {
+    const char *value = std::getenv("CELAB_T13A_MODE");
+    return value && (value[0]=='0' || value[0]=='1' || value[0]=='2') && value[1]=='\0'
+        ? int(value[0]-'0') : 2;
+  }();
+  return mode;
+}
+struct T13aCounts {
+  std::uint64_t lazy_prepared=0, lazy_expanded=0, early_probes=0,
+      early_exact_returns=0, early_bound_returns=0, early_nonreturns=0,
+      deferred_order_nodes=0, order_skipped_returns=0;
+};
+thread_local T13aCounts t13a_counts;
 struct OrderedMove {
   detail::CompactUciText text;
   std::unique_ptr<Move> move;
@@ -373,9 +392,10 @@ GameHistory GameHistory::replay(const ChessCore &c, const Position &start,
 }
 namespace {
 // A prepared node owns one legal list and its position-specific facts.
-enum class PreparationMode { eager, native_claim_free_leaf, native_horizon_batch, native_inner_batch };
+enum class PreparationMode { eager, native_claim_free_leaf, native_horizon_batch, native_inner_batch, native_inner_deferred };
 enum class PreparationPurpose { eager, search_horizon, search_inner };
 struct PreparedNode {
+  std::uint64_t audit_prepare_ns=0;
   std::unique_ptr<const PositionSnapshot> snapshot;
   std::vector<OrderedMove> legal;
   std::size_t native_legal_count = 0;
@@ -386,7 +406,8 @@ struct PreparedNode {
   bool claim_now_fifty = false;
   detail::NativeMoveBatchOwner batch;
   std::size_t legal_count() const {
-    return mode == PreparationMode::native_claim_free_leaf ? native_legal_count : legal.size();
+    return (mode == PreparationMode::native_claim_free_leaf ||
+            mode == PreparationMode::native_inner_deferred) ? native_legal_count : legal.size();
   }
 };
 RepetitionSignature snapshot_repetition(const PositionSnapshot &s) {
@@ -460,6 +481,57 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
     // A failed prepare must not lose the retained capacity. No board
     // state, TT state, or cancellation boundary is modified here.
     if (recycled) { node.legal.clear(); recycled->swap(node.legal); }
+    throw;
+  }
+}
+// Prepare a native positive-depth node without encoding, sorting, or
+// materializing its moves. The complete native legal batch is retained so
+// there is no second native move-generation pass after a TT miss.
+PreparedNode prepare_deferred_inner(const ChessCore &c, const Position &p,
+                                   const CancellationToken *token,
+                                   std::vector<OrderedMove> *recycled) {
+  PreparedNode node;
+  if (recycled) {
+    assert(recycled->empty());
+    node.legal.swap(*recycled);
+  }
+  try {
+    node.snapshot = c.snapshot(p);
+    if (token) detail::tt_poll(*token);
+    node.batch = detail::prepare_native_move_batch(c, p);
+    if (token) detail::tt_poll(*token);
+    node.native_legal_count = detail::native_move_batch_size(*node.batch);
+    node.repetition = snapshot_repetition(*node.snapshot);
+    if (auto ep = node.snapshot->en_passant_square(); ep &&
+        detail::native_has_legal_en_passant(c, p))
+      node.repetition.legal_ep = ep;
+    node.mode = PreparationMode::native_inner_deferred;
+    ++t13a_counts.lazy_prepared;
+    return node;
+  } catch (...) {
+    if (recycled) { node.legal.clear(); recycled->swap(node.legal); }
+    throw;
+  }
+}
+void expand_deferred_inner(PreparedNode &node, const ChessCore &c,
+                           const Position &p, const CancellationToken *token) {
+  assert(node.mode == PreparationMode::native_inner_deferred && node.batch);
+  try {
+    batch_ordered_moves_into(node.legal,c,p,*node.batch,token,*node.snapshot);
+    if (node.legal.size() != node.native_legal_count)
+      throw std::logic_error("T1.3a deferred native batch count drift");
+    // The native legality helper must agree with the original batch-derived
+    // repetition signature, including rare legal en-passant transitions.
+    auto expected=snapshot_repetition(*node.snapshot);
+    if (auto ep=node.snapshot->en_passant_square())
+      for (const auto &m:node.legal)
+        if (m.legal_ep) { expected.legal_ep=ep; break; }
+    if (!(expected == node.repetition))
+      throw std::logic_error("T1.3a deferred repetition mismatch");
+    node.mode=PreparationMode::native_inner_batch;
+    ++t13a_counts.lazy_expanded;
+  } catch (...) {
+    detail::invalidate_native_move_batch(*node.batch);
     throw;
   }
 }
@@ -554,7 +626,8 @@ struct Traversal {
   }
   std::size_t count(const RepetitionSignature &s) const {
     poll();
-    if (cache) return cache->count(s);
+    detail::Timer count_timer(detail::audit.enabled ? &detail::audit.count_ns : nullptr);
+    if (detail::audit.enabled) ++detail::audit.counts;
     std::size_t n = 0;
     for (const auto &entry : history) {
       poll();
@@ -602,19 +675,17 @@ struct Traversal {
         std::optional<std::span<const RepetitionSignature>> leaf_history;
         if (purpose == PreparationPurpose::search_horizon)
           leaf_history.emplace(history);
-        prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
-            purpose == PreparationPurpose::search_horizon && cache, has_duplicate,
-            purpose == PreparationPurpose::search_inner, &spare));
+        const auto preparation_start=detail::audit.enabled?detail::audit_clock():0;
+        if (t13a_mode() == 2 && purpose == PreparationPurpose::search_inner &&
+            cache && cache->numeric() && native_chess_core(core))
+          prepared.emplace(prepare_deferred_inner(core,position,&cancellation,&spare));
+        else
+          prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
+              purpose == PreparationPurpose::search_horizon && cache, has_duplicate,
+              purpose == PreparationPurpose::search_inner, &spare));
+        if(detail::audit.enabled)prepared->audit_prepare_ns=detail::audit_clock()-preparation_start;
         history.push_back(prepared->repetition);
       } catch (...) {
-        if (track_path) path.pop_back();
-        throw;
-      }
-      std::uint32_t old_tail = 0;
-      try {
-        if (cache) old_tail = cache->push(history.back());
-      } catch (...) {
-        history.pop_back();
         if (track_path) path.pop_back();
         throw;
       }
@@ -623,12 +694,10 @@ struct Traversal {
       try {
         result.emplace(f(*prepared));
       } catch (...) {
-        if (cache) cache->pop(history.back(), old_tail);
         history.pop_back();
         if (track_path) path.pop_back();
         throw;
       }
-      if (cache) cache->pop(history.back(), old_tail);
       history.pop_back();
       if (track_path) path.pop_back();
       return std::move(*result);
@@ -787,6 +856,8 @@ struct Traversal {
             bool exact = false,
             bool root_play_only = false) {
     poll();
+    const auto audit_node_start=detail::audit.enabled?detail::audit_clock():0;
+    std::uint64_t audit_preprobe_ns=0;
     // Outside the previous-PV prefix all descendants retain M3's canonical
     // order, so a full-window traversal already supplies its canonical PV.
     // Only a subtree that can actually receive a hint needs tie refinement.
@@ -802,44 +873,119 @@ struct Traversal {
            (depth == 0 && native_chess_core(core) && prepared.batch));
     assert(prepared.mode != PreparationMode::native_inner_batch ||
            (depth > 0 && native_chess_core(core) && prepared.batch));
+    assert(prepared.mode != PreparationMode::native_inner_deferred ||
+           (depth > 0 && native_chess_core(core) && prepared.batch));
     const auto original_alpha = alpha, original_beta = beta;
     const auto &s = prepared.snapshot;
+    // This cache is scoped to a single node; children cannot overwrite it.
+    // A TT hash is computed only if this node actually probes or stores.
+    std::optional<std::uint64_t> node_tt_hash;
     auto finish = [&](Line line) {
       if (ordering && depth > 0) ordering->seal(ordering_node);
       if (cache && !root_play_only && raw_leaf && !cache->numeric()) poll(); // Preserve hint-only skipped store boundary.
-      if (cache && !root_play_only && (!raw_leaf || cache->numeric())) {
+      // T1.1d.2 C: depth-zero numeric scores are not written to the TT.
+      // Keep existing positive-depth and hint-only storage semantics.
+      if (cache && !root_play_only && (!raw_leaf || cache->numeric()) &&
+          (!cache->numeric() || depth > 0)) {
         poll();
-        cache->store(evaluation_snapshot(*s), history.back(), depth, line.score,
-          detail::classify_bound(line.score, original_alpha, original_beta), line.action, ply);
+        cache->store(history.back(), depth, line.score,
+          detail::classify_bound(line.score, original_alpha, original_beta),
+          line.action, ply, *s, &node_tt_hash);
       }
       return line;
     };
-    // Leaves own a fresh, canonical list from prepare_node(); only positive
-    // depths consume move ordering or reuse the iterative root's reordered list.
-    if (depth == 0) poll(); // Retain moves()'s cancellation boundary.
-    auto &moves_here = depth == 0 ? prepared.legal : moves(prepared, false);
-    if (auto end = terminal(ply, prepared))
-      return finish(std::move(*end));
+    // On native inner nodes mode 2 tests the terminal/draw guard before
+    // expanding the already-generated native batch. Only a provably
+    // claim-free node may return directly from the early numeric TT probe.
+    bool terminal_checked = false;
+    std::optional<detail::TTProbe> preprobe;
+    if (prepared.mode == PreparationMode::native_inner_deferred) {
+      if (auto end = terminal(ply,prepared)) return finish(std::move(*end));
+      terminal_checked = true;
+      if (prepared.legal_count() == 0)
+        throw std::runtime_error("ongoing node has no legal moves");
+      if (!root_play_only && cache && cache->numeric() &&
+          !has_duplicate && s->halfmove_clock() < 99) {
+        if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
+        poll();
+        if(detail::audit.enabled)audit_preprobe_ns=detail::audit_clock()-audit_node_start;
+        preprobe.emplace(cache->probe(history.back(),depth,ply,*s,&node_tt_hash));
+        ++t13a_counts.early_probes;
+        poll();
+        if (preprobe->score && !exact) {
+          const bool exact_return=preprobe->bound==detail::TTBound::exact;
+          const bool bound_return=!exact_return &&
+            ((preprobe->bound==detail::TTBound::lower && beta && *preprobe->score >= *beta) ||
+             (preprobe->bound==detail::TTBound::upper && alpha && *preprobe->score <= *alpha));
+          if (exact_return || bound_return) {
+            // Terminal adjudication and actual repetition-count updates already
+            // happened above; available claims have been proven absent.
+            if (!preprobe->hint.empty() &&
+                detail::native_has_legal_uci_hint(core,position,preprobe->hint))
+              ++stats.transposition.hint_hits;
+            if (ordering) ordering->prepare(ordering_node,prepared.legal);
+            if (bound_return) {
+              ++stats.alpha_beta_cutoffs;
+              ++stats.transposition.bound_cutoffs;
+              ++t13a_counts.early_bound_returns;
+            } else ++t13a_counts.early_exact_returns;
+            if (detail::audit.enabled) {
+              auto &row=detail::audit.depth[detail::bin(depth)];
+              if (bound_return) ++row.bound_returns; else ++row.exact_returns;
+              row.preprobe_return_ns+=audit_preprobe_ns;
+              row.prepare_return_ns+=prepared.audit_prepare_ns;
+            }
+            cache->reward(*preprobe);
+            return finish({*preprobe->score, preprobe->decision.value(), {}, PVEnd::horizon, {}});
+          }
+        }
+        ++t13a_counts.early_nonreturns;
+      }
+      expand_deferred_inner(prepared,core,position,&cancellation);
+    }
+    const bool defer_order = t13a_mode() != 0 && depth > 0 &&
+        cache && cache->numeric() && !root_play_only;
+    if (defer_order) ++t13a_counts.deferred_order_nodes;
+    // Leaves are canonical already; positive-depth ordering can be postponed
+    // until a numeric hit is known to be unusable.
+    if (depth == 0) poll();
+    auto &moves_here = depth == 0 ? prepared.legal :
+        (defer_order ? prepared.legal : moves(prepared, false));
+    if (!terminal_checked) {
+      if (auto end = terminal(ply, prepared)) return finish(std::move(*end));
+    }
     if (prepared.legal_count() == 0)
       throw std::runtime_error("ongoing node has no legal moves");
     if (!root_play_only && !raw_leaf) annotate_claims(prepared);
-    // The raw-leaf guard proves both immediate and intended claims unavailable.
     auto best = root_play_only || raw_leaf ? std::optional<Line>{} : claim(prepared);
-    if (depth > 0) {
+    if (depth > 0 && !defer_order) {
       if (ordering) {
         ordering->prepare(ordering_node,moves_here);
         ordering->apply(ordering_node,moves_here,[&]{poll();});
       }
       prefer_previous(moves_here);
     }
+    std::string deferred_hint;
+    auto tt_finish=[&](Line line) {
+      if (defer_order) {
+        ++t13a_counts.order_skipped_returns;
+        if (ordering) ordering->prepare(ordering_node,moves_here);
+      }
+      return finish(std::move(line));
+    };
     if (raw_leaf && cache && !root_play_only && !cache->numeric()) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
     }
-    if (cache && !root_play_only && (!raw_leaf || cache->numeric())) {
+    // T1.1d.2: depth-zero numeric TT probes cannot avoid recursive search.
+    // Hint-only and all positive-depth lookup behavior remain unchanged.
+    if (cache && !root_play_only && (!raw_leaf || cache->numeric()) &&
+        (!cache->numeric() || depth > 0)) {
       if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
       poll();
-      auto hit = cache->probe(evaluation_snapshot(*s), history.back(), depth, ply);
+      if(detail::audit.enabled)audit_preprobe_ns=detail::audit_clock()-audit_node_start;
+      auto hit = preprobe ? std::move(*preprobe) :
+          cache->probe(history.back(), depth, ply, *s, &node_tt_hash);
       if (!hit.hint.empty()) {
         if (raw_leaf) {
           // The table may still report a move hint for a previously searched
@@ -850,26 +996,63 @@ struct Traversal {
         } else {
           auto found = std::find_if(moves_here.begin(), moves_here.end(), [&](const auto &m) { return m.text == hit.hint; });
           if (found != moves_here.end()) {
-            if (depth > 0) std::rotate(moves_here.begin(), found, found + 1);
+            if (defer_order) deferred_hint=hit.hint;
+            else if (depth > 0) std::rotate(moves_here.begin(), found, found + 1);
             ++stats.transposition.hint_hits;
           }
         }
       }
       poll();
       if (hit.score) {
+        // Current, legally available draw claims take precedence over a
+        // history-independent losing estimate. This applies to both exact
+        // scores and alpha-beta bounds, and never trusts a cached claim action.
+        const bool claim_dominates = best &&
+          detail::cached_score_worse_than_claim(*hit.score, s->side_to_move());
+        auto &audit_row=detail::audit.depth[detail::bin(depth)];
+        auto audit_return=[&](bool bound) {
+          if(!detail::audit.enabled)return;
+          if(bound)++audit_row.bound_returns;else ++audit_row.exact_returns;
+          audit_row.preprobe_return_ns+=audit_preprobe_ns;
+          audit_row.prepare_return_ns+=prepared.audit_prepare_ns;
+        };
+        if(detail::audit.enabled && claim_dominates)++audit_row.claim_veto;
         if (hit.bound == detail::TTBound::exact) {
+          if (claim_dominates) return tt_finish(*best);
           if (best && hit.decision == best->action)
-            return finish(*best); // exact zero, claim eligibility revalidated
-          if (!exact || (depth == 0 && hit.decision && hit.decision->kind == DecisionKind::play))
-            return finish({*hit.score, hit.decision.value(), {}, PVEnd::horizon, {}});
+            return tt_finish(*best); // exact zero, claim eligibility revalidated
+          if (!exact || (depth == 0 && hit.decision && hit.decision->kind == DecisionKind::play)) {
+            audit_return(false);
+            cache->reward(hit); // actual numeric TT return, not just candidate hit
+            return tt_finish({*hit.score, hit.decision.value(), {}, PVEnd::horizon, {}});
+          }
+          if(detail::audit.enabled)++audit_row.pv_research;
           ++stats.transposition.pv_researches;
-        } else if (!exact &&
+        } else if (!exact && !claim_dominates &&
             ((hit.bound == detail::TTBound::lower && beta && *hit.score >= *beta) ||
              (hit.bound == detail::TTBound::upper && alpha && *hit.score <= *alpha))) {
           ++stats.alpha_beta_cutoffs;
           ++stats.transposition.bound_cutoffs;
-          return finish({*hit.score, hit.decision.value(), {}, PVEnd::horizon, {}});
+          audit_return(true);
+          cache->reward(hit); // bound genuinely cut off the node
+          return tt_finish({*hit.score, hit.decision.value(), {}, PVEnd::horizon, {}});
+        } else if(hit.bound!=detail::TTBound::exact && detail::audit.enabled && !claim_dominates) {
+          ++audit_row.bound_noncutoff;
         }
+      }
+    }
+    if (defer_order) {
+      moves(prepared,false);
+      if (ordering) {
+        ordering->prepare(ordering_node,moves_here);
+        ordering->apply(ordering_node,moves_here,[&]{poll();});
+      }
+      prefer_previous(moves_here);
+      if (!deferred_hint.empty()) {
+        auto found=std::find_if(moves_here.begin(),moves_here.end(),
+            [&](const auto &m) { return m.text == deferred_hint; });
+        if (found!=moves_here.end())
+          std::rotate(moves_here.begin(),found,found+1);
       }
     }
     bool white = s->side_to_move() == Side::white;
@@ -1031,7 +1214,7 @@ IterativeSearchResult iterative_search(
       if (!session->enabled()) session.reset();
     }
     r.provenance.tt_numeric_certified = session &&
-        table_use.evaluator == EvaluatorCacheCompatibility::deterministic_position;
+        table_use.evaluator != EvaluatorCacheCompatibility::not_certified;
     r.provenance.tt_value_policy = table_use.value_policy;
     // Compile-time selection changes only the representation. Normal callers need
     // no experimental activation scope; each iterative invocation owns its tree.
@@ -1163,5 +1346,19 @@ IterativeSearchResult iterative_search(
   }
   elapsed();
   return r;
+}
+// Benchmark-only instrumentation accessors (not part of public chess API).
+extern "C" int celab_t13a_config() noexcept { return t13a_mode(); }
+extern "C" void celab_t13a_reset() noexcept { t13a_counts={}; }
+extern "C" void celab_t13a_dump() noexcept {
+  std::fprintf(stderr,"CELAB_T13A_COUNTS mode=%d lazy_prepared=%llu lazy_expanded=%llu early_probes=%llu early_exact_returns=%llu early_bound_returns=%llu early_nonreturns=%llu deferred_order_nodes=%llu order_skipped_returns=%llu\n",
+    t13a_mode(),static_cast<unsigned long long>(t13a_counts.lazy_prepared),
+    static_cast<unsigned long long>(t13a_counts.lazy_expanded),
+    static_cast<unsigned long long>(t13a_counts.early_probes),
+    static_cast<unsigned long long>(t13a_counts.early_exact_returns),
+    static_cast<unsigned long long>(t13a_counts.early_bound_returns),
+    static_cast<unsigned long long>(t13a_counts.early_nonreturns),
+    static_cast<unsigned long long>(t13a_counts.deferred_order_nodes),
+    static_cast<unsigned long long>(t13a_counts.order_skipped_returns));
 }
 } // namespace chess_lab

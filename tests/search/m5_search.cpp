@@ -97,20 +97,47 @@ void context_and_bounds() {
     for(int depth:{0,1,2})check(session.probe(s,sig,depth,0).score==SearchScore::finite(depth+1),"equal-depth entries coexist");
     check(!session.probe(s,sig,3,0).score,"deeper score is not reused at different depth");
   }
-  auto reject=[&](std::vector<RepetitionSignature> history,ChessEvalPosition snapshot,bool complete,std::string_view id,uint64_t policy) {
+  // T1.1f hardening: histories never gate numeric reuse, but a generic
+  // deterministic evaluator may read halfmove/fullmove/raw-EP ABI fields.
+  auto matches=[&](std::vector<RepetitionSignature> history, ChessEvalPosition snapshot,
+                   bool complete, std::string_view id, uint64_t policy) {
     TTSession session(certified(table,policy),id,complete,stats,{});session.start(history);
-    check(!session.probe(snapshot,sig,1,0).score,"colliding incompatible context rejected");
+    return session.probe(snapshot,sig,1,0).score == SearchScore::finite(2);
   };
-  reject({sig,other},s,true,fp,1);reject({sig,sig},s,true,fp,1);
-  reject({sig},s,false,fp,1);reject({sig},s,true,changed,1);reject({sig},s,true,fp,2);
-  auto changed_snapshot=s;changed_snapshot.fullmove_number++;reject({sig},changed_snapshot,true,fp,1);
-  changed_snapshot=s;changed_snapshot.halfmove_clock++;reject({sig},changed_snapshot,true,fp,1);
-  changed_snapshot=s;changed_snapshot.en_passant_square=20;reject({sig},changed_snapshot,true,fp,1);
+  check(matches({sig,other},s,true,fp,1) &&
+        matches({sig,sig},s,true,fp,1) &&
+        matches({sig},s,false,fp,1),"history variants reuse position score");
+  check(!matches({sig},s,true,changed,1) &&
+        !matches({sig},s,true,fp,2),"evaluator and search policy still restrict numeric scores");
+  auto changed_snapshot=s;changed_snapshot.fullmove_number++;
+  check(!matches({sig},changed_snapshot,true,fp,1),"fullmove-sensitive evaluator must not reuse different fullmove");
+  changed_snapshot=s;changed_snapshot.halfmove_clock++;
+  check(!matches({sig},changed_snapshot,true,fp,1),"halfmove-sensitive evaluator must not reuse different clock");
+  changed_snapshot=s;changed_snapshot.en_passant_square=20;
+  check(!matches({sig},changed_snapshot,true,fp,1),"raw EP-sensitive evaluator must not reuse different ABI EP");
+  auto position_matches=[&](ChessEvalPosition snapshot) {
+    TTSession session({&table,EvaluatorCacheCompatibility::history_independent_position,1},
+                      fp,true,stats,{}); session.start({sig});
+    return session.probe(snapshot,sig,1,0).score == SearchScore::finite(2);
+  };
+  // An old strict entry cannot silently become a position-only entry.
+  check(!position_matches(s),"numeric certification modes must not cross-reuse");
+  table.clear();
+  {TTSession session({&table,EvaluatorCacheCompatibility::history_independent_position,1},
+                     fp,true,stats,{});session.start({sig});
+   session.store(s,sig,1,SearchScore::finite(2),TTBound::exact,{DecisionKind::play,"a1a2"},0);}
+  check(position_matches(s),"position-only evaluator reuses its own entry");
+  changed_snapshot=s;changed_snapshot.fullmove_number++;
+  check(position_matches(changed_snapshot),"certified position-only ignores fullmove");
+  changed_snapshot=s;changed_snapshot.halfmove_clock++;
+  check(position_matches(changed_snapshot),"certified position-only ignores halfmove");
+  changed_snapshot=s;changed_snapshot.en_passant_square=20;
+  check(position_matches(changed_snapshot),"certified position-only ignores raw EP");
   {
     TTSession session({&table},fp,true,stats,{});session.start({sig});
     auto hit=session.probe(s,sig,1,0);check(!hit.score && hit.hint=="a1a2","uncertified evaluators receive hints only");
   }
-  check(stats.context_rejections>0 && stats.verified_history_nodes>0,"collision verification observed");
+  check(stats.context_rejections>0 && stats.verified_history_nodes==0,"no history verification remains");
   table.clear();
   {TTSession session(certified(table),fp,true,stats,{});session.start({sig,other,sig});session.store(s,sig,1,SearchScore::finite(7),TTBound::exact,{DecisionKind::play,"a1a2"},0);}
   {TTSession session(certified(table),fp,true,stats,{});session.start({other,sig,sig});check(session.probe(s,sig,1,0).score==SearchScore::finite(7),"canonical counts permit different chronological histories");}
@@ -207,8 +234,8 @@ void memory_and_lifetime() {
   auto snap=evaluation_snapshot(*t.snapshot(*p));std::string fp(64,'a');
   {TTSession session(certified(limited),fp,true,stats,{});session.start(std::vector<RepetitionSignature>(5000,sig));
    session.store(snap,sig,1,SearchScore::finite(2),TTBound::exact,{DecisionKind::play,"a1a2"},0);
-   check(!session.probe(snap,sig,1,0).score,"oversized evidence declines numeric storage");}
-  check(limited.capacity_bytes()<=16384 && stats.skipped_stores>0,"variable history cannot exceed pool");
+   check(session.probe(snap,sig,1,0).score==SearchScore::finite(2),"numeric TT reuse ignores oversized path evidence");}
+  check(limited.capacity_bytes()<=16384 && stats.skipped_stores==0,"TT allocation independent of history length");
   TranspositionTable first(32768),second(32768);TTAccess::force_collisions(first,true);TTAccess::force_collisions(second,true);
   auto a=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(first));
   auto b=legacy_iterative_search(t,*p,h,*e,{3,true,3,true},{},{},certified(second));equal_result(a,b);
@@ -306,25 +333,25 @@ void cancellation_and_errors() {
         !owner.table.entry_count() && !owner.cleared,"predepth cancellation no speculative entries");
   CancellationSource inside;calls=0;eval_hook=[&]{if(calls==2)inside.request();};
   r=owner.run(t,*p,h,*e,{2,true,3,true},inside.token());eval_hook={};
-  check(r.status==IterativeSearchStatus::cancelled && r.unevaluated_fallback && !r.completed && owner.table.entry_count()>0 && t.balance==0 &&
-        !owner.cleared,"cancelled iteration keeps only completed leaf writes");
+  check(r.status==IterativeSearchStatus::cancelled && r.unevaluated_fallback && !r.completed && owner.table.entry_count()==0 && t.balance==0 &&
+        !owner.cleared,"cancelled iteration leaves no depth-zero numeric entries");
   equal_result(owner.run(t,*p,h,*e,{2,true,3,true}),reference);
   owner.table.clear();CancellationSource later;int events=0;
   r=owner.run(t,*p,h,*e,{3,true,3,true},later.token(),[&](CompletedDepth){++events;eval_hook=[&]{later.request();};});eval_hook={};
-  check(r.status==IterativeSearchStatus::cancelled && r.completed->depth==1 && events==1 && owner.table.entry_count()>0 && t.balance==0,"cancelled later depth retains committed result/cache");
+  check(r.status==IterativeSearchStatus::cancelled && r.completed->depth==1 && events==1 && owner.table.entry_count()==0 && t.balance==0,"cancelled later depth retains committed result");
   owner.table.clear();fail_at=0;e=evaluator();
   r=owner.run(t,*p,h,*e,{3,true,3,true},{},[&](CompletedDepth){fail_at=calls+1;});
   check(r.status==IterativeSearchStatus::evaluator_failed && !r.completed && !r.unevaluated_fallback && !e->usable() &&
-        owner.cleared && owner.retained_before_clear>0 && !owner.table.entry_count() && t.balance==0,"owner clears after late provider failure, engine retained writes until return");
+        owner.cleared && owner.retained_before_clear==0 && !owner.table.entry_count() && t.balance==0,"owner clears after late provider failure, before positive-depth stores");
   check(unrelated.table.entry_count()==untouched,"failure clearing leaves independent owner untouched");
   auto dispatched=calls;
   r=owner.run(t,*p,h,*e,{2,true,3,true});check(r.status==IterativeSearchStatus::evaluator_failed && calls==dispatched,"quarantine cannot be bypassed by cache");
   fail_at=0;e=evaluator();owner.cleared=false;
   r=owner.run(t,*p,h,*e,{2,true,3,true},{},[](CompletedDepth){throw EvaluationError("callback failure");});
-  check(r.status==IterativeSearchStatus::search_error && !r.completed && e->usable() && owner.cleared && owner.retained_before_clear>0 && !owner.table.entry_count(),"callback exception is search error; owner clears after release");
+  check(r.status==IterativeSearchStatus::search_error && !r.completed && e->usable() && owner.cleared && owner.retained_before_clear==0 && !owner.table.entry_count(),"callback exception is search error; owner clears after release");
   owner.cleared=false;
   r=owner.run(t,*p,h,*e,{2,true,3,true},{},[&](CompletedDepth){t.throw_at=2;});t.throw_at=-1;
-  check(r.status==IterativeSearchStatus::search_error && !r.completed && e->usable() && owner.cleared && owner.retained_before_clear>0 && t.balance==0,"traversal error controller clears, root unwinds");
+  check(r.status==IterativeSearchStatus::search_error && !r.completed && e->usable() && owner.cleared && owner.retained_before_clear==0 && t.balance==0,"traversal error controller clears, root unwinds");
   check(unrelated.table.entry_count()==untouched && t.id(*p)==0 && h.matches_root(t,*p),"all failures isolate caller and unrelated tables");
   std::cout<<"cancellation commit/write boundaries and controller-owned failure clearing/quarantine passed\n";
 }
@@ -392,28 +419,94 @@ void hintless_storage_retains_hints() {
   table.clear();stats={};
   {
     TTSession session(certified(table),fingerprint,true,stats,{});session.start({signature});
-    int depth=0;
-    for(const auto&decision:hintless){
-      session.store(snapshot,signature,depth,SearchScore::finite(3),TTBound::exact,decision,0);
-      auto hit=session.probe(snapshot,signature,depth++,0);
-      check(hit.score==SearchScore::finite(3)&&hit.decision==decision,"certified hintless PLAY/claim/terminal values remain stored and retrievable");
+    for(const auto&decision:hintless) {
+      session.store(snapshot,signature,1,SearchScore::finite(3),TTBound::exact,decision,0);
     }
-    check(stats.stores==4&&stats.skipped_stores==0,"certified hintless writes retain original public statistics");
+    check(stats.stores==0 && table.entry_count()==0,
+          "TT never records history-dependent claim or terminal decisions");
+    session.store(snapshot,signature,1,SearchScore::finite(3),TTBound::exact,
+                  {DecisionKind::play,"e2e4"},0);
+    check(session.probe(snapshot,signature,1,0).score==SearchScore::finite(3),
+          "real PLAY scores are still numerically reusable");
   }
   const auto retained=table.entry_count();TranspositionStatistics hints;
   {
     TTSession session({&table},fingerprint,true,hints,{});session.start({signature});
-    for(const auto&decision:hintless)session.store(snapshot,signature,0,SearchScore::finite(0),TTBound::exact,decision,0);
+    for(const auto&decision:hintless)
+      session.store(snapshot,signature,0,SearchScore::finite(0),TTBound::exact,decision,0);
   }
-  check(hints.stores==0&&hints.skipped_stores==0&&hints.evictions==0&&table.entry_count()==retained,"hint-only suppression preserves prior numeric entries in mixed-mode reuse");
-  {
-    TTSession session(certified(table),fingerprint,true,stats,{});session.start({signature});
-    check(session.probe(snapshot,signature,0,0).score==SearchScore::finite(3),"numeric hintless value survives intervening hint-only attempts");
-  }
+  check(hints.stores==0 && table.entry_count()==retained,
+        "hintless attempts cannot displace useful numeric entries");
   std::cout<<"hintless suppression, collision retention, mixed numeric reuse and validation passed\n";
+}
+// Hardening: history-independent numeric scores must never override a locally
+// legal 50-move claim (current or with an intended move). Exercise actual
+// positive-depth TT probes and alpha/beta bounds with both colors.
+void local_draw_claim_dominance() {
+  check(cached_score_worse_than_claim(SearchScore::finite(-1),Side::white) &&
+        cached_score_worse_than_claim(SearchScore::finite(+1),Side::black) &&
+       !cached_score_worse_than_claim(SearchScore::finite(+1),Side::white) &&
+       !cached_score_worse_than_claim(SearchScore::finite(-1),Side::black) &&
+       !cached_score_worse_than_claim(SearchScore::finite(0),Side::white) &&
+       !cached_score_worse_than_claim(SearchScore::finite(0),Side::black) &&
+        cached_score_worse_than_claim(SearchScore::black_mate(3),Side::white) &&
+        cached_score_worse_than_claim(SearchScore::white_mate(3),Side::black),
+        "cached claim guard handles both colors, exact zero, and mates");
+  for(bool white_claimant:{false,true})for(bool intended:{false,true})
+      for(bool bounded:{false,true}) {
+    // Root move a1a2 establishes an alpha/beta window; the second move
+    // reaches the claimant at remaining depth 1 with an unrelated cached
+    // losing score. Without the safeguard, it could be accepted immediately.
+    const Side root_side=white_claimant?Side::black:Side::white;
+    const Side claimant=white_claimant?Side::white:Side::black;
+    Tree t;
+    t.nodes={{root_side,{1,2}},{claimant,{3}},
+             {claimant,{4},PositionStatus::ongoing,static_cast<uint32_t>(intended?99:100)},
+             {root_side,{3}},{root_side,{4},PositionStatus::ongoing,static_cast<uint32_t>(intended?100:0)}};
+    tree_values=true;
+    const double first = bounded?(root_side==Side::white?+10:-10):
+                                 (root_side==Side::white?-3:+3);
+    const double losing=white_claimant?-9:+9;
+    values={0,0,0,first,losing};
+    auto root=t.initial_position();auto history=GameHistory::starting_at(t,*root,true);
+    auto e=evaluator();
+    TranspositionTable table(256*1024);auto use=certified(table);
+    auto second=t.clone(*root);auto move=t.decode_move(*second,"b1a2");
+    auto undo=t.make_move(*second,*move);
+    auto sig=repetition_signature(t,*second);
+    auto snap=evaluation_snapshot(*t.snapshot(*second));
+    TranspositionStatistics seed;
+    {
+      TTSession session(use,e->identity().fingerprint,history.complete(),seed,{});
+      session.start({history.occurrences().back(),sig});
+      const auto bound=bounded?(white_claimant?TTBound::lower:TTBound::upper):TTBound::exact;
+      session.store(snap,sig,1,SearchScore::finite(bounded? (white_claimant?-9:+9):losing),
+                    bound,{DecisionKind::play,"a1a2"},1);
+    }
+    t.undo_move(*second,*undo);
+    auto r=iterative_search(t,*root,history,*e,{2,true,1,true,true},{},{},use);
+    check(r.status==IterativeSearchStatus::depth_reached && r.completed &&
+          r.completed->depth==2 && t.balance==0 && history.matches_root(t,*root),
+          "hardening claim position completes and restores search");
+    check(r.statistics.transposition.exact_hits+r.statistics.transposition.bound_hits>0,
+          "hardening claim fixture reached a numeric TT hit");
+    if(bounded) {
+      check(r.statistics.transposition.bound_cutoffs==0,
+            "locally losing TT bound must not cause a cutoff");
+      check(r.completed->best.decision.move=="a1a2" &&
+            r.completed->best.score==SearchScore::finite(first),
+            "claim-aware search preserves selected root continuation after bad bound");
+    } else {
+      check(r.completed->best.decision.move=="b1a2" &&
+            r.completed->best.score==SearchScore::finite(0),
+            "claiming player must not accept cached losing score");
+    }
+  }
+  tree_values=false;values.clear();
+  std::cout<<"positive-depth TT exact/bound claim dominance for both sides and intended claims passed\n";
 }
 int main(int argc,char**argv) try {
   if(argc>1)digest=argv[1];
-  generated();context_and_bounds();mate_races();real_rules();memory_and_lifetime();cancellation_inside_tt_verification();cancellation_and_errors();ordered_trap_and_certification();hintless_storage_retains_hints();
+  generated();context_and_bounds();mate_races();real_rules();memory_and_lifetime();cancellation_and_errors();ordered_trap_and_certification();hintless_storage_retains_hints();local_draw_claim_dominance();
   std::cout<<"M5 transposition table passed\n";
 } catch(const std::exception&e){std::cerr<<"M5 failure: "<<e.what()<<'\n';return 1;}
