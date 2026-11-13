@@ -78,7 +78,8 @@ void same(const SearchVariation &a,const SearchVariation &b) {
   check(a.decision==b.decision && a.score==b.score && a.principal_variation==b.principal_variation &&
         a.pv_end==b.pv_end && a.pv_intended_move==b.pv_intended_move,"single-PV exact PLAY/score/canonical PV/termination");
 }
-void compare(const ChessCore &c,const Position &p,const GameHistory &h,int depth,bool ci_tt=false) {
+void compare(const ChessCore &c,const Position &p,const GameHistory &h,int depth,
+             bool ci_tt=false, bool expect_numeric_reuse=true) {
   Checkpoint comparison("compare depth="+std::to_string(depth));
   auto reference_evaluator=evaluator();std::vector<CompletedDepth> reference;
   Checkpoint reference_time("legacy exhaustive reference");++search_count;
@@ -121,7 +122,23 @@ void compare(const ChessCore &c,const Position &p,const GameHistory &h,int depth
         auto warm=verify(*e,ordering,use);
         check(cold.statistics.transposition.lookups>0&&warm.statistics.transposition.lookups>0,"CI cold/warm cache exercised");
         if(mode==1)check(!warm.statistics.transposition.exact_hits&&!warm.statistics.transposition.bound_hits,"hint-only cannot use numeric hits");
-        else check(warm.statistics.transposition.exact_hits+warm.statistics.transposition.bound_hits>0,"certified warm numeric hits exercised");
+        else if (expect_numeric_reuse) {
+          // Explicit positive control: numeric entries must have been stored
+          // and must actually be reused on the warmed search.
+          check(cold.statistics.transposition.stores>0,
+                "certified numeric control stores positive-depth PLAY entries");
+          check(warm.statistics.transposition.exact_hits+warm.statistics.transposition.bound_hits>0,
+                "certified warm numeric hits exercised");
+        } else {
+          // Near the fifty-move boundary, all searched positive-depth
+          // continuations here are claim-bearing; TT stores only PLAY, and
+          // T1.1d.2 disables depth-zero stores. No numeric entry is eligible.
+          const auto &ct=cold.statistics.transposition;
+          const auto &wt=warm.statistics.transposition;
+          check(ct.stores==0 && wt.stores==0 &&
+                wt.candidate_hits==0 && wt.exact_hits==0 && wt.bound_hits==0,
+                "claim-only numeric fixture stores/reuses no ineligible TT entry");
+        }
         reverse(*e,ordering,use); // optimized -> legacy
         verify(*e,ordering,use);  // legacy -> optimized
         reverse(*e,ordering,use);
@@ -687,7 +704,11 @@ int main(int argc,char **argv)try {
     for(double value:{-3.0,0.0,3.0}){
       if(ci_matrix&&value!=0)continue;
       Checkpoint score("value="+std::to_string(value));constant=value;
-      compare(*c,*p,h,2,ci_matrix&&(case_number==5||case_number==8));score.finish();
+      // Case 5 (legal EP): positive numeric reuse control.
+      // Case 8 (99 halfmoves): only claim-bearing continuations, so no stored
+      // positive-depth PLAY entries; verify the no-reuse safety boundary.
+      compare(*c,*p,h,2,ci_matrix&&(case_number==5||case_number==8),
+              case_number!=8);score.finish();
     }
     fixture.finish();
   }
