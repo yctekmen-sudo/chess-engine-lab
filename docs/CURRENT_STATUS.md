@@ -17,15 +17,26 @@ Git hashes exactly. Source evidence: `CELab-C1-evidence-c169e35d(4).zip`,
 `CELab-C2-evidence-c252a530(1).zip`, and
 `CELab-C3-evidence-c3952dd8.zip`.
 
-Exploratory Windows/WSL Release/Debug and five-TT-mode results support
-throughput gains with unchanged observed nodes/evaluations/TT metrics/PV
-checksums. A *direct* paired benchmark of the final clean committed integration
-against `origin/main` on the same host/toolchain and the separate 54-gate
-Full CI have **not** been performed. See
+Draft PR #49 (`feature/c1-c2-c3-accepted-stack`) contains the accepted
+C1+C2+C3-B implementation, benchmarked as clean committed source
+`fb25990f3b8a32114d916fcd3f67783fb0a3d604` (tree
+`92a9d2d70c0c0d855e5a41f9d0b5940cf298d2f6`). The direct
+same-host/same-toolchain benchmark against merged `origin/main` completed
+2026-11-14: `CELab-Cstack-direct-evidence-cs8c6589.zip`.
+Windows / Linux TT-off elapsed time saved **15.84% / 19.71%** and numeric
+cold **15.88% / 18.45%**; all five TT modes and all 11 workloads improved
+by median on both platforms. There were 660/660 raw benchmark observations,
+184/184 native CTest executions, zero reported or independently observed
+per-run search-result/TT/node mismatches, and 1471/1471 matching evidence
+SHA-256 manifest entries. See
 [`c-stack-integration-performance.md`](c-stack-integration-performance.md)
-for carefully labeled staged A/B evidence, provisional cross-session
-comparison and outstanding acceptance gates. Draft PR publication does not
-authorize Full CI, merge or change of the baseline/reference.
+for exact summed-median methodology, per-mode comparison and Perft5 outliers.
+
+**Still pending:** full clean committed 54-gate Windows/WSL/controller/GUI/WASM
+CI and its historical-reference review, followed by separate merge approval.
+The post-benchmark performance/status documentation updates change Git commit
+but not the benchmarked engine source. Draft publication does not authorize
+Full CI, merge or reference replacement.
 
 ## T1 accepted TT integration — 2026-11-13: isolated validation passed, PR preparation authorized
 
