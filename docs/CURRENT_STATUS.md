@@ -1,5 +1,32 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## C1+C2+C3 accepted stack — 2026-11-14: draft integration candidate
+
+C1 (packed UCI text comparison, conditional canonical resort, promotion validation),
+C2-A (guarded exact native-type dispatch), C2-B (snapshot bitboard accumulation),
+C3-A (cheap repetition-identity fields first), and C3-B (same ordering plus
+one-byte piece-array memcmp) are **accepted experiments**. The stacked
+integration uses **C3-B, which incorporates C3-A**, not two competing equality
+operators. No previous B4/T1 accepted defaults are changed.
+
+The stack is based on merged T1 main commit
+`072032c0d086dbe37a5b7afd796424b283f0ba53`, tree
+`dc1d2d03482fc8c1401ed3172c3c0b18a680bd23`.
+Five source blobs match the independently validated C3-B combined-overlay
+Git hashes exactly. Source evidence: `CELab-C1-evidence-c169e35d(4).zip`,
+`CELab-C2-evidence-c252a530(1).zip`, and
+`CELab-C3-evidence-c3952dd8.zip`.
+
+Exploratory Windows/WSL Release/Debug and five-TT-mode results support
+throughput gains with unchanged observed nodes/evaluations/TT metrics/PV
+checksums. A *direct* paired benchmark of the final clean committed integration
+against `origin/main` on the same host/toolchain and the separate 54-gate
+Full CI have **not** been performed. See
+[`c-stack-integration-performance.md`](c-stack-integration-performance.md)
+for carefully labeled staged A/B evidence, provisional cross-session
+comparison and outstanding acceptance gates. Draft PR publication does not
+authorize Full CI, merge or change of the baseline/reference.
+
 ## T1 accepted TT integration — 2026-11-13: isolated validation passed, PR preparation authorized
 
 The eight approved optimizations (T1.1a, T1.1d.2 C, T1.1fH, T1.1h C,

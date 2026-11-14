@@ -7,20 +7,24 @@
 #include <charconv>
 #include <limits>
 #include <sstream>
+#include <typeinfo>
+#include <type_traits>
 #include <stdexcept>
 
 namespace chess_lab {
 namespace {
 [[noreturn]] void invalid() { throw std::invalid_argument("Invalid chess object, FEN, move or undo order"); }
+// Exact-type dispatch is equivalent to dynamic_cast for final native types.
+// Synthetic/mismatched objects must still be rejected by invalid().
 template<class T, class B> const T& cast(const B& b) {
-    auto p = dynamic_cast<const T*>(&b);
-    if (!p) invalid();
-    return *p;
+    static_assert(std::is_final_v<T>, "C2 exact-type dispatch requires final target");
+    if (typeid(b) != typeid(T)) invalid();
+    return static_cast<const T&>(b);
 }
 template<class T, class B> T& cast(B& b) {
-    auto p = dynamic_cast<T*>(&b);
-    if (!p) invalid();
-    return *p;
+    static_assert(std::is_final_v<T>, "C2 exact-type dispatch requires final target");
+    if (typeid(b) != typeid(T)) invalid();
+    return static_cast<T&>(b);
 }
 struct Metadata {
     std::optional<std::uint8_t> ep;
@@ -262,7 +266,10 @@ public:
 std::unique_ptr<ChessCore> create_chess_core() { return std::make_unique<Core>(); }
 // Search-internal adapter dispatch; synthetic ChessCore fixtures retain their
 // existing status and clock-transition semantics.
-bool native_chess_core(const ChessCore& c) noexcept { return dynamic_cast<const Core*>(&c)!=nullptr; }
+bool native_chess_core(const ChessCore& c) noexcept {
+    static_assert(std::is_final_v<Core>, "C2 native dispatch requires final Core");
+    return typeid(c) == typeid(Core);
+}
 // Private search capability: complete generation without boxing unused moves.
 // Neither native move values nor certificates escape the current position frame.
 std::size_t native_legal_move_count(const ChessCore& c, const Position& p) {
@@ -362,7 +369,9 @@ bool native_try_skip_claim_probe(const ChessCore& core, Position& position,
             ordinal >= batch->size) return false;
         move = chess::Move(batch->identities[ordinal]);
     } else {
-        const auto* m = dynamic_cast<const Mv*>(eager);
+        static_assert(std::is_final_v<Mv>, "C2 eager move requires final Mv");
+        const auto* m = eager && typeid(*eager) == typeid(Mv)
+            ? static_cast<const Mv*>(eager) : nullptr;
         if (!m || !certified(p, *m)) return false;
         move = m->value;
     }
