@@ -1,12 +1,8 @@
 # C1 + C2 + C3 integration: comparison to origin/main
 
-**Status (2026-11-14): DRAFT / pre-integration direct A/B not yet performed.**
-The `origin/main` reference is frozen at
-`072032c0d086dbe37a5b7afd796424b283f0ba53` (merged T1, tree
-`dc1d2d03482fc8c1401ed3172c3c0b18a680bd23`).
-This document is the draft PR performance comparison; **do not treat the
-indicative cumulative percentages below as directly measured integration
-speedups**. The final head needs same-host direct A/B before merge.
+**Status (2026-11-14): Direct committed-source A/B complete; 54-gate Full CI pending.**
+The frozen `origin/main` commit, exact benchmarked PR implementation commit,
+and Windows/WSL raw evidence are recorded below. Draft PR #49 remains unmerged.
 
 ## Accepted, exact source stack
 
@@ -25,37 +21,36 @@ The five source blobs in the draft branch exactly match the C3-B experimental
 overlay in `CELab-C3-evidence-c3952dd8.zip` (verified Git blob identities).
 No rejected TT or malformed-move patch from Claude is included.
 
-## Preliminary origin/main comparison: chained A/B ratios (NOT direct A/B)
+## Direct committed-head A/B vs origin/main — verified
 
-Each stage used the same nine base workloads, five TT policies, and three
-fresh-process runs per workload/mode/variant on a common platform, measuring
-**sums of nine per-workload median elapsed times**. Ratios are measured *within*
-each stage: T1 -> C1; C1 -> C1+C2; C1+C2 -> C1+C2+C3-B.
-The displayed percentages multiply those three independent ratios:
-`100 * (1 - R_C1 * R_C2 * R_C3B)`.
+The performance benchmark compared the **exact clean committed source revisions**:
+- Reference `origin/main`: `072032c0d086dbe37a5b7afd796424b283f0ba53` (tree `dc1d2d03482fc8c1401ed3172c3c0b18a680bd23`).
+- Accepted C1+C2+C3-B implementation: `fb25990f3b8a32114d916fcd3f67783fb0a3d604` (tree `92a9d2d70c0c0d855e5a41f9d0b5940cf298d2f6`).
+- Evidence: `CELab-Cstack-direct-evidence-cs8c6589.zip`, 2026-11-14, externally archived; **1471/1471** SHA-256 manifest entries verified. Any later documentation-only PR commit does not modify the exact tested engine source.
 
-Because these were **different sessions** and not a single contemporaneous
-T1-vs-final-stack run, hardware conditions, compiler/linker and run-to-run
-variance can bias this calculation. It is a directional, **inferred comparison**,
-not the required authoritative integration benchmark.
+Eleven comparable workloads (nine original + TwofoldReplay d4 and LongHistory16 d4), five TT modes, three interleaved **fresh-process** samples per variant/mode/workload on **each** platform: **660/660 observed benchmark runs**. Both platforms used separate clean exact-commit trees and a common platform-local material evaluator binary for baseline and candidate. Release binaries were uninstrumented; C1/C2/C3 optional experimental controls were not enabled.
 
-| TT mode | Windows inferred time saved vs origin/main | WSL Linux inferred time saved vs origin/main |
-|---|---:|---:|
-| Off | ~16.55% | ~18.42% |
-| Hint-only cold | ~16.71% | ~20.82% |
-| Hint-only warm | ~19.11% | ~26.35% |
-| Numeric cold | ~15.05% | ~20.64% |
-| Numeric warm | ~18.33% | ~23.58% |
+### Direct performance, per-platform sum of eleven workload medians
 
-The nine common workloads are Initial d7, Italian d5, Kiwipete d6
-(8 MiB and 64 MiB), Perft5 Checks d5, Perft6 Middlegame d5,
-QueenMate d5, Sicilian d5, and ThreefoldReplay d3.
-C3 also tested TwofoldReplay d4 and LongHistory16 d4, which are
-**excluded from these nine-workload inferred cumulative ratios**.
+**Positive time saved means the candidate is faster.** Each entry is the ratio of *sums of eleven workload medians*, not mean of percentage changes or a typical-game gain.
 
-The warm numeric mode is a synthetic same-root prepopulated TT and is *not*
-a representative gameplay throughput estimate. Positive values represent lower
-elapsed time; no claim is made of improved playing strength or node reduction.
+| TT mode | Windows baseline ms | Windows PR ms | Windows time saved | WSL baseline ms | WSL PR ms | WSL time saved |
+|---|---:|---:|---:|---:|---:|---:|
+| Off | 10,198.8 | 8,583.2 | **15.84%** | 8,772.8 | 7,043.8 | **19.71%** |
+| Hint-only cold | 8,362.4 | 6,941.5 | **16.99%** | 7,100.9 | 5,701.4 | **19.71%** |
+| Hint-only warm | 3,087.7 | 2,552.7 | **17.33%** | 2,611.9 | 2,010.9 | **23.01%** |
+| Numeric cold | 7,137.0 | 6,003.9 | **15.88%** | 6,137.7 | 5,005.4 | **18.45%** |
+| Numeric warm | 41.7 | 35.8 | **14.29%** | 35.9 | 28.7 | **19.81%** |
+
+Effective NPS ratios at identical visited-node counts: Windows **1.188x** TT-off / **1.189x** numeric cold; WSL **1.246x** TT-off / **1.226x** numeric cold. These are aggregate ratios using summed medians, not instrumented per-node CPU profiles.
+
+**All 55/55 per-workload TT-mode medians improved on Windows and all 55/55 on WSL**, including the earlier C2/C3 Perft5 cold-mode watchpoint. Windows Perft5 Checks d5 numeric-cold: **293.61 to 284.96 ms (2.95% reduction)**; hint-cold: **383.67 to 295.23 ms (23.05% reduction)**. WSL Perft5 numeric-cold: **259.48 to 211.16 ms (18.62% reduction)**; hint-cold: **295.78 to 239.83 ms (18.92% reduction)**. Three-run medians do not guarantee every run or host improves; Windows Perft5 cold samples retain variability.
+
+**Search semantics:** 330 paired raw benchmark observations per platform, zero mismatches for visited nodes, evaluator calls, alpha-beta/TT counters, best move, PV and checksum (660 observations total, 330 paired pairs). No observed search-node reductions; improvements reflect faster identical search work. Reference and candidate evaluator fingerprints and artifacts matched *within* each platform; platform-specific artifacts differ appropriately.
+
+**Local native validation:** baseline and candidate both passed 23/23 native tests in Release and Debug on Windows and WSL: **184/184 native CTest executions**. All standalone C1 packed-key, C2 dispatch/snapshot, and C3 repetition-signature parity checks passed on both platform variants (12/12 executions). These checks include malformed/key text controls, 30,000 synthetic board fixtures and 100,000 randomized repetition pairs. Clean exact source SHA/tree checks matched on both platforms.
+
+**Caveats:** Synthetic numeric warm reuses a pre-populated identical root and should never be extrapolated to full-game performance. Windows process CPU time is coarse, especially sub-millisecond warm runs; the principal comparable measure is wall elapsed time. Eleven chosen search workloads cannot establish playing-strength gains, generalize to every time control or eliminate host variance.
 
 ## Measured incremental performance and audit provenance
 
@@ -75,35 +70,30 @@ evidence, not GitHub CI attachments.
 - C2 exploratory Windows/WSL native and 945/945 benchmark observations passed.
 - C3 exploratory Windows/WSL native and 990/990 benchmark observations passed.
 - All stage-local comparable results preserved best move, PV checksum, nodes,
-  evaluator calls and TT statistics. No final-stack-vs-main full direct
-  comparison has yet been observed.
-- **Adverse case**: Windows Perft5 Checks hint-cold C3-B vs C2 was ~10.22%
+  evaluator calls and TT statistics. The subsequent direct committed-head A/B
+  above supersedes any inferred cumulative percentage.
+- **Historical stage-local adverse case (superseded by direct comparison): Windows Perft5 Checks hint-cold C3-B vs C2 was ~10.22%
   slower by three-run median (295.03 -> 325.18 ms) while Linux improved.
   C2 Windows Perft5 hint-cold and numeric-cold also regressed on their
   stage-local medians; retain these explicit watchpoints.
 
-## Mandatory direct integration benchmark and release gate
+## Remaining release gate — authoritative Full CI
 
-Before marking this draft PR ready for review/merge:
+The **direct integrated A/B requirement is completed and verified** on the
+clean committed code revision identified above. It does **not** substitute for
+full-system integration qualification, and the documentation-only update made
+after benchmarking requires use of the final clean PR head in Full CI.
 
-1. Check out the **exact frozen `origin/main` commit** and **the exact
-   committed PR head** in separate, clean, short-path source trees. Confirm
-   HEAD/tree, source/patch hashes, toolchain, build type and evaluator binary.
-2. Run fresh native Release builds and complete relevant CTest suites on both
-   Windows 11 and WSL Ubuntu 24.04. Reuse the **same evaluator binary** between
-   baseline and candidate on each platform.
-3. Run directly paired/interleaved **all five TT modes**: off, hint-only
-   cold/warm, numeric cold/warm, with at least the original nine workloads,
-   plus the two additional history controls. Three or more independent
-   process runs per variant/workload/mode, raw wall/CPU time and effective NPS.
-4. Require equal nodes, evaluator calls, full PV/checksum, legal best moves,
-   and relevant TT metrics; publish per-position medians/negative outliers,
-   particularly Windows Perft5 cold modes. Retain complete raw logs and source
-   manifests; do not aggregate sub-millisecond warm timing as gameplay speed.
-5. After separately authorized **clean committed Full CI**, run the existing
-   model-free `scripts/validation/full-ci.ps1 -PlanOnly` and then one 54-gate
-   `scripts/validation/full-ci.ps1` invocation. Review any
-   `reference_review_required` outcome rather than automatically replacing
-   the historical reference. No GitHub-hosted CI or unapproved merge.
+- [x] Direct Windows/WSL baseline-vs-PR-source A/B, 11 workloads, five modes, repeated runs, complete logs/hashes and adverse-outlier review.
+- [x] Native Release and Debug CTest 23/23 for both revisions on each platform, plus targeted C1/C2/C3 parity tests.
+- [ ] Obtain separate user approval for clean-commit model-free Full CI; run
+  `scripts/validation/full-ci.ps1 -PlanOnly`, then the existing **54-gate**
+  `scripts/validation/full-ci.ps1` exactly once. Validate Windows+WSL,
+  GUI/controller, WASM, deterministic records, source/evaluator fingerprints,
+  and all reference exceptions.
+- [ ] Independently review CI results, including any
+  `reference_review_required` (exit 2); do not silently rewrite the sealed
+  historical reference or add GitHub-hosted CI.
+- [ ] Obtain separate user approval for merge. Draft status remains.
 
-No direct benchmark result or Full CI status is claimed by this document.
+**No authoritative Full CI or playing-strength claim is made here.**
