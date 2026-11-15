@@ -242,7 +242,7 @@ void batch_ordered_moves_into(
     const detail::NativeBatchEncoder encoder(c, p, batch);
     for (std::size_t i = 0; i < count; ++i) {
       if (i && token) detail::tt_poll(*token);
-      OrderedMove move{encoder.encode(i), {}};
+      OrderedMove move{encoder.encode_compact(i), {}};
       move.native_ordinal = static_cast<std::uint16_t>(i);
       result.push_back(std::move(move));
     }
