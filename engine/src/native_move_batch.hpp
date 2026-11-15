@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chess_lab/chess_core.hpp>
+#include "search/compact_uci_text.hpp" // Native search-private in-record UCI.
 #include <cstddef>
 
 // Adapter-private capabilities. No native chess-library types or executable
@@ -26,6 +27,9 @@ public:
   NativeBatchEncoder(const NativeBatchEncoder &) = delete;
   NativeBatchEncoder &operator=(const NativeBatchEncoder &) = delete;
   std::string encode(std::size_t ordinal) const;
+  // Avoid constructing temporary std::string in search's native-batch path.
+  // Keep encode() unchanged for independent reference/certificate tests.
+  CompactUciText encode_compact(std::size_t ordinal) const;
 
 private:
   const Position &position_;

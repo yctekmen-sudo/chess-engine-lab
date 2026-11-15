@@ -181,6 +181,26 @@ std::string native_move_to_uci(chess::Move move) {
     if (promotion) text[4] = "pnbrqk"[int(move.promotionType())];
     return std::string(text, promotion ? 5 : 4);
 }
+// C4.3: identical native castling/promotion normalization, written straight
+// into the search-private eight-byte UCI record without an intermediate string.
+// CompactUciText's remaining bytes start zeroed, retaining its raw-word
+// equality and lexical-order invariants.
+detail::CompactUciText native_move_to_compact_uci(chess::Move move) {
+    const auto from = move.from();
+    auto to = move.to();
+    if (move.typeOf() == chess::Move::CASTLING)
+        to = chess::Square(to > from ? chess::File::FILE_G : chess::File::FILE_C,
+                           from.rank());
+    detail::CompactUciText text;
+    text.bytes[0] = char('a' + from.index() % 8);
+    text.bytes[1] = char('1' + from.index() / 8);
+    text.bytes[2] = char('a' + to.index() % 8);
+    text.bytes[3] = char('1' + to.index() / 8);
+    const bool promotion = move.typeOf() == chess::Move::PROMOTION;
+    if (promotion) text.bytes[4] = "pnbrqk"[int(move.promotionType())];
+    text.length = static_cast<std::uint8_t>(promotion ? 5 : 4);
+    return text;
+}
 class Core final : public ChessCore {
 public:
     std::unique_ptr<Position> initial_position() const override { return load_fen(chess::constants::STARTPOS); }
@@ -432,6 +452,14 @@ std::string NativeBatchEncoder::encode(std::size_t ordinal) const {
     if (batch_.invalidated || batch_.owner != p.identity || batch_.top != p.top ||
         ordinal >= batch_.size) invalid();
     return native_move_to_uci(chess::Move(batch_.identities[ordinal]));
+}
+CompactUciText NativeBatchEncoder::encode_compact(std::size_t ordinal) const {
+    // The binding proved the final native type. Every member still receives
+    // the same owner/frame/invalidation/ordinal certificate checks as encode().
+    const auto& p = static_cast<const Pos&>(position_);
+    if (batch_.invalidated || batch_.owner != p.identity || batch_.top != p.top ||
+        ordinal >= batch_.size) invalid();
+    return native_move_to_compact_uci(chess::Move(batch_.identities[ordinal]));
 }
 std::unique_ptr<Move> materialize_native_batch_member(
     const ChessCore& core, const Position& position, const NativeMoveBatch& batch,

@@ -61,6 +61,7 @@ void encoder_guards() {
   auto rejects=[&](const ChessCore &core,const Position &pos,const detail::NativeMoveBatch &b,std::size_t i){
     check(rejected([&]{detail::encode_native_batch_member(core,pos,b,i);})==message,"checked rejection message");
     check(rejected([&]{detail::NativeBatchEncoder e(core,pos,b);(void)e.encode(i);})==message,"bound rejection matches reference");
+    check(rejected([&]{detail::NativeBatchEncoder e(core,pos,b);(void)e.encode_compact(i);})==message,"compact bound rejection matches reference");
   };
   ForeignCore foreign(*c); ForeignPosition position;
   rejects(foreign,*p,*batch,0); rejects(*c,position,*batch,0);
@@ -70,14 +71,16 @@ void encoder_guards() {
   auto undo=c->make_move(*p,*m);rejects(*c,*p,*batch,0);
   c->undo_move(*p,*undo);
   { detail::NativeBatchEncoder e(*c,*p,*batch);
-    check(e.encode(0)==detail::encode_native_batch_member(*c,*p,*batch,0),"strict undo restores original frame"); }
+    check(e.encode(0)==detail::encode_native_batch_member(*c,*p,*batch,0),"strict undo restores original frame");
+    check(e.encode_compact(0).view()==detail::encode_native_batch_member(*c,*p,*batch,0),"compact strict undo restores original frame"); }
   check(rejected([&]{c->undo_move(*p,*undo);})==message,"consumed undo rejected");
   c->reset(*p,c->export_fen(*p)); rejects(*c,*p,*batch,0);
   batch=detail::prepare_native_move_batch(*c,*p);
   // Adversarial invalidation between members must be checked again, not cached.
   { detail::NativeBatchEncoder e(*c,*p,*batch);(void)e.encode(0);
     detail::invalidate_native_move_batch(*batch);
-    check(rejected([&]{(void)e.encode(1);})==message,"per-member invalidation retained"); }
+    check(rejected([&]{(void)e.encode(1);})==message,"per-member invalidation retained");
+    check(rejected([&]{(void)e.encode_compact(1);})==message,"compact per-member invalidation retained"); }
   rejects(*c,*p,*batch,0);
   // A destroyed owner's shared identity cannot authenticate a fresh position.
   batch=detail::prepare_native_move_batch(*c,*p);
@@ -147,7 +150,15 @@ void native_case(const char *fen, bool castle=false, bool ep=false, bool promoti
   auto batch=detail::prepare_native_move_batch(*c,*p);
   { detail::NativeBatchEncoder encoder(*c,*p,*batch);
     for(std::size_t i=0;i<detail::native_move_batch_size(*batch);++i)
-      check(encoder.encode(i)==detail::encode_native_batch_member(*c,*p,*batch,i),"bound full UCI matches checked reference"); }
+      check(encoder.encode(i)==detail::encode_native_batch_member(*c,*p,*batch,i),"bound full UCI matches checked reference");
+    for(std::size_t i=0;i<detail::native_move_batch_size(*batch);++i) {
+      auto compact=encoder.encode_compact(i);
+      check(compact.view()==detail::encode_native_batch_member(*c,*p,*batch,i),"compact UCI equals checked reference");
+      check(compact.size()==4 || compact.size()==5,"compact UCI canonical length");
+      for(std::size_t j=compact.size();j<compact.bytes.size();++j)
+        check(compact.bytes[j]=='\0',"compact UCI zero-filled suffix");
+    }
+  }
   auto sorted=batch_ordered_moves(*c,*p,*batch,nullptr,*snapshot);
   auto eager=ordered_moves(*c,*p,nullptr,snapshot.get());
   check(sorted.size()==eager.size(),"complete native coverage");
