@@ -6,7 +6,9 @@
 #include <chess_lab/transposition_table.hpp>
 #include <chrono>
 #include <compare>
+#include <cstring>
 #include <functional>
+#include <type_traits>
 #include <optional>
 
 namespace chess_lab {
@@ -40,7 +42,17 @@ struct RepetitionSignature {
   Side side{};
   std::array<bool, 4> castling{};
   std::optional<std::uint8_t> legal_ep;
-  bool operator==(const RepetitionSignature &) const = default;
+  // PieceCode has an explicit one-byte underlying representation.
+  // This compares only the 64 live piece bytes; not struct/array padding.
+  bool operator==(const RepetitionSignature &other) const noexcept {
+    static_assert(sizeof(PieceCode) == 1 &&
+                  std::has_unique_object_representations_v<PieceCode>,
+                  "C3 memcmp requires uniquely represented one-byte pieces");
+    return side == other.side &&
+           castling == other.castling &&
+           legal_ep == other.legal_ep &&
+           std::memcmp(pieces.data(), other.pieces.data(), pieces.size()) == 0;
+  }
 };
 RepetitionSignature repetition_signature(const ChessCore &, const Position &);
 

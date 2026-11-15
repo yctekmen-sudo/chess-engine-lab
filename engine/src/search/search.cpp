@@ -137,7 +137,7 @@ void ordered_moves_into(std::vector<OrderedMove> &result, const ChessCore &c, co
     };
     if ((s.size() != 4 && s.size() != 5) || !square(0) || !square(2) ||
         (s.size() == 5 &&
-         std::string("bnqr").find(s[4]) == std::string::npos) ||
+         (s[4] != 'b' && s[4] != 'n' && s[4] != 'q' && s[4] != 'r')) ||
         (i && result[i - 1].text == s))
       throw std::runtime_error("ambiguous/noncanonical legal move encoding");
   }
@@ -219,7 +219,7 @@ void validate_native_batch_moves(const std::vector<OrderedMove> &result) {
       return s[n] >= 'a' && s[n] <= 'h' && s[n + 1] >= '1' && s[n + 1] <= '8';
     };
     if ((s.size() != 4 && s.size() != 5) || !square(0) || !square(2) ||
-        (s.size() == 5 && std::string("bnqr").find(s[4]) == std::string::npos) ||
+        (s.size() == 5 && (s[4] != 'b' && s[4] != 'n' && s[4] != 'q' && s[4] != 'r')) ||
         (i && result[i - 1].text == s))
       throw std::runtime_error("ambiguous/noncanonical legal move encoding");
   }
@@ -588,8 +588,10 @@ struct Traversal {
     poll();
     auto &result = prepared.legal;
     // Iterative-deepening root preparation is reused with canonical reset.
-    std::sort(result.begin(), result.end(),
-              [](const auto &a, const auto &b) { return a.text < b.text; });
+    // Fresh lists remain canonical; previously ordered nodes may not.
+    const auto by_text = [](const auto &a, const auto &b) { return a.text < b.text; };
+    if (!std::is_sorted(result.begin(), result.end(), by_text))
+      std::sort(result.begin(), result.end(), by_text);
     if (hints) {
       if (ordering) {
         ordering->prepare(ordering_node,result);

@@ -1,5 +1,43 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## C1+C2+C3 accepted stack — 2026-11-14: draft integration candidate
+
+C1 (packed UCI text comparison, conditional canonical resort, promotion validation),
+C2-A (guarded exact native-type dispatch), C2-B (snapshot bitboard accumulation),
+C3-A (cheap repetition-identity fields first), and C3-B (same ordering plus
+one-byte piece-array memcmp) are **accepted experiments**. The stacked
+integration uses **C3-B, which incorporates C3-A**, not two competing equality
+operators. No previous B4/T1 accepted defaults are changed.
+
+The stack is based on merged T1 main commit
+`072032c0d086dbe37a5b7afd796424b283f0ba53`, tree
+`dc1d2d03482fc8c1401ed3172c3c0b18a680bd23`.
+Five source blobs match the independently validated C3-B combined-overlay
+Git hashes exactly. Source evidence: `CELab-C1-evidence-c169e35d(4).zip`,
+`CELab-C2-evidence-c252a530(1).zip`, and
+`CELab-C3-evidence-c3952dd8.zip`.
+
+Draft PR #49 (`feature/c1-c2-c3-accepted-stack`) contains the accepted
+C1+C2+C3-B implementation, benchmarked as clean committed source
+`fb25990f3b8a32114d916fcd3f67783fb0a3d604` (tree
+`92a9d2d70c0c0d855e5a41f9d0b5940cf298d2f6`). The direct
+same-host/same-toolchain benchmark against merged `origin/main` completed
+2026-11-14: `CELab-Cstack-direct-evidence-cs8c6589.zip`.
+Windows / Linux TT-off elapsed time saved **15.84% / 19.71%** and numeric
+cold **15.88% / 18.45%**; all five TT modes and all 11 workloads improved
+by median on both platforms. There were 660/660 raw benchmark observations,
+184/184 native CTest executions, zero reported or independently observed
+per-run search-result/TT/node mismatches, and 1471/1471 matching evidence
+SHA-256 manifest entries. See
+[`c-stack-integration-performance.md`](c-stack-integration-performance.md)
+for exact summed-median methodology, per-mode comparison and Perft5 outliers.
+
+**Still pending:** full clean committed 54-gate Windows/WSL/controller/GUI/WASM
+CI and its historical-reference review, followed by separate merge approval.
+The post-benchmark performance/status documentation updates change Git commit
+but not the benchmarked engine source. Draft publication does not authorize
+Full CI, merge or reference replacement.
+
 ## T1 accepted TT integration — 2026-11-13: isolated validation passed, PR preparation authorized
 
 The eight approved optimizations (T1.1a, T1.1d.2 C, T1.1fH, T1.1h C,

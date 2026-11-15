@@ -8,13 +8,19 @@ ChessEvalPosition evaluation_snapshot(const PositionSnapshot &s) {
   p.struct_size = sizeof p;
   p.schema_major = 1;
   const auto squares = s.squares();
+  // Slot zero collects empty squares; masked indices also keep malformed
+  // piece codes memory-safe until the original error is reported.
+  uint64_t acc[16] = {};
+  unsigned invalid = 0;
   for (size_t i = 0; i < 64; ++i) {
-    auto code = static_cast<unsigned>(squares[i]);
-    if (code > 12)
-      throw EvaluationError("invalid source piece");
-    if (code)
-      p.bitboards[code - 1] |= uint64_t{1} << i;
+    const auto code = static_cast<unsigned>(squares[i]);
+    invalid |= static_cast<unsigned>(code > 12);
+    acc[code & 15U] |= uint64_t{1} << i;
   }
+  if (invalid)
+    throw EvaluationError("invalid source piece");
+  for (unsigned code = 1; code <= 12; ++code)
+    p.bitboards[code - 1] = acc[code];
   if (s.side_to_move() != Side::white && s.side_to_move() != Side::black)
     throw EvaluationError("invalid source side");
   p.side_to_move = s.side_to_move() == Side::black;
