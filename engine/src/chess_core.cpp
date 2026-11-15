@@ -276,6 +276,13 @@ std::size_t native_legal_move_count(const ChessCore& c, const Position& p) {
     (void)cast<Core>(c);
     return moves(cast<Pos>(p)).size();
 }
+// C4.2 isolated leaf experiment. Use the pinned upstream generator's
+// ONE_MOVE_ONLY path. No full legal list or exact count is needed for
+// certified claim-free horizon terminal classification.
+bool native_has_any_legal_move(const ChessCore& c, const Position& p) {
+    (void)cast<Core>(c);
+    return chess::movegen::anylegalmoves(cast<Pos>(p).board);
+}
 namespace detail {
 
 // Search-private fast path shares the same transition and restoration helpers

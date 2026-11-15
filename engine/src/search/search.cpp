@@ -22,6 +22,7 @@ static_assert(std::is_trivially_copyable_v<SearchScore>);
 // Native adapter identification; synthetic adapters retain custom status and clock semantics.
 bool native_chess_core(const ChessCore &) noexcept;
 std::size_t native_legal_move_count(const ChessCore &, const Position &);
+bool native_has_any_legal_move(const ChessCore &, const Position &);
 SearchScore SearchScore::finite(double v) {
   if (!std::isfinite(v))
     throw std::invalid_argument("nonfinite search score");
@@ -398,6 +399,7 @@ struct PreparedNode {
   std::uint64_t audit_prepare_ns=0;
   std::unique_ptr<const PositionSnapshot> snapshot;
   std::vector<OrderedMove> legal;
+  // Exact count for deferred inner batches; 0/1 availability for claim-free leaves.
   std::size_t native_legal_count = 0;
   PreparationMode mode = PreparationMode::eager;
   RepetitionSignature repetition;
@@ -449,13 +451,17 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
     node.repetition = snapshot_repetition(*node.snapshot);
     if (token) detail::tt_poll(*token);
     if (!parent_has_duplicate && !history_contains(*leaf_history, node.repetition, token)) {
-      // No move/text consumer is reachable in this certified position frame.
-      // Generate the complete set, retaining its count without move owners.
+      // C4.2: certified claim-free horizon needs existence, not an exact
+      // count. Pinned native library's ONE_MOVE_ONLY generator returns after
+      // finding its first legal move. 0/1 is a presence sentinel used only
+      // for terminal classification, never for deferred batch expansion.
       if (token) detail::tt_poll(*token);
-      node.native_legal_count = native_legal_move_count(c, p);
-      if (token) detail::tt_poll(*token); // Also covers zero-move terminals.
-      for (std::size_t i = 0; i < node.native_legal_count; ++i)
-        if (token) detail::tt_poll(*token);
+      node.native_legal_count = native_has_any_legal_move(c, p) ? 1U : 0U;
+      if (token) detail::tt_poll(*token); // Including zero-move terminals.
+      // Poll once after positive availability; the faster ONE_MOVE_ONLY
+      // generation does not provide per-member callbacks. The original
+      // full-list path remains responsible for per-member polling elsewhere.
+      if (node.native_legal_count && token) detail::tt_poll(*token);
       node.mode = PreparationMode::native_claim_free_leaf;
       return node;
     }
