@@ -51,6 +51,26 @@ void one_position(const char* fen){
   auto expected=ordered_moves(*core,*pos,nullptr,snapshot.get());
   auto reference_batch=detail::prepare_native_move_batch(*core,*pos);
   auto expected_batch=batch_ordered_moves(*core,*pos,*reference_batch,nullptr,*snapshot);
+  // Independent legal move/fact set oracle: eager adapter uses lexical UCI,
+  // native batches retain generator order. Check complete membership without
+  // weakening any of the existing per-record/capacity/lifetime assertions.
+  auto facts=[](const std::vector<OrderedMove>& moves) {
+    std::vector<std::string> entries;
+    entries.reserve(moves.size());
+    for (const auto &m:moves) {
+      auto key=m.text.str();
+      key+=m.pawn_move?'P':'-';key+=m.capture?'C':'-';
+      key+=m.legal_ep?'E':'-';
+      entries.push_back(std::move(key));
+    }
+    std::sort(entries.begin(),entries.end());
+    return entries;
+  };
+  check(facts(expected)==facts(expected_batch),
+        "native generator loses or changes a legal move/fact vs eager adapter");
+  for(std::size_t i=0;i<expected_batch.size();++i)
+    check(expected_batch[i].text.native() && expected_batch[i].native_ordinal==i,
+          "native generator identity/ordinal contract");
   std::vector<OrderedMove> spare;
   spare.reserve(256); // Larger than every legal chess move list.
   auto* location=spare.data();auto capacity=spare.capacity();
@@ -66,7 +86,7 @@ void one_position(const char* fen){
       check(spare.empty(),"spare should have donated its buffer");
       check_same(prepared->legal,expected_batch);
       check(root.legal.data()==parent_location,"recycling overwrote parent list");
-      check_same(root.legal,expected);
+      check_same(root.legal,expected_batch);
     }
     check(spare.data()==location && spare.size()==0 && spare.capacity()==capacity,
           "prepared frame failed to return capacity");

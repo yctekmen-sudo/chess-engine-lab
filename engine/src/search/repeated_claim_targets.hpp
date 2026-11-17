@@ -54,8 +54,8 @@ public:
       targets_.push_back({&history[i], changed, piece_count(history[i])});
     }
   }
-  template<class Poll>
-  bool possible(const RepetitionSignature &parent, std::string_view text,
+  template<class MoveText, class Poll>
+  bool possible(const RepetitionSignature &parent, const MoveText &text,
                 bool legal_ep, bool capture, Poll poll) const {
     poll();
     // text/facts came from this prepared native legal list, never external UCI.

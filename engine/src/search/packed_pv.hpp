@@ -2,6 +2,7 @@
 // B4.4 private PV representation: inlined contiguous 16-bit canonical UCI
 // codes; at the external result boundary, expand once to std::vector<string>.
 // No dynamic memory, pointers or string objects in recursive PV fragments.
+#include "native_search_move.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -56,6 +57,18 @@ public:
   void prepend(std::string_view s) {
     // Check all failure conditions before mutating the current PV.
     const auto code=encode(s);
+    if (length_==maximum) throw std::length_error("principal variation exceeds 64 plies");
+    std::move_backward(codes_.begin(),codes_.begin()+length_,codes_.begin()+length_+1);
+    codes_[0]=code;
+    ++length_;
+  }
+  // Native search prepends 16-bit native move identity without a text roundtrip.
+  // Only exact SearchMoveIdentity arguments take this binary path.
+  // Strings and literals continue to use prepend(std::string_view).
+  template<class T> requires std::is_same_v<std::remove_cvref_t<T>,SearchMoveIdentity>
+  void prepend(T&& m) {
+    if (!m.native()) {prepend(m.view());return;}
+    const auto code=m.native_move().pv_code();
     if (length_==maximum) throw std::length_error("principal variation exceeds 64 plies");
     std::move_backward(codes_.begin(),codes_.begin()+length_,codes_.begin()+length_+1);
     codes_[0]=code;

@@ -1,5 +1,6 @@
 #include "packed_pv.hpp"
 #include "compact_uci_text.hpp"
+#include "native_search_move.hpp"
 #include "transposition_table_internal.hpp"
 #include "audit_ttg.hpp"
 #include "history_duplicates.hpp"
@@ -88,7 +89,7 @@ struct T13aCounts {
 };
 thread_local T13aCounts t13a_counts;
 struct OrderedMove {
-  detail::CompactUciText text;
+  detail::SearchMoveIdentity text;
   std::unique_ptr<Move> move;
   bool pawn_move = false;
   bool capture = false;
@@ -102,6 +103,32 @@ struct OrderedMove {
   }
 };
 static_assert(sizeof(OrderedMove) <= 24, "B4.1 search move records must remain compact");
+// H2-C1.1 experimental: ONE capture and ONE promotion index, recorded during
+// native move-fact preparation. Each compiled variant pays only for its policy.
+struct H2C11Candidates {
+  static constexpr std::uint16_t missing=UINT16_MAX;
+  std::uint16_t first_promotion=missing;
+  std::uint16_t chosen_capture=missing;
+#if CELAB_H2C11_POLICY == 2 || CELAB_H2C11_POLICY == 3
+  int best_capture_score=-100000;
+#endif
+};
+#if CELAB_H2C11_POLICY == 2 || CELAB_H2C11_POLICY == 3
+static int h2c11_piece_value(PieceCode p) noexcept {
+  switch(p) {
+    case PieceCode::white_pawn: case PieceCode::black_pawn: return 1;
+    case PieceCode::white_knight: case PieceCode::black_knight: return 3;
+    case PieceCode::white_bishop: case PieceCode::black_bishop: return 3;
+    case PieceCode::white_rook: case PieceCode::black_rook: return 5;
+    case PieceCode::white_queen: case PieceCode::black_queen: return 9;
+    // Legal moves cannot capture kings, but handle unexpected facts safely.
+    case PieceCode::white_king: case PieceCode::black_king: return 100;
+    case PieceCode::empty: return 0;
+  }
+  return 0;
+}
+#endif
+
 void ordered_moves_into(std::vector<OrderedMove> &result, const ChessCore &c, const Position &p,
                         const CancellationToken *token,
                         const PositionSnapshot *snapshot) {
@@ -230,36 +257,67 @@ void validate_native_batch_moves(const std::vector<OrderedMove> &result) {
 void batch_ordered_moves_into(
     std::vector<OrderedMove> &result, const ChessCore &c, const Position &p,
     const detail::NativeMoveBatch &batch,
-    const CancellationToken *token, const PositionSnapshot &snapshot) {
+    const CancellationToken *token, const PositionSnapshot &snapshot,
+    H2C11Candidates *h2c11 = nullptr) {
   result.clear();
   const auto count = detail::native_move_batch_size(batch);
   if (token && count) detail::tt_poll(*token);
   result.reserve(count);
   if (count) {
-    // Preserve reserve/first-member poll/type-check ordering, including the
-    // empty-list path. This binding ends before facts, sorting or traversal.
     if (token) detail::tt_poll(*token);
     const detail::NativeBatchEncoder encoder(c, p, batch);
-    for (std::size_t i = 0; i < count; ++i) {
+    for (std::size_t i=0; i<count; ++i) {
       if (i && token) detail::tt_poll(*token);
-      OrderedMove move{encoder.encode_compact(i), {}};
-      move.native_ordinal = static_cast<std::uint16_t>(i);
-      result.push_back(std::move(move));
+      // Identity only: no UCI encoding, sorting-key creation, or record permutation.
+      OrderedMove m{detail::SearchMoveIdentity::from_native(encoder.identity(i)), {}};
+      m.native_ordinal = static_cast<std::uint16_t>(i);
+      result.push_back(std::move(m));
     }
   }
-  const auto squares = snapshot.squares();
-  for (auto &m : result) {
-    const unsigned from = unsigned(m.text[0] - 'a') + 8U * unsigned(m.text[1] - '1');
-    const unsigned to = unsigned(m.text[2] - 'a') + 8U * unsigned(m.text[3] - '1');
-    const auto piece = squares[from];
-    m.pawn_move = piece == PieceCode::white_pawn || piece == PieceCode::black_pawn;
-    m.legal_ep = m.pawn_move && m.text[0] != m.text[2] &&
-        squares[to] == PieceCode::empty &&
-        snapshot.en_passant_square() == std::optional<std::uint8_t>(static_cast<std::uint8_t>(to));
-    m.capture = squares[to] != PieceCode::empty || m.legal_ep;
+  const auto squares=snapshot.squares();
+  for (std::size_t h2c11_i=0;h2c11_i<result.size();++h2c11_i) {
+    auto &m=result[h2c11_i];
+    const auto id=m.text.native_move();
+    const unsigned from=id.from(), to=id.uci_to();
+    const auto piece=squares[from];
+    m.pawn_move=piece==PieceCode::white_pawn || piece==PieceCode::black_pawn;
+    m.legal_ep=m.pawn_move && (from%8 != to%8) &&
+        squares[to]==PieceCode::empty &&
+        snapshot.en_passant_square()==std::optional<std::uint8_t>(static_cast<std::uint8_t>(to));
+    m.capture=squares[to]!=PieceCode::empty || m.legal_ep;
+    // Reuse the existing generation/fact-annotation pass; no tactical scan.
+    if (h2c11) {
+      if (h2c11_i >= H2C11Candidates::missing)
+        throw std::logic_error("H2-C1.1 native list exceeds index capacity");
+      const auto index=static_cast<std::uint16_t>(h2c11_i);
+      if (m.text.native_move().kind()==detail::NativeBinaryMove::promotion &&
+          h2c11->first_promotion==H2C11Candidates::missing)
+        h2c11->first_promotion=index;
+      if (m.capture) {
+#if CELAB_H2C11_POLICY == 1
+        // First capture: no material scoring and no second list pass.
+        if (h2c11->chosen_capture==H2C11Candidates::missing)
+          h2c11->chosen_capture=index;
+#elif CELAB_H2C11_POLICY == 2 || CELAB_H2C11_POLICY == 3
+        const auto victim=m.legal_ep ? PieceCode::white_pawn : squares[to];
+        const int captured=h2c11_piece_value(victim);
+#if CELAB_H2C11_POLICY == 2
+        const int priority=captured; // Most valuable victim.
+#else
+        const int priority=captured-h2c11_piece_value(piece); // Victim - attacker.
+#endif
+        if (priority>h2c11->best_capture_score) {
+          h2c11->best_capture_score=priority;
+          h2c11->chosen_capture=index;
+        }
+#else
+#error "Unsupported H2-C1.1 policy"
+#endif
+      }
+    }
   }
-  sort_native_batch_moves(result);
-  validate_native_batch_moves(result);
+  // Native generator output is canonical by original ordinal. The vendored
+  // library's legal generator already certifies uniqueness; no UCI text exists.
 }
 std::vector<OrderedMove> batch_ordered_moves(
     const ChessCore &c, const Position &p, const detail::NativeMoveBatch &batch,
@@ -407,6 +465,7 @@ struct PreparedNode {
   bool claim_now_threefold = false;
   bool claim_now_fifty = false;
   detail::NativeMoveBatchOwner batch;
+  H2C11Candidates h2c11{};
   std::size_t legal_count() const {
     return (mode == PreparationMode::native_claim_free_leaf ||
             mode == PreparationMode::native_inner_deferred) ? native_legal_count : legal.size();
@@ -467,11 +526,11 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
     }
   }
   const bool native_search_horizon = tt_search_horizon || leaf_history.has_value();
-  if ((native_search_horizon || native_search_inner) && native_chess_core(c)) {
+  if (native_chess_core(c)) { // Include iterative root in native generator order.
     if (token) detail::tt_poll(*token);
     node.batch = detail::prepare_native_move_batch(c, p);
     if (token) detail::tt_poll(*token); // Including zero-legal terminal positions.
-    batch_ordered_moves_into(node.legal, c, p, *node.batch, token, *node.snapshot);
+    batch_ordered_moves_into(node.legal, c, p, *node.batch, token, *node.snapshot, &node.h2c11);
     node.mode = native_search_horizon ? PreparationMode::native_horizon_batch
                                   : PreparationMode::native_inner_batch;
   } else {
@@ -523,7 +582,7 @@ void expand_deferred_inner(PreparedNode &node, const ChessCore &c,
                            const Position &p, const CancellationToken *token) {
   assert(node.mode == PreparationMode::native_inner_deferred && node.batch);
   try {
-    batch_ordered_moves_into(node.legal,c,p,*node.batch,token,*node.snapshot);
+    batch_ordered_moves_into(node.legal,c,p,*node.batch,token,*node.snapshot,&node.h2c11);
     if (node.legal.size() != node.native_legal_count)
       throw std::logic_error("T1.3a deferred native batch count drift");
     // The native legality helper must agree with the original batch-derived
@@ -546,11 +605,16 @@ void expand_deferred_inner(PreparedNode &node, const ChessCore &c,
 // node-relative Mate(0), avoiding lossy inverse bound transforms at Mate(0).
 struct Line {
   SearchScore score;
-  ChessDecision action;
+  detail::PrivateDecision action;
   detail::PackedPV pv;
   PVEnd end;
   std::string intended;
 };
+bool canonical_before(const detail::PrivateDecision &a, const detail::PrivateDecision &b) {
+  auto rank=[](DecisionKind k){return k==DecisionKind::claim_draw ? 0
+         : k==DecisionKind::claim_draw_with_intended_move ? 1 : 2;};
+  return rank(a.kind)!=rank(b.kind) ? rank(a.kind)<rank(b.kind) : a.move<b.move;
+}
 bool canonical_before(const ChessDecision &a, const ChessDecision &b) {
   auto rank = [](DecisionKind k) {
     return k == DecisionKind::claim_draw ? 0
@@ -575,9 +639,20 @@ struct Traversal {
   SearchOptions options;
   SearchStatistics &stats;
   std::vector<RepetitionSignature> history;
+#if defined(CELAB_H2_POLICY) && CELAB_H2_POLICY >= 1 && CELAB_H2_POLICY <= 4
+  // Place experimental fields after the six positional aggregate-initialized
+  // Traversal members. Every new field is self-initialized.
+  std::array<detail::SearchMoveIdentity,65> h2_killer{};
+  std::array<bool,65> h2_killer_valid{};
+  static bool h2_promotion(const OrderedMove &m) noexcept {
+    return m.text.native() ? m.text.native_move().kind()==detail::NativeBinaryMove::promotion
+                           : m.text.size()==5;
+  }
+#endif
+
   CancellationToken cancellation{};
   const CompletedDepth *previous = nullptr;
-  std::vector<std::string> path{};
+  std::vector<detail::SearchMoveIdentity> path{};
   detail::TTSession *cache = nullptr;
   // Each recursive ply owns exactly one currently active prepared list.
   // Retain capacity by ply between siblings; no globally shared storage.
@@ -595,9 +670,17 @@ struct Traversal {
     auto &result = prepared.legal;
     // Iterative-deepening root preparation is reused with canonical reset.
     // Fresh lists remain canonical; previously ordered nodes may not.
-    const auto by_text = [](const auto &a, const auto &b) { return a.text < b.text; };
-    if (!std::is_sorted(result.begin(), result.end(), by_text))
-      std::sort(result.begin(), result.end(), by_text);
+    // C4.6a isolated experiment: native generator/hint/PV order is already
+    // deterministic for identical histories. Do not re-sort native moves into
+    // historical lexical UCI order at each visit. Keep generic adapter policy.
+    if (!result.empty() && result.front().text.native()) {
+      // No canonical sorting, sortedness scan, or UCI-text materialization.
+      // Previous-PV, persistent-ordering and TT hints still apply below.
+    } else {
+      const auto by_text=[](const auto &a,const auto &b){return a.text<b.text;};
+      if (!std::is_sorted(result.begin(),result.end(),by_text))
+        std::sort(result.begin(),result.end(),by_text);
+    }
     if (hints) {
       if (ordering) {
         ordering->prepare(ordering_node,result);
@@ -617,7 +700,8 @@ struct Traversal {
       } else {
         const auto &pv = previous->best.principal_variation;
         if (path.size() < pv.size() &&
-            std::equal(path.begin(), path.end(), pv.begin()))
+            std::equal(path.begin(), path.end(), pv.begin(),
+                [](const auto &a,const auto &b){return a==b;}))
           preferred.push_back(pv[path.size()]);
       }
       auto dest = result.begin();
@@ -672,7 +756,7 @@ struct Traversal {
 #else
       detail::OrderingFrame ordering_frame(ordering,ordering_node,ordering_ply,m.text);
 #endif
-      if (track_path) path.push_back(m.text.str()); // Already encoded.
+      if (track_path) path.push_back(m.text); // Binary for native, no UCI conversion.
       if (history.size() < root_history_size ||
           history.size() - root_history_size >= recycled_moves.size())
         throw std::logic_error("search recursion exceeds move-storage frames");
@@ -846,12 +930,16 @@ struct Traversal {
                        next.snapshot->halfmove_clock() >= 100;
               });
         if (eligible) {
-          best = Line{SearchScore::finite(0),
-                      {DecisionKind::claim_draw_with_intended_move, m.text.str()},
-                      {},
-                      PVEnd::claim_draw_with_intended_move,
-                      m.text.str()};
-          break;
+          // Native generator order governs traversal, but the established
+          // public tie-break among eligible draw claims remains lexical.
+          if (!best || m.text < best->action.move)
+            best = Line{SearchScore::finite(0),
+                        {DecisionKind::claim_draw_with_intended_move, m.text.str()},
+                        {},
+                        PVEnd::claim_draw_with_intended_move,
+                        m.text.str()};
+          // Preserve generic adapters' exact first-eligible claim behavior.
+          if (!native_chess_core(core)) break;
         }
       }
     return best;
@@ -928,8 +1016,15 @@ struct Traversal {
           if (exact_return || bound_return) {
             // Terminal adjudication and actual repetition-count updates already
             // happened above; available claims have been proven absent.
-            if (!preprobe->hint.empty() &&
-                detail::native_has_legal_uci_hint(core,position,preprobe->hint))
+            // C4.5: the private TT can now retain a native 16-bit hint.
+            // An early numeric return must account for that hint just as the
+            // ordinary TT probe path does. Do not materialize a UCI string.
+            const bool legal_preprobe_hint = preprobe->native_hint
+                ? (native_chess_core(core) && detail::native_has_legal_move_identity(
+                       core, position, preprobe->native_hint->native_bits()))
+                : (!preprobe->hint.empty() &&
+                   detail::native_has_legal_uci_hint(core, position, preprobe->hint));
+            if (legal_preprobe_hint)
               ++stats.transposition.hint_hits;
             if (ordering) ordering->prepare(ordering_node,prepared.legal);
             if (bound_return) {
@@ -944,7 +1039,7 @@ struct Traversal {
               row.prepare_return_ns+=prepared.audit_prepare_ns;
             }
             cache->reward(*preprobe);
-            return finish({*preprobe->score, preprobe->decision.value(), {}, PVEnd::horizon, {}});
+            return finish({*preprobe->score, preprobe->internal_decision.value(), {}, PVEnd::horizon, {}});
           }
         }
         ++t13a_counts.early_nonreturns;
@@ -973,7 +1068,10 @@ struct Traversal {
       }
       prefer_previous(moves_here);
     }
-    std::string deferred_hint;
+    std::optional<detail::SearchMoveIdentity> deferred_hint;
+#if defined(CELAB_H2_POLICY) && CELAB_H2_POLICY >= 1 && CELAB_H2_POLICY <= 4
+    bool h2_legal_tt_hint=false;
+#endif
     auto tt_finish=[&](Line line) {
       if (defer_order) {
         ++t13a_counts.order_skipped_returns;
@@ -994,17 +1092,26 @@ struct Traversal {
       if(detail::audit.enabled)audit_preprobe_ns=detail::audit_clock()-audit_node_start;
       auto hit = preprobe ? std::move(*preprobe) :
           cache->probe(history.back(), depth, ply, *s, &node_tt_hash);
-      if (!hit.hint.empty()) {
+      if (!hit.hint.empty() || hit.native_hint) {
         if (raw_leaf) {
           // The table may still report a move hint for a previously searched
           // position. Preserve the exact legal-hint statistic without constructing
           // a complete boxed/sorted/encoded batch. Depth zero never reorders.
-          if (detail::native_has_legal_uci_hint(core, position, hit.hint))
+          if (hit.native_hint
+              ? (native_chess_core(core) && detail::native_has_legal_move_identity(
+                    core,position,hit.native_hint->native_bits()))
+              : detail::native_has_legal_uci_hint(core, position, hit.hint))
             ++stats.transposition.hint_hits;
         } else {
-          auto found = std::find_if(moves_here.begin(), moves_here.end(), [&](const auto &m) { return m.text == hit.hint; });
+          auto found = std::find_if(moves_here.begin(), moves_here.end(), [&](const auto &m) {
+            return hit.native_hint ? m.text == *hit.native_hint : m.text == hit.hint;
+          });
           if (found != moves_here.end()) {
-            if (defer_order) deferred_hint=hit.hint;
+#if defined(CELAB_H2_POLICY) && CELAB_H2_POLICY >= 1 && CELAB_H2_POLICY <= 4
+            h2_legal_tt_hint=true;
+#endif
+            if (defer_order) deferred_hint=hit.native_hint
+                ? *hit.native_hint : detail::SearchMoveIdentity(hit.hint);
             else if (depth > 0) std::rotate(moves_here.begin(), found, found + 1);
             ++stats.transposition.hint_hits;
           }
@@ -1027,12 +1134,12 @@ struct Traversal {
         if(detail::audit.enabled && claim_dominates)++audit_row.claim_veto;
         if (hit.bound == detail::TTBound::exact) {
           if (claim_dominates) return tt_finish(*best);
-          if (best && hit.decision == best->action)
+          if (best && hit.internal_decision == std::optional<detail::PrivateDecision>(best->action))
             return tt_finish(*best); // exact zero, claim eligibility revalidated
-          if (!exact || (depth == 0 && hit.decision && hit.decision->kind == DecisionKind::play)) {
+          if (!exact || (depth == 0 && hit.internal_decision && hit.internal_decision->kind == DecisionKind::play)) {
             audit_return(false);
             cache->reward(hit); // actual numeric TT return, not just candidate hit
-            return tt_finish({*hit.score, hit.decision.value(), {}, PVEnd::horizon, {}});
+            return tt_finish({*hit.score, hit.internal_decision.value(), {}, PVEnd::horizon, {}});
           }
           if(detail::audit.enabled)++audit_row.pv_research;
           ++stats.transposition.pv_researches;
@@ -1043,7 +1150,7 @@ struct Traversal {
           ++stats.transposition.bound_cutoffs;
           audit_return(true);
           cache->reward(hit); // bound genuinely cut off the node
-          return tt_finish({*hit.score, hit.decision.value(), {}, PVEnd::horizon, {}});
+          return tt_finish({*hit.score, hit.internal_decision.value(), {}, PVEnd::horizon, {}});
         } else if(hit.bound!=detail::TTBound::exact && detail::audit.enabled && !claim_dominates) {
           ++audit_row.bound_noncutoff;
         }
@@ -1056,9 +1163,9 @@ struct Traversal {
         ordering->apply(ordering_node,moves_here,[&]{poll();});
       }
       prefer_previous(moves_here);
-      if (!deferred_hint.empty()) {
+      if (deferred_hint) {
         auto found=std::find_if(moves_here.begin(),moves_here.end(),
-            [&](const auto &m) { return m.text == deferred_hint; });
+            [&](const auto &m) { return m.text == *deferred_hint; });
         if (found!=moves_here.end())
           std::rotate(moves_here.begin(),found,found+1);
       }
@@ -1092,6 +1199,50 @@ struct Traversal {
       ++stats.alpha_beta_cutoffs;
       return finish(*best);
     }
+#if defined(CELAB_H2_POLICY) && CELAB_H2_POLICY >= 1 && CELAB_H2_POLICY <= 4
+    // The new heuristic runs only AFTER B2/previous-PV/TT ordering. Treat an
+    // eligible B2/PV node as hinted even if the heuristic could potentially
+    // find another move; this deliberately favors safety over coverage.
+    // Do not ever touch synthetic-adapter move order or depth-zero leaves.
+    const bool h2_active_depth = (CELAB_H2_POLICY==2 || CELAB_H2_POLICY==4) || depth==1;
+    const bool h2_prev_pv = previous && (path.empty() ?
+      !previous->multipv.empty() :
+      (path.size()<previous->best.principal_variation.size() &&
+       std::equal(path.begin(),path.end(),previous->best.principal_variation.begin())));
+    const bool h2_existing_hint = h2_legal_tt_hint || h2_prev_pv ||
+      (ordering && ordering->can_reorder(ordering_node));
+    if (h2_active_depth && !h2_existing_hint && moves_here.size()>1 &&
+        moves_here.front().text.native()) {
+      std::size_t candidate=moves_here.size();
+#if CELAB_H2_POLICY == 1 || CELAB_H2_POLICY == 2
+      if (ply<h2_killer_valid.size() && h2_killer_valid[ply]) {
+        for(std::size_t k=0;k<moves_here.size();++k) {
+          const auto &m=moves_here[k];
+          if (!m.capture && !h2_promotion(m) && m.text==h2_killer[ply]) {
+            candidate=k;
+            break;
+          }
+        }
+      }
+#else
+      // At unhinted native nodes no PV/TT/B2 reorder has invalidated the
+      // generation-time indexes. A single cached lookup replaces the scan.
+      const auto &h2c11=prepared.h2c11;
+      const auto index=h2c11.first_promotion!=H2C11Candidates::missing
+          ? h2c11.first_promotion : h2c11.chosen_capture;
+      if (index!=H2C11Candidates::missing) {
+        if (index>=moves_here.size())
+          throw std::logic_error("H2-C1.1 cached move index is out of range");
+        candidate=index;
+      }
+#endif
+      // Rotate a single candidate to the first slot. All other moves retain
+      // native relative ordering; unlike a swap, only the selected move moves.
+      if (candidate>0 && candidate<moves_here.size())
+        std::rotate(moves_here.begin(),moves_here.begin()+candidate,
+                    moves_here.begin()+candidate+1);
+    }
+#endif
     for (std::size_t i = 0; i < moves_here.size(); ++i) {
       auto &m = moves_here[i];
       poll();
@@ -1101,10 +1252,15 @@ struct Traversal {
       auto line = child(prepared, m, [&](PreparedNode &next) {
         return node(depth - 1, ply + 1, next, alpha, beta, direct_exact);
       }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
-      ChessDecision action{DecisionKind::play, m.text.str()};
+      detail::PrivateDecision action{DecisionKind::play,m.text};
+      // C4.6b experiment: native first-encounter tie policy. An alpha-beta
+      // bound equal to the incumbent does not certify that a later lexical
+      // predecessor has the same exact minimax score. Never replace on equal
+      // scores for native moves; preserve synthetic canonical tie semantics.
       auto competitive = [&] {
         return !best || better(line.score, best->score) ||
-               (line.score == best->score && canonical_before(action, best->action));
+               (line.score == best->score && !m.text.native() &&
+                canonical_before(action, best->action));
       };
       bool improved = false;
       if (competitive()) {
@@ -1127,7 +1283,17 @@ struct Traversal {
           detail::classify_bound(line.score,child_alpha,child_beta)==detail::TTBound::exact;
         ordering->observe(ordering_node,m.text,score_exact?(improved?3:2):1,i+1);
       }
-      if (update() && i + 1 < moves_here.size()) {
+      const bool h2_should_cut = update() && i + 1 < moves_here.size();
+#if defined(CELAB_H2_POLICY) && (CELAB_H2_POLICY == 1 || CELAB_H2_POLICY == 2)
+      // Learn from ANY real quiet cutoff, including at hinted nodes, but do
+      // not promote a learned move over a stronger PV/TT/B2 hint.
+      if (h2_should_cut && ply<h2_killer_valid.size() &&
+          m.text.native() && !m.capture && !h2_promotion(m)) {
+        h2_killer[ply]=m.text;
+        h2_killer_valid[ply]=true;
+      }
+#endif
+      if (h2_should_cut) {
         if (ordering) {
           ordering->observe(ordering_node,m.text,4,i+1);
         }
@@ -1164,7 +1330,7 @@ SearchResult search(const ChessCore &c, const Position &root,
                    : SearchStatus::complete;
     r.completed_depth =
         r.status == SearchStatus::terminal ? 0 : options.nominal_depth;
-    r.decision = std::move(line.action);
+    r.decision = line.action.expand();
     r.score = line.score;
     r.principal_variation = line.pv.expand();
     r.pv_end = line.end;
@@ -1243,7 +1409,7 @@ IterativeSearchResult iterative_search(
     if (auto line = t.terminal(0, root_prepared)) {
       ++r.statistics.visited_nodes;
       r.status = IterativeSearchStatus::terminal;
-      r.terminal_decision = line->action;
+      r.terminal_decision = line->action.expand();
       r.terminal_score = line->score;
     } else {
       auto &legal = root_prepared.legal;
@@ -1257,7 +1423,7 @@ IterativeSearchResult iterative_search(
         t.cache = &*session;
       }
       auto variation = [](Line line) {
-        return SearchVariation{std::move(line.action), line.score,
+        return SearchVariation{line.action.expand(), line.score,
              line.pv.expand(), line.end, std::move(line.intended)};
       };
       for (int depth = 1; depth <= options.max_depth.value_or(64); ++depth) {
@@ -1291,7 +1457,7 @@ IterativeSearchResult iterative_search(
               return snapshot->side_to_move()==Side::white?line.score>v.score:line.score<v.score;});
             t.ordering->observe(t.ordering_node,m.text,improving?3:2,ranking.size()+1);
           }
-          line.action = {DecisionKind::play, m.text.str()};
+          line.action = {DecisionKind::play, m.text};
           line.pv.prepend(m.text);
           ranking.push_back(variation(std::move(line)));
         }

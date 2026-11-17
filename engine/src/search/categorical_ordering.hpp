@@ -1,5 +1,7 @@
 #pragma once
 // M7.6 P1 PRIVATE experimental controls. No public search/UCI option.
+#include "native_search_move.hpp"
+#include <type_traits>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -59,6 +61,14 @@ private:
            (std::uint32_t(s[2]-'a')<<15)|(std::uint32_t(s[3]-'1')<<12)|
            (s.size()==5?std::uint32_t(s[4]):0);
   }
+  // Only authentic SearchMoveIdentity arguments select the native key path.
+  // std::string, char arrays and std::string_view must remain generic UCI keys.
+  template<class T> requires std::is_same_v<std::remove_cvref_t<T>,SearchMoveIdentity>
+  static std::uint32_t code(T&& m) noexcept {
+    if(m.native()) return 0x01000000U | m.native_bits();
+    return code(m.view());
+  }
+
   void memory() noexcept {
     stats_.allocated_bytes=sizeof(*this)+
       (committed_.nodes.capacity()+pending_.nodes.capacity())*sizeof(Node)+
@@ -115,7 +125,7 @@ public:
     for(const auto &m:moves)pending_.edges.push_back({code(m.text),invalid,0});
     memory();
   }
-  Index child(Index i,int ply,std::string_view move) {
+  template<class MoveText> Index child(Index i,int ply,const MoveText &move) {
     Measure measure(*this);
     if(i==invalid||ply>=config_.last_ply)return invalid;
     const auto n=pending_.nodes[i];
@@ -143,7 +153,7 @@ public:
     if(used) {++stats_.hits;stats_.reused_moves+=used;if(used>1)stats_.reused_siblings+=used-1;}
     else ++stats_.misses;
   }
-  void observe(Index i,std::string_view move,unsigned category,std::size_t sequence) {
+  template<class MoveText> void observe(Index i,const MoveText &move,unsigned category,std::size_t sequence) {
     Measure measure(*this);if(i==invalid)return;const auto n=pending_.nodes[i];
     for(Index j=n.begin;j<n.begin+n.count;++j)if(pending_.edges[j].move==code(move)) {
       // Only exact improvements/cutoffs use chronology. Other groups canonical.
@@ -161,7 +171,7 @@ public:
 };
 struct OrderingFrame {
   OrderingTree::Index &index;int &ply;OrderingTree::Index old;int old_ply;
-  OrderingFrame(OrderingTree *tree,OrderingTree::Index &i,int &p,std::string_view move)
+  template<class MoveText> OrderingFrame(OrderingTree *tree,OrderingTree::Index &i,int &p,const MoveText &move)
       :index(i),ply(p),old(i),old_ply(p) {
     if(tree){index=tree->child(i,p,move);++ply;}
   }

@@ -30,6 +30,8 @@ public:
   // Avoid constructing temporary std::string in search's native-batch path.
   // Keep encode() unchanged for independent reference/certificate tests.
   CompactUciText encode_compact(std::size_t ordinal) const;
+  // Return raw 16-bit native identity with the full per-member certificate check.
+  std::uint16_t identity(std::size_t ordinal) const;
 
 private:
   const Position &position_;
@@ -44,6 +46,9 @@ bool native_has_legal_en_passant(const ChessCore &, const Position &);
 // Native adapter only, same canonical UCI spelling as ordered moves.
 bool native_has_legal_uci_hint(const ChessCore &, const Position &,
                                std::string_view hint);
+// Check native TT hints without encoding UCI. Identity is not a certificate.
+bool native_has_legal_move_identity(const ChessCore &, const Position &,
+                                    std::uint16_t identity);
 // Omit a proven claim-ineligible make/undo while retaining its serial advance.
 // False requires the original exact path (counter boundary or stale certificate).
 // A batch member needs no boxed Move; eager members use their existing owner.

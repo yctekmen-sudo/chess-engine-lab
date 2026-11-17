@@ -62,6 +62,7 @@ void encoder_guards() {
     check(rejected([&]{detail::encode_native_batch_member(core,pos,b,i);})==message,"checked rejection message");
     check(rejected([&]{detail::NativeBatchEncoder e(core,pos,b);(void)e.encode(i);})==message,"bound rejection matches reference");
     check(rejected([&]{detail::NativeBatchEncoder e(core,pos,b);(void)e.encode_compact(i);})==message,"compact bound rejection matches reference");
+    check(rejected([&]{detail::NativeBatchEncoder e(core,pos,b);(void)e.identity(i);})==message,"binary bound rejection matches reference");
   };
   ForeignCore foreign(*c); ForeignPosition position;
   rejects(foreign,*p,*batch,0); rejects(*c,position,*batch,0);
@@ -72,7 +73,8 @@ void encoder_guards() {
   c->undo_move(*p,*undo);
   { detail::NativeBatchEncoder e(*c,*p,*batch);
     check(e.encode(0)==detail::encode_native_batch_member(*c,*p,*batch,0),"strict undo restores original frame");
-    check(e.encode_compact(0).view()==detail::encode_native_batch_member(*c,*p,*batch,0),"compact strict undo restores original frame"); }
+    check(e.encode_compact(0).view()==detail::encode_native_batch_member(*c,*p,*batch,0),"compact strict undo restores original frame");
+    check(detail::NativeBinaryMove{e.identity(0)}.uci()==e.encode(0),"native identity restores original frame"); }
   check(rejected([&]{c->undo_move(*p,*undo);})==message,"consumed undo rejected");
   c->reset(*p,c->export_fen(*p)); rejects(*c,*p,*batch,0);
   batch=detail::prepare_native_move_batch(*c,*p);
@@ -80,7 +82,8 @@ void encoder_guards() {
   { detail::NativeBatchEncoder e(*c,*p,*batch);(void)e.encode(0);
     detail::invalidate_native_move_batch(*batch);
     check(rejected([&]{(void)e.encode(1);})==message,"per-member invalidation retained");
-    check(rejected([&]{(void)e.encode_compact(1);})==message,"compact per-member invalidation retained"); }
+    check(rejected([&]{(void)e.encode_compact(1);})==message,"compact per-member invalidation retained");
+    check(rejected([&]{(void)e.identity(1);})==message,"binary per-member invalidation retained"); }
   rejects(*c,*p,*batch,0);
   // A destroyed owner's shared identity cannot authenticate a fresh position.
   batch=detail::prepare_native_move_batch(*c,*p);
@@ -164,7 +167,11 @@ void native_case(const char *fen, bool castle=false, bool ep=false, bool promoti
   check(sorted.size()==eager.size(),"complete native coverage");
   bool found_castle=false,found_ep=false;std::string promotions;
   for(std::size_t i=0;i<sorted.size();++i){auto &m=sorted[i];
-    check(m.text==eager[i].text&&m.pawn_move==eager[i].pawn_move&&m.capture==eager[i].capture&&m.legal_ep==eager[i].legal_ep,"native batch exact lexical/fact parity");
+    const auto match=std::find_if(eager.begin(),eager.end(),[&](const auto &e){return m.text==e.text;});
+    check(match!=eager.end() && m.pawn_move==match->pawn_move &&
+      m.capture==match->capture && m.legal_ep==match->legal_ep,
+      "native batch identity/fact parity independent of generator order");
+    check(m.text.native() && m.native_ordinal==i,"native ordinal and binary identity retained");
     m.move=detail::materialize_native_batch_member(*c,*p,*batch,m.native_ordinal);
     check(c->encode_move(*p,m.executable())==m.text,"sorted ordinal materializes matching certificate");
     if(m.text=="e1g1"||m.text=="e1c1")found_castle=true;
@@ -177,7 +184,7 @@ void native_case(const char *fen, bool castle=false, bool ep=false, bool promoti
   }
   if(castle)check(found_castle,"castling normalized to king destination");
   if(ep)check(found_ep,"legal EP metadata retained");
-  if(promotion)check(promotions=="bnqr","all four promotions in canonical order");
+  if(promotion){std::sort(promotions.begin(),promotions.end());check(promotions=="bnqr","all four promotions in legal order");}
   if(!sorted.empty()){
     auto clone=c->clone(*p);bool rejected=false;
     try{detail::materialize_native_batch_member(*c,*clone,*batch,sorted.front().native_ordinal);}catch(const std::invalid_argument&){rejected=true;}

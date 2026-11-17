@@ -1,4 +1,5 @@
 #pragma once
+#include "private_decision.hpp"
 #include <limits>
 #include <chess_lab/search.hpp>
 #include <map>
@@ -99,8 +100,10 @@ bool same_eval_state(const ChessEvalPosition &, const ChessEvalPosition &);
 struct TTProbe {
   std::optional<SearchScore> score;
   TTBound bound = TTBound::exact;
-  std::optional<ChessDecision> decision;
-  std::string hint;
+  std::optional<ChessDecision> decision; // original generic fixture result
+  std::optional<PrivateDecision> internal_decision;
+  std::string hint; // generic adapter only
+  std::optional<SearchMoveIdentity> native_hint;
   std::size_t selected_slot=std::numeric_limits<std::size_t>::max(); // reward only a score actually returned by search
 };
 // Private access also supports deliberate collision/bound fixtures, without
@@ -125,7 +128,7 @@ struct TTAccess {
                     EvaluatorCacheCompatibility compatibility,
                     std::optional<EvaluationExtras> extras,
                     bool numeric, SearchScore score, TTBound,
-                    const ChessDecision &, std::uint64_t ply,
+                    const PrivateDecision &, std::uint64_t ply,
                     TranspositionStatistics &);
 };
 class TTSession {
@@ -149,6 +152,11 @@ public:
              SearchScore, TTBound, const ChessDecision &, std::uint64_t ply,
              const PositionSnapshot &,
              std::optional<std::uint64_t> *node_hash = nullptr);
+  // Native engine path never builds public ChessDecision strings.
+  void store(const RepetitionSignature &, int depth,
+             SearchScore, TTBound, const PrivateDecision &, std::uint64_t ply,
+             const PositionSnapshot &,
+             std::optional<std::uint64_t> *node_hash = nullptr);
   // Private direct-fixture overloads: ABI extras matter only for deterministic
   // complete-snapshot evaluators, never for position-only certification.
   TTProbe probe(const ChessEvalPosition &s, const RepetitionSignature &r,
@@ -166,7 +174,7 @@ private:
                      std::optional<EvaluationExtras>,
                      std::optional<std::uint64_t> *node_hash = nullptr);
   void store_impl(const RepetitionSignature &, int, SearchScore, TTBound,
-                  const ChessDecision &, std::uint64_t,
+                  const PrivateDecision &, std::uint64_t,
                   std::optional<EvaluationExtras>,
                   std::optional<std::uint64_t> *node_hash = nullptr);
   TranspositionStatistics &stats_;
