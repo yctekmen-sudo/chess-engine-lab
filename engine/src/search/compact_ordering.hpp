@@ -1,4 +1,6 @@
 #pragma once
+#include "native_search_move.hpp"
+#include <type_traits>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -24,7 +26,7 @@ public:explicit OrderingScope(OrderingConfig c,OrderingStatistics*s=nullptr):con
 class OrderingTree {
 public:using Index=std::uint32_t;static constexpr Index invalid=UINT32_MAX;
 private:
-  static constexpr std::uint32_t active_bit=0x80000000U,move_mask=0x00ffffffU;
+  static constexpr std::uint32_t active_bit=0x80000000U,move_mask=0x01ffffffU;
   struct Node{std::uint32_t incoming=0,best=0;Index first=invalid,next=invalid;};
   struct Observation{std::uint32_t move=0,priority=0;Index next=invalid;};
   std::vector<Node> committed_,pending_;
@@ -36,6 +38,14 @@ private:
     explicit Measure(OrderingTree&x):t(x){if(t.config_.time_maintenance)start=std::chrono::steady_clock::now();}
     ~Measure(){if(t.config_.time_maintenance)t.stats_.maintenance_ns+=std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-start).count();}};
   static std::uint32_t code(std::string_view s)noexcept{return 1U+((std::uint32_t(s[0]-'a')<<21)|(std::uint32_t(s[1]-'1')<<18)|(std::uint32_t(s[2]-'a')<<15)|(std::uint32_t(s[3]-'1')<<12)|(s.size()==5?std::uint32_t(s[4]):0));}
+  // Only authentic SearchMoveIdentity arguments select the native key path.
+  // std::string, char arrays and std::string_view must remain generic UCI keys.
+  template<class T> requires std::is_same_v<std::remove_cvref_t<T>,SearchMoveIdentity>
+  static std::uint32_t code(T&& m) noexcept {
+    if(m.native()) return 0x01000000U | m.native_bits();
+    return code(m.view());
+  }
+
   std::size_t reserved()const noexcept{return sizeof(*this)+(committed_.capacity()+pending_.capacity())*sizeof(Node)+heads_.capacity()*sizeof(Index)+observations_.capacity()*sizeof(Observation);}
   void memory()noexcept{
     stats_.allocated_bytes=reserved();stats_.peak_allocated_bytes=std::max<std::uint64_t>(stats_.peak_allocated_bytes,reserved());
@@ -76,7 +86,7 @@ public:
     if(iteration_){committed_.swap(pending_);stats_.nodes=committed_.size();stats_.edges=committed_.empty()?0:committed_.size()-1;}
     observations_.clear();heads_.clear();memory();}
   template<class Moves>void prepare(Index i,const Moves&){Measure timer(*this);if(iteration_&&i!=invalid)pending_[i].incoming|=active_bit;}
-  Index child(Index i,int ply,std::string_view move,bool actual_positive=true){Measure timer(*this);
+  template<class MoveText> Index child(Index i,int ply,const MoveText &move,bool actual_positive=true){Measure timer(*this);
     if(!iteration_||!actual_positive||i==invalid||ply>=config_.last_ply)return invalid;
     const auto key=code(move);
     for(auto j=pending_[i].first;j!=invalid;j=pending_[j].next){
@@ -103,7 +113,7 @@ public:
 #endif
     std::rotate(moves.begin(),found,found+1);++stats_.hits;++stats_.reused_moves;
   }
-  void observe(Index i,std::string_view move,unsigned category,std::size_t sequence){Measure timer(*this);
+  template<class MoveText> void observe(Index i,const MoveText &move,unsigned category,std::size_t sequence){Measure timer(*this);
     if(!iteration_||i==invalid)return;
     const auto key=code(move);const auto priority=(category<<24)|((category>=3)?static_cast<std::uint32_t>(std::min<std::size_t>(sequence,0xffffff)):0);
     for(auto j=heads_[i];j!=invalid;j=observations_[j].next){
@@ -122,6 +132,6 @@ public:
   void refinement()noexcept{++stats_.exact_refinements;}
 };
 struct OrderingFrame{OrderingTree::Index&index;int&ply;OrderingTree::Index old;int old_ply;
-  OrderingFrame(OrderingTree*t,OrderingTree::Index&i,int&p,std::string_view move,bool actual_positive=true):index(i),ply(p),old(i),old_ply(p){if(t){index=t->child(i,p,move,actual_positive);++ply;}}
+  template<class MoveText> OrderingFrame(OrderingTree*t,OrderingTree::Index&i,int&p,const MoveText &move,bool actual_positive=true):index(i),ply(p),old(i),old_ply(p){if(t){index=t->child(i,p,move,actual_positive);++ply;}}
   ~OrderingFrame(){index=old;ply=old_ply;}};
 } // namespace chess_lab::detail

@@ -414,15 +414,16 @@ SearchResult both(const ChessCore &c, const Position &p, const GameHistory &h,
             x.options.nominal_depth == depth && !x.options.alpha_beta_enabled &&
             x.history_incomplete == !h.complete(),
         "identity/configuration provenance");
-  check(x.status == y.status && x.score == y.score &&
-            x.decision == y.decision &&
-            x.principal_variation == y.principal_variation &&
-            x.pv_end == y.pv_end && x.pv_intended_move == y.pv_intended_move,
-        "real chess AB oracle agreement");
+  // C4.6b: native traversal may choose different equally optimal ties.
+  // Keep exact score, status and decision class equality; verify both PVs.
+  check(x.status == y.status && x.score == y.score && x.decision && y.decision &&
+            x.decision->kind == y.decision->kind && x.pv_end == y.pv_end,
+        "real chess AB score/status/decision-kind/end agreement");
   check(x.statistics.alpha_beta_cutoffs == 0, "exhaustive no cutoffs");
   check(c.export_fen(p) == before && h.occurrences() == history,
         "real root/history preserved");
   verify_pv(c, p, x);
+  verify_pv(c, p, y);
   return x;
 }
 // Separate real-chess reference for small positions without a claim threshold
@@ -474,6 +475,24 @@ Expected chess_oracle(const ChessCore &c, const Position &p, int depth) {
   check(bool(best), "reference legal moves");
   return *best;
 }
+// C4.6b: independently verify every continuation is minimax-optimal.
+// Uses the pre-existing exhaustive chess_oracle, not production traversal.
+void independent_m3_pv(const ChessCore &c,const Position &root,
+                       const SearchResult &r,int depth) {
+  check(r.score && r.decision && r.pv_end,"oracle result fields");
+  auto cur=c.clone(root);
+  for(size_t ply=0;ply<r.principal_variation.size();++ply) {
+    check(int(ply)<depth,"oracle PV length bounded");
+    auto expected=chess_oracle(c,*cur,depth-int(ply)).score;
+    auto move=c.decode_move(*cur,r.principal_variation[ply]);
+    auto u=c.make_move(*cur,*move);
+    auto actual=chess_oracle(c,*cur,depth-int(ply)-1).score.one_ply_farther();
+    check(actual==expected,"independent optimal chess PV continuation");
+  }
+  const bool terminal=c.status(*cur)!=PositionStatus::ongoing || c.known_dead_position(*cur);
+  check(terminal || int(r.principal_variation.size())==depth,
+        "no premature nonterminal PV truncation");
+}
 void real_oracle_cases() {
   auto c = create_chess_core();
   tree_values = false;
@@ -487,10 +506,10 @@ void real_oracle_cases() {
       auto h = GameHistory::starting_at(*c, *p);
       auto expected = chess_oracle(*c, *p, 2);
       auto r = both(*c, *p, h, 2);
-      check(r.score == expected.score && r.decision == expected.action &&
-                r.principal_variation == expected.pv &&
-                r.pv_end == expected.end,
-            "independent genuine chess oracle");
+      check(r.score == expected.score && r.decision &&
+                r.decision->kind == expected.action.kind,
+            "independent genuine chess optimal score/decision class");
+      independent_m3_pv(*c,*p,r,2);
     }
   std::cout
       << "independent genuine chess reference, extreme finite scores: passed\n";
@@ -547,7 +566,12 @@ void real_rules() {
                 DecisionKind::claim_draw_with_intended_move &&
             intended.principal_variation.empty(),
         "50-move intended unplayed claim");
-  check(intended.decision->move == "a1a2", "lexicographic intended claim");
+  // An intended move must be legal and make the claim eligible. It need not
+  // be the lexically first eligible move under native-order C4.6b.
+  {auto pos=c->load_fen("4k3/8/8/8/8/8/8/R3K3 w - - 99 1");
+   auto mv=c->decode_move(*pos,intended.decision->move);
+   auto token=c->make_move(*pos,*mv);
+   check(c->snapshot(*pos)->halfmove_clock()>=100,"legal eligible intended claim");}
   auto now = run("4k3/8/8/8/8/8/8/R3K3 w - - 100 1");
   check(now.status == SearchStatus::complete &&
             now.decision->kind == DecisionKind::claim_draw,

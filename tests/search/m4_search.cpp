@@ -193,6 +193,56 @@ std::vector<Expected> real_candidates(const ChessCore &c, const Position &p, con
   std::stable_sort(out.begin(),out.end(),[&](const auto&a,const auto&b){return s->side_to_move()==Side::white?a.score>b.score:a.score<b.score;});
   return out;
 }
+// Verify exact score/ranking per decision, not an arbitrary lexical tie.
+// Every reported played continuation must attain the independently enumerated
+// minimax score at each ply, using M4's existing standalone real_reference.
+void check_native_semantic_ranking(const ChessCore &c,const Position&p,
+    const GameHistory&h,int depth,const std::vector<SearchVariation>&rank,
+    const std::vector<Expected>&expected) {
+  check(rank.size()==expected.size(),"C4.6 native exact rank cardinality");
+  std::vector<std::string> seen;
+  for(size_t i=0;i<rank.size();++i) {
+    const auto &v=rank[i];
+    check(v.score==expected[i].score,"C4.6 native exact ranked score");
+    SearchResult result=legacy_line(v);verify_pv(c,p,result);
+    if(v.decision.kind==DecisionKind::play) {
+      check(std::find(seen.begin(),seen.end(),v.decision.move)==seen.end(),
+            "C4.6 native distinct root PLAY decisions");
+      seen.push_back(v.decision.move);
+      auto found=std::find_if(expected.begin(),expected.end(),[&](const Expected &e){
+        return e.action.kind==DecisionKind::play && e.action.move==v.decision.move;
+      });
+      check(found!=expected.end() && found->score==v.score,
+            "C4.6 native per-move exact score against exhaustive reference");
+      auto cursor=c.clone(p);auto history=h;
+      for(size_t ply=0;ply<v.principal_variation.size();++ply) {
+        check(int(ply)<depth,"native PV depth bound");
+        // MultiPV root candidates are not necessarily globally optimal:
+        // compare their first move to that candidate's own exact score.
+        // Only subsequent PV moves must attain the position's minimax value.
+        const auto required=ply==0 ? v.score :
+            real_reference(c,*cursor,history,depth-int(ply)).score;
+        const auto &text=v.principal_variation[ply];
+        auto next=history.after_move(c,*cursor,text);
+        auto m=c.decode_move(*cursor,text);c.make_move(*cursor,*m);
+        const auto chosen=real_reference(c,*cursor,next,depth-int(ply)-1).score.one_ply_farther();
+        check(chosen==required,"C4.6 independently optimal native PV ply");
+        history=std::move(next);
+      }
+    } else if(v.decision.kind==DecisionKind::claim_draw ||
+              v.decision.kind==DecisionKind::claim_draw_with_intended_move) {
+      check(v.score==SearchScore::finite(0),"native claim score zero");
+      if(v.decision.kind==DecisionKind::claim_draw_with_intended_move) {
+        auto next=h.after_move(c,p,v.decision.move);
+        auto cursor=c.clone(p);
+        auto m=c.decode_move(*cursor,v.decision.move);c.make_move(*cursor,*m);
+        auto sig=repetition_signature(c,*cursor);
+        check(std::count(next.occurrences().begin(),next.occurrences().end(),sig)>=3 ||
+              c.snapshot(*cursor)->halfmove_clock()>=100,"native intended claim eligible");
+      }
+    } else check(false,"unexpected terminal in ongoing native root ranking");
+  }
+}
 void real_case(const ChessCore &c,const Position&p,const GameHistory&h,int max=2) {
   auto fen=c.export_fen(p); auto occurrences=h.occurrences();
   for(bool ab:{false,true}) for(bool order:{false,true}) {
@@ -201,16 +251,56 @@ void real_case(const ChessCore &c,const Position&p,const GameHistory&h,int max=2
     auto r=legacy_iterative_search(c,p,h,*e,{max,ab,256,order},{},[&](CompletedDepth d){
       auto expected=real_candidates(c,p,h,d.depth);
       check(d.multipv.size()==expected.size(),"all exact real root decisions");
-      for(size_t i=0;i<expected.size();++i) {equal(d.multipv[i],expected[i]);verify_pv(c,p,legacy_line(d.multipv[i]));}
+      try {
+        check_native_semantic_ranking(c,p,h,d.depth,d.multipv,expected);
+      } catch(const std::exception &ex) {
+        std::cerr << "C46V10_M4_DIFF FEN=" << c.export_fen(p)
+                  << " depth=" << d.depth << " ab=" << ab
+                  << " ordering=" << order << " assertion=" << ex.what() << "\n";
+        for(size_t j=0;j<d.multipv.size();++j) {
+          const auto &v=d.multipv[j];
+          std::cerr << "C46V10_M4_ACTUAL i=" << j
+                    << " kind=" << int(v.decision.kind)
+                    << " move=" << v.decision.move
+                    << " scoreKind=" << int(v.score.kind());
+          if(v.score.kind()==SearchScore::Kind::finite) std::cerr << " value=" << v.score.value();
+          else std::cerr << " distance=" << v.score.distance();
+          std::cerr << " end=" << int(v.pv_end) << " intended=" << v.pv_intended_move << " pv=";
+          for(const auto &m:v.principal_variation)std::cerr << m << ',';
+          std::cerr << "\n";
+        }
+        for(size_t j=0;j<expected.size();++j) {
+          const auto &v=expected[j];
+          std::cerr << "C46V10_M4_EXPECTED i=" << j
+                    << " kind=" << int(v.action.kind)
+                    << " move=" << v.action.move
+                    << " scoreKind=" << int(v.score.kind());
+          if(v.score.kind()==SearchScore::Kind::finite) std::cerr << " value=" << v.score.value();
+          else std::cerr << " distance=" << v.score.distance();
+          std::cerr << " end=" << int(v.end) << " intended=" << v.intended << " pv=";
+          for(const auto &m:v.pv)std::cerr << m << ',';
+          std::cerr << "\n";
+        }
+        throw;
+      }
       snapshots.push_back(std::move(d));
     });
+    if(r.status!=IterativeSearchStatus::depth_reached || !r.completed)
+      std::cerr << "C46V10_M4_RESULT FEN=" << fen << " max=" << max
+                << " ab=" << ab << " ordering=" << order
+                << " status=" << int(r.status) << " diagnostic=" << r.diagnostic << "\n";
     check(r.status==IterativeSearchStatus::depth_reached && r.completed,"real iterations");
-    for(auto &d:snapshots){auto ref=evaluator();equal(d.best,search(c,p,h,*ref,{d.depth,ab}));}
+    for(auto &d:snapshots){auto ref=evaluator();auto fixed=search(c,p,h,*ref,{d.depth,ab});
+      check(fixed.score==d.best.score,"M4 native fixed/iterative score compatibility");
+      verify_pv(c,p,fixed);}
     // N=1, ordering off, same final and all intermediate depths as M3.
     snapshots.clear();
     auto one=legacy_iterative_search(c,p,h,*e,{max,ab,1,false},{},[&](CompletedDepth d){snapshots.push_back(std::move(d));});
-    for(auto &d:snapshots){auto ref=evaluator();equal(d.best,search(c,p,h,*ref,{d.depth,ab}));}
-    equal(one.completed->best,legacy_line(r.completed->best));
+    for(auto &d:snapshots){auto ref=evaluator();auto fixed=search(c,p,h,*ref,{d.depth,ab});
+      check(fixed.score==d.best.score,"M4 native fixed/iterative score compatibility");
+      verify_pv(c,p,fixed);}
+    check(one.completed && one.completed->best.score==r.completed->best.score,
+          "M4 native single/MultiPV exact top score");
     check(c.export_fen(p)==fen && h.occurrences()==occurrences,"real immutable root/history");
   }
 }

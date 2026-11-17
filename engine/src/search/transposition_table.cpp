@@ -139,15 +139,36 @@ std::uint64_t meta(std::uint64_t tick, std::uint8_t gen, std::uint8_t useful) no
  return (tick & RECENCY_MASK) | (std::uint64_t(gen)<<48) | (std::uint64_t(useful)<<56);
 }
 struct CompactDecision {
-  DecisionKind kind = DecisionKind::play;
+  DecisionKind kind=DecisionKind::play;
   char move[6]{};
-  std::optional<TerminalOutcome> outcome;
-  CompactDecision(const ChessDecision &d = {DecisionKind::play, {}})
+  std::optional<TerminalOutcome> outcome{};
+  // Preserve compact footprint. The last byte marks a native 16-bit move;
+  // original UCI decisions have a NUL there (at most five UCI characters).
+  static constexpr char binary_marker=char(0x7f);
+  CompactDecision()=default;
+  CompactDecision(const detail::PrivateDecision &d)
       : kind(d.kind), outcome(d.terminal_outcome) {
-    if (d.move.size() > 5) throw std::logic_error("noncanonical TT decision");
-    std::copy(d.move.begin(), d.move.end(), move);
+    if(d.move.size()>5)throw std::logic_error("noncanonical TT decision");
+    if(d.move.native()) {
+      auto id=d.move.native_bits();
+      move[0]=static_cast<char>(id&255U);
+      move[1]=static_cast<char>(id>>8);
+      move[5]=binary_marker;
+    } else {
+      auto v=d.move.view();
+      std::copy(v.begin(),v.end(),move);
+    }
   }
-  ChessDecision expand() const { return {kind, move, outcome}; }
+  bool native() const noexcept {return move[5]==binary_marker;}
+  bool has_move() const noexcept {return native()||move[0];}
+  detail::SearchMoveIdentity identity() const {
+    if(native())return detail::SearchMoveIdentity::from_native(static_cast<std::uint16_t>(
+        static_cast<unsigned char>(move[0]) |
+        (unsigned(static_cast<unsigned char>(move[1]))<<8)));
+    return detail::SearchMoveIdentity(std::string_view(move));
+  }
+  detail::PrivateDecision internal() const {return {kind,identity(),outcome};}
+  ChessDecision expand() const {return internal().expand();}
 };
 // Deliberately no history, clock, full snapshot, history pool pointers, or
 // verification metadata. Exact position signatures guard moves against
@@ -424,10 +445,12 @@ TTProbe TTAccess::probe(TranspositionTable &t,
        to_root_score(*e.score,ply)) {
       p.touch(e,true); shadow_done=true; // one deeper entry, NO deeper numeric return
     }
-    if (e.decision.kind == DecisionKind::play && e.decision.move[0] &&
+    if (e.decision.kind == DecisionKind::play && e.decision.has_move() &&
         recency(e.touched) >= hint_recency) {
-      result.hint = e.decision.move;
-      hint_recency = recency(e.touched);
+      result.native_hint.reset();result.hint.clear();
+      if(e.decision.native())result.native_hint=e.decision.identity();
+      else result.hint=e.decision.move;
+      hint_recency=recency(e.touched);
     }
     if (!numeric || !e.score) continue;
     ++stats.candidate_hits;
@@ -444,7 +467,9 @@ TTProbe TTAccess::probe(TranspositionTable &t,
     if (!result.score || e.bound == TTBound::exact) {
       result.score = *score;
       result.bound = e.bound;
-      result.decision = e.decision.expand();
+      result.internal_decision=e.decision.internal();
+      result.decision=e.decision.native() ? std::nullopt
+                          : std::optional<ChessDecision>(e.decision.expand());
       result.selected_slot=i;
       if(touch_mode==0 || touch_mode==3) p.touch(e); // original on selection
       if(detail::audit.enabled) {
@@ -462,7 +487,7 @@ void TTAccess::store(TranspositionTable &t,
     int depth, std::string_view evaluator, std::uint64_t policy,
     EvaluatorCacheCompatibility compatibility,
     std::optional<EvaluationExtras> extras,
-    bool numeric, SearchScore score, TTBound bound, const ChessDecision &decision,
+    bool numeric, SearchScore score, TTBound bound, const PrivateDecision &decision,
     std::uint64_t ply, TranspositionStatistics &stats) {
   auto &row=audit.depth[bin(depth)];
   Timer timer(audit.enabled?&row.store_ns:nullptr);
@@ -470,7 +495,8 @@ void TTAccess::store(TranspositionTable &t,
   // Only a real PLAY continuation can provide history-independent move
   // information. Claims/terminal decisions require current DrawState.
   if (decision.move.size() > 5) throw std::logic_error("noncanonical TT decision");
-  if (decision.kind != DecisionKind::play || decision.move.empty()) {
+  if (decision.kind != DecisionKind::play || decision.move.size()==0 ||
+      (decision.move.native() && !decision.move.native_move().valid_shape())) {
     if(audit.enabled)++row.nonplay;
     return;
   }
@@ -642,7 +668,7 @@ TTProbe TTSession::probe_impl(const RepetitionSignature &s, int depth,
 }
 void TTSession::store_impl(const RepetitionSignature &s, int depth,
                            SearchScore score, TTBound bound,
-                           const ChessDecision &action, std::uint64_t ply,
+                           const PrivateDecision &action, std::uint64_t ply,
                            std::optional<EvaluationExtras> extras,
                            std::optional<std::uint64_t> *node_hash) {
   if (!table_) return;
@@ -665,6 +691,15 @@ void TTSession::store(const RepetitionSignature &s, int depth,
                       const ChessDecision &action, std::uint64_t ply,
                       const PositionSnapshot &snapshot,
                       std::optional<std::uint64_t> *node_hash) {
+  store_impl(s, depth, score, bound, PrivateDecision(action), ply,
+      compatibility_ == EvaluatorCacheCompatibility::deterministic_position
+      ? std::optional(evaluation_extras(snapshot)) : std::nullopt, node_hash);
+}
+void TTSession::store(const RepetitionSignature &s, int depth,
+                      SearchScore score, TTBound bound,
+                      const PrivateDecision &action, std::uint64_t ply,
+                      const PositionSnapshot &snapshot,
+                      std::optional<std::uint64_t> *node_hash) {
   store_impl(s, depth, score, bound, action, ply,
       compatibility_ == EvaluatorCacheCompatibility::deterministic_position
       ? std::optional(evaluation_extras(snapshot)) : std::nullopt, node_hash);
@@ -680,7 +715,7 @@ void TTSession::store(const ChessEvalPosition &snapshot,
                       const RepetitionSignature &s, int depth,
                       SearchScore score, TTBound bound,
                       const ChessDecision &action, std::uint64_t ply) {
-  store_impl(s, depth, score, bound, action, ply,
+  store_impl(s, depth, score, bound, PrivateDecision(action), ply,
       compatibility_ == EvaluatorCacheCompatibility::deterministic_position
       ? std::optional(evaluation_extras(snapshot)) : std::nullopt);
 }

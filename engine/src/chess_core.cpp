@@ -341,6 +341,15 @@ bool native_has_legal_uci_hint(const ChessCore& core, const Position& position,
     return false;
 }
 
+// Verify the raw TT hint against the current position's legal move list.
+// Never interpret this raw identity as an executable move certificate.
+bool native_has_legal_move_identity(const ChessCore& core, const Position& position,
+                                    std::uint16_t identity) {
+    (void)cast<Core>(core);
+    const auto& p=cast<Pos>(position);
+    for (auto m:moves(p)) if (m.move()==identity) return true;
+    return false;
+}
 bool native_has_legal_en_passant(const ChessCore& core, const Position& position) {
     (void)cast<Core>(core);
     const auto& p = cast<Pos>(position);
@@ -460,6 +469,12 @@ CompactUciText NativeBatchEncoder::encode_compact(std::size_t ordinal) const {
     if (batch_.invalidated || batch_.owner != p.identity || batch_.top != p.top ||
         ordinal >= batch_.size) invalid();
     return native_move_to_compact_uci(chess::Move(batch_.identities[ordinal]));
+}
+std::uint16_t NativeBatchEncoder::identity(std::size_t ordinal) const {
+    const auto& p = static_cast<const Pos&>(position_);
+    if (batch_.invalidated || batch_.owner != p.identity || batch_.top != p.top ||
+        ordinal >= batch_.size) invalid();
+    return batch_.identities[ordinal];
 }
 std::unique_ptr<Move> materialize_native_batch_member(
     const ChessCore& core, const Position& position, const NativeMoveBatch& batch,

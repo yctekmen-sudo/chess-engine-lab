@@ -4,6 +4,16 @@ project(ChessEngineLab VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 
+# H2-C1.1b accepted tactical ordering: prioritize a first promotion,
+# otherwise the highest-value captured victim. Capture/promotion indexes are
+# recorded in the existing native move-fact preparation pass (no second scan).
+# Define this for every C++ target, including m72 and j1 tests, native/WASM,
+# and m76's nested B2/P1/NONE builds; no external CMake hooks are needed.
+add_compile_definitions(
+  "$<$<COMPILE_LANGUAGE:CXX>:CELAB_H2_POLICY=3>"
+  "$<$<COMPILE_LANGUAGE:CXX>:CELAB_H2C11_POLICY=2>"
+)
+
 # Reversible production policy; the algorithm and public search API are shared.
 set(CHESS_LAB_ORDERING_POLICY "B2" CACHE STRING "Persistent ordering: B2, P1, NONE")
 set_property(CACHE CHESS_LAB_ORDERING_POLICY PROPERTY STRINGS B2 P1 NONE)
