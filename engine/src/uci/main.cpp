@@ -47,6 +47,7 @@ class Adapter {
   std::string module, config="{}";
   std::size_t multipv=1;
   bool certified=false;
+  bool builtin_material=false;
   std::uint64_t policy=1;
   std::uint64_t search_sequence=0;
   std::thread worker;
@@ -90,7 +91,15 @@ class Adapter {
     else if(name=="ValuePolicy")policy=number(val,1,2147483647);
     else if(name=="Evaluator" || name=="EvaluatorConfig") {
       auto path=name=="Evaluator"?val:module, json=name=="EvaluatorConfig"?val:config;
-      evaluation.replace(EvaluatorModule::native(path),json);module=std::move(path);config=std::move(json);identity();
+      evaluation.replace(EvaluatorModule::native(path),json);
+      if(name=="Evaluator") {
+        // Replacing the module voids the implicit built-in material certification.
+        // A caller may explicitly re-enable numeric caching after certifying
+        // its evaluator under the documented full-snapshot contract.
+        certified=false; builtin_material=false;
+        emit("info string chesslab numeric TT reset to hint-only after evaluator replacement\n");
+      }
+      module=std::move(path);config=std::move(json);identity();
     } else throw std::invalid_argument("unknown option or invalid button value");
   }
   Mode mode(const std::vector<std::string>&v) {
@@ -185,14 +194,14 @@ class Adapter {
     });
   }
 public:
-  explicit Adapter(std::string default_module):module(std::move(default_module)) {evaluation.replace(EvaluatorModule::native(module),config);}
+  explicit Adapter(std::string default_module, bool builtin):module(std::move(default_module)), certified(builtin), builtin_material(builtin) {evaluation.replace(EvaluatorModule::native(module),config);}
   void stop() {cancellation.request();signal.notify_all();if(worker.joinable())worker.join();active=false;}
   ~Adapter(){stop();}
   bool command(const std::string &line) {
     try {
       auto v=tokens(line);if(v.empty())return true;
       if(v[0]=="uci" && v.size()==1) {
-        emit("id name Chess Lab M6\nid author Chess Engine Lab\noption name Hash type spin default 16 min 0 max 256\noption name Clear Hash type button\noption name MultiPV type spin default 1 min 1 max 256\noption name Evaluator type string default "+module+"\noption name EvaluatorConfig type string default {}\noption name NumericTT type check default false\noption name ValuePolicy type spin default 1 min 1 max 2147483647\n");identity();emit("uciok\n");
+        emit("id name Chess Lab M6\nid author Chess Engine Lab\noption name Hash type spin default 16 min 0 max 256\noption name Clear Hash type button\noption name MultiPV type spin default 1 min 1 max 256\noption name Evaluator type string default "+module+"\noption name EvaluatorConfig type string default {}\noption name NumericTT type check default "+std::string(builtin_material?"true":"false")+"\noption name ValuePolicy type spin default 1 min 1 max 2147483647\n");identity();emit("uciok\n");
       } else if(v[0]=="isready" && v.size()==1)emit("readyok\n");
       else if(v[0]=="quit" && v.size()==1){stop();return false;}
       else if(v[0]=="stop" && v.size()==1)stop();
@@ -209,7 +218,7 @@ public:
 int main(int argc,char **argv) {
   try {
     auto path=argc>1?std::filesystem::path(argv[1]):std::filesystem::absolute(argv[0]).parent_path()/CHESS_LAB_MATERIAL_FILENAME;
-    Adapter adapter(path.string());
+    Adapter adapter(path.string(),argc==1);
     std::string line;bool oversized=false;char c;
     while(std::cin.get(c)) {
       if(c=='\n') {if(oversized)emit("info string chesslab rejected oversized command\n");else if(!adapter.command(line))break;line.clear();oversized=false;}
