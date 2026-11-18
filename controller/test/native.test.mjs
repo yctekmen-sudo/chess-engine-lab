@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {nativeEngine as binary,sharedLibrary} from './native-paths.mjs';
-function client(t,env={}){
- const p=spawn(binary,[],{stdio:'pipe',env:{...process.env,...env}}),lines=[],waiters=[];let exit;
+function client(t,env={},args=[]){
+ const p=spawn(binary,args,{stdio:'pipe',env:{...process.env,...env}}),lines=[],waiters=[];let exit;
  p.on('exit',(code)=>{exit=code;for(const w of waiters.splice(0))w.reject(Error('engine exited '+code));});
  createInterface({input:p.stdout}).on('line',s=>{lines.push(s);for(const w of [...waiters])if(w.check(s)){waiters.splice(waiters.indexOf(w),1);clearTimeout(w.timer);w.resolve(s);}});
  p.stdin.on('error',()=>{});t.after(()=>p.kill('SIGKILL'));
@@ -83,4 +83,51 @@ test('failure after provisional depth exits without bestmove and clears TT after
 test('quit during active search cancels, joins and exits cleanly',async t=>{
  const c=client(t);await handshake(c);const exit=new Promise(resolve=>c.p.once('exit',code=>resolve(code)));
  c.send('go infinite');c.send('quit');assert.equal(await exit,0);
+});
+
+// Numeric-TT default integration: check actual search reuse, not merely the
+// option banner. The material evaluator is the only implicitly certified
+// provider; external evaluators require an explicit option.
+async function numericTtExactHits(c) {
+ const from=c.lines.length;
+ const move=await search(c,'position startpos','go depth 5');
+ assert.match(move,/^bestmove [a-h][1-8][a-h][1-8]/);
+ const lines=c.lines.slice(from);
+ const matches=lines.filter(s=>s.startsWith('info string chesslab metrics '));
+ assert.equal(matches.length,1,'exactly one completed search metrics line');
+ const result=/\btt_exact_hits (\d+)$/.exec(matches[0]);
+ assert(result,'TT exact-hit counter present');
+ return Number(result[1]);
+}
+test('numeric TT packaged-material default, explicit opt-out, external and replacement policy',async t=>{
+ // Packaged default must perform actual numeric-score reuse.
+ const built=client(t);await handshake(built);
+ assert(built.lines.includes('option name NumericTT type check default true'));
+ assert((await numericTtExactHits(built))>0,'packaged material numeric default is active');
+ built.send('setoption name NumericTT value false');
+ assert.equal(await numericTtExactHits(built),0,'explicit opt-out uses hints only');
+ built.send('setoption name NumericTT value true');
+ assert((await numericTtExactHits(built))>0,'explicit opt-in reactivates numeric reuse');
+
+ // Explicit startup path is not trusted implicitly, even if it happens to
+ // point to the separately built material evaluator.
+ const explicit=client(t,{},[sharedLibrary('material_evaluator')]);
+ await handshake(explicit);
+ assert(explicit.lines.includes('option name NumericTT type check default false'));
+ assert.equal(await numericTtExactHits(explicit),0,'external path defaults hint-only');
+ explicit.send('setoption name NumericTT value true');
+ assert((await numericTtExactHits(explicit))>0,'explicitly certified external numeric reuse');
+
+ // Replacing an evaluator invalidates the implicit certification. Verify the
+ // effective behavior using the actual search metrics and option banner.
+ const replaced=client(t);await handshake(replaced);
+ const reset=replaced.wait(s=>s.includes('numeric TT reset to hint-only'));
+ replaced.send('setoption name Evaluator value '+sharedLibrary('material_evaluator'));
+ await reset;
+ const before=replaced.lines.length;
+ const banner=replaced.wait(s=>s==='uciok');replaced.send('uci');await banner;
+ assert(replaced.lines.slice(before).includes('option name NumericTT type check default false'));
+ assert.equal(await numericTtExactHits(replaced),0,'replacement must not inherit certification');
+ replaced.send('setoption name NumericTT value true');
+ assert((await numericTtExactHits(replaced))>0,'explicit opt-in works after replacement');
 });

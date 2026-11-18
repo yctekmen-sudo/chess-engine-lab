@@ -617,8 +617,18 @@ paired reductions were **18.00% / 17.87%**, warm **19.15% / 18.32%**. Its separa
 repetition-cold regression was **1.44% / 2.07%**, and middlegame TT-off control
 regression **4.24% / 2.49%**. All raw observations and outliers remain retained.
 
-The real native UCI defaults are **Hash=16 MiB requested, NumericTT=false** and
-value policy 1. This is an attached effective **hint-only** table, not TT disabled.
+The native UCI default continues to request **Hash=16 MiB** and value policy 1.
+For the **packaged material evaluator launched with no explicit evaluator path**,
+`NumericTT` now defaults to **true** (certified for the complete evaluator
+snapshot). An explicit evaluator path or `setoption name Evaluator` replacement
+defaults to **hint-only**, unless the caller deliberately asserts compatible
+numeric caching through `NumericTT=true`. Explicit `NumericTT=false` remains an
+opt-out. This is a packaging trust boundary, not cryptographic certification of
+an arbitrary DLL/SO. See [numeric TT default adoption](numeric-tt-default-adoption.md).
+
+**Historical baseline for the M7.5c study below:** At the time of those measurements,
+the real native UCI default was `NumericTT=false`. Its default-policy results
+remain hint-only measurements and must not be relabeled as numeric.
 The separate **336-invocation default-policy** study used the iterative API with
 `TranspositionTableUse{&table, EvaluatorCacheCompatibility::not_certified, 1}`.
 Actual allocated capacity was verified as **9,044,156 bytes**, with positive hint,
