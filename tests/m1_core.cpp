@@ -69,7 +69,7 @@ try {
         }
     }
     auto p=c.initial_position(); auto s=c.snapshot(*p);
-    check(c.export_fen(*p)==initial && s->schema_version()==1,"Initial/schema");
+    check(c.export_fen(*p)==initial && s->schema_version()==position_snapshot_schema_version,"Initial/schema");
     check(s->squares()[0]==PieceCode::white_rook && s->squares()[4]==PieceCode::white_king &&
           s->squares()[60]==PieceCode::black_king && s->squares()[63]==PieceCode::black_rook,"Piece codes");
     auto original=c.position_key(*p);

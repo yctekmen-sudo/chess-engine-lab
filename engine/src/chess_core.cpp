@@ -1,9 +1,13 @@
 #include "chess_lab/chess_core.hpp"
 #include "native_move_batch.hpp"
+#include "evaluation/native_eval_snapshot.hpp"
 #include "native_undo_fastpath.hpp"
 #include "chess.hpp"
 
 #include <array>
+#include <algorithm>
+#include <cstring>
+#include <bit>
 #include <charconv>
 #include <limits>
 #include <sstream>
@@ -57,7 +61,7 @@ struct Undo final : UndoToken {
     bool consumed = false;
 };
 struct Snap final : PositionSnapshot {
-    std::array<PieceCode, 64> pieces{};
+    std::array<PieceCode, 64> pieces = empty_piece_squares();
     Side side{};
     std::array<bool, 4> rights{};
     Metadata meta;
@@ -68,8 +72,71 @@ struct Snap final : PositionSnapshot {
     std::optional<std::uint8_t> en_passant_square() const noexcept override { return meta.ep; }
     std::uint32_t halfmove_clock() const noexcept override { return meta.half; }
     std::uint32_t fullmove_number() const noexcept override { return meta.full; }
-    std::uint32_t schema_version() const noexcept override { return 1; }
+    std::uint32_t schema_version() const noexcept override { return position_snapshot_schema_version; }
 };
+// Prove the actual byte representation, not just enum ordinal equality.
+static_assert(sizeof(chess::Piece)==1 && sizeof(PieceCode)==1);
+static_assert(std::is_trivially_copyable_v<chess::Piece> && std::is_trivially_copyable_v<PieceCode>);
+static_assert(std::has_unique_object_representations_v<chess::Piece> &&
+              std::has_unique_object_representations_v<PieceCode>);
+static_assert(int(chess::Piece{chess::Piece::WHITEPAWN})==int(PieceCode::white_pawn) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::WHITEPAWN})==
+    std::bit_cast<std::uint8_t>(PieceCode::white_pawn));
+static_assert(int(chess::Piece{chess::Piece::WHITEKNIGHT})==int(PieceCode::white_knight) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::WHITEKNIGHT})==
+    std::bit_cast<std::uint8_t>(PieceCode::white_knight));
+static_assert(int(chess::Piece{chess::Piece::WHITEBISHOP})==int(PieceCode::white_bishop) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::WHITEBISHOP})==
+    std::bit_cast<std::uint8_t>(PieceCode::white_bishop));
+static_assert(int(chess::Piece{chess::Piece::WHITEROOK})==int(PieceCode::white_rook) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::WHITEROOK})==
+    std::bit_cast<std::uint8_t>(PieceCode::white_rook));
+static_assert(int(chess::Piece{chess::Piece::WHITEQUEEN})==int(PieceCode::white_queen) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::WHITEQUEEN})==
+    std::bit_cast<std::uint8_t>(PieceCode::white_queen));
+static_assert(int(chess::Piece{chess::Piece::WHITEKING})==int(PieceCode::white_king) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::WHITEKING})==
+    std::bit_cast<std::uint8_t>(PieceCode::white_king));
+static_assert(int(chess::Piece{chess::Piece::BLACKPAWN})==int(PieceCode::black_pawn) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::BLACKPAWN})==
+    std::bit_cast<std::uint8_t>(PieceCode::black_pawn));
+static_assert(int(chess::Piece{chess::Piece::BLACKKNIGHT})==int(PieceCode::black_knight) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::BLACKKNIGHT})==
+    std::bit_cast<std::uint8_t>(PieceCode::black_knight));
+static_assert(int(chess::Piece{chess::Piece::BLACKBISHOP})==int(PieceCode::black_bishop) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::BLACKBISHOP})==
+    std::bit_cast<std::uint8_t>(PieceCode::black_bishop));
+static_assert(int(chess::Piece{chess::Piece::BLACKROOK})==int(PieceCode::black_rook) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::BLACKROOK})==
+    std::bit_cast<std::uint8_t>(PieceCode::black_rook));
+static_assert(int(chess::Piece{chess::Piece::BLACKQUEEN})==int(PieceCode::black_queen) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::BLACKQUEEN})==
+    std::bit_cast<std::uint8_t>(PieceCode::black_queen));
+static_assert(int(chess::Piece{chess::Piece::BLACKKING})==int(PieceCode::black_king) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::BLACKKING})==
+    std::bit_cast<std::uint8_t>(PieceCode::black_king));
+static_assert(int(chess::Piece{chess::Piece::NONE})==int(PieceCode::empty) &&
+    std::bit_cast<std::uint8_t>(chess::Piece{chess::Piece::NONE})==
+    std::bit_cast<std::uint8_t>(PieceCode::empty));
+void fill_native_snapshot(const Pos& p, Snap& s) {
+        const auto& native=p.board.celab_native_squares();
+        static_assert(sizeof(native)==64 && sizeof(s.pieces)==64);
+        std::memcpy(s.pieces.data(),native.data(),sizeof(s.pieces));
+#if defined(CELAB_S111C_VERIFY)
+        // Independent scalar reads from the original square accessor.
+        for (int i=0;i<64;++i) {
+            const auto piece=p.board.at(chess::Square(i));
+            if (s.pieces[i]!=static_cast<PieceCode>(int(piece)))
+                throw std::logic_error("S1.11c native byte copy mismatch");
+        }
+#endif
+        s.side=p.board.sideToMove()==chess::Color::WHITE?Side::white:Side::black;
+        auto cr=p.board.castlingRights();
+        using CS=chess::Board::CastlingRights::Side;
+        s.rights={cr.has(chess::Color::WHITE,CS::KING_SIDE),cr.has(chess::Color::WHITE,CS::QUEEN_SIDE),
+                   cr.has(chess::Color::BLACK,CS::KING_SIDE),cr.has(chess::Color::BLACK,CS::QUEEN_SIDE)};
+        s.meta=p.meta;
+}
 std::uint32_t number(const std::string& s, bool positive) {
     std::uint32_t n;
     auto [end, ec] = std::from_chars(s.data(), s.data()+s.size(), n);
@@ -269,16 +336,7 @@ public:
     std::uint64_t repetition_key(const Position& p) const override { return position_key(p); }
     std::unique_ptr<const PositionSnapshot> snapshot(const Position& position) const override {
         const auto& p=cast<Pos>(position); auto s=std::make_unique<Snap>();
-        for (int i=0;i<64;++i) {
-            auto piece=p.board.at(chess::Square(i));
-            s->pieces[i]=piece==chess::Piece::NONE?PieceCode::empty:static_cast<PieceCode>(int(piece)+1);
-        }
-        s->side=p.board.sideToMove()==chess::Color::WHITE?Side::white:Side::black;
-        auto cr=p.board.castlingRights();
-        using CS=chess::Board::CastlingRights::Side;
-        s->rights={cr.has(chess::Color::WHITE,CS::KING_SIDE),cr.has(chess::Color::WHITE,CS::QUEEN_SIDE),
-                   cr.has(chess::Color::BLACK,CS::KING_SIDE),cr.has(chess::Color::BLACK,CS::QUEEN_SIDE)};
-        s->meta=p.meta;
+        fill_native_snapshot(p,*s);
         return s;
     }
 };
@@ -350,6 +408,32 @@ bool native_has_legal_move_identity(const ChessCore& core, const Position& posit
     for (auto m:moves(p)) if (m.move()==identity) return true;
     return false;
 }
+// S1.11e: callers supply the exact repetition EP of this live frame.
+std::uint64_t native_tt_repetition_key(const ChessCore& core,const Position& position,
+                                      std::optional<std::uint8_t> legal_ep) {
+    (void)cast<Core>(core);
+    const auto& p=cast<Pos>(position);
+    const auto ep=legal_ep ? chess::Square(*legal_ep) : chess::Square(chess::Square::NO_SQ);
+#if defined(CELAB_S111E_VERIFY)
+    if(p.board.hash()!=p.board.zobrist())
+        throw std::logic_error("S1.11e incremental Zobrist mismatch");
+    // Independent complete legal-list oracle when raw EP exists. No production
+    // regeneration, and no change to the make/unmake or public key contracts.
+    std::optional<std::uint8_t> expected;
+    if(p.meta.ep) for(auto m:moves(p))
+        if(m.typeOf()==chess::Move::ENPASSANT) expected=p.meta.ep;
+    if(expected!=legal_ep)
+        throw std::logic_error("S1.11e effective EP mismatch");
+    // Rebuild through the existing validated FEN parser. It normalizes EP on
+    // load independently of the normal (pseudo-legal) makeMove path.
+    if(p.meta.ep) {
+        auto reload=core.load_fen(core.export_fen(position));
+        if(p.board.celab_repetition_hash(ep)!=core.position_key(*reload))
+            throw std::logic_error("S1.11e normalized key mismatch");
+    }
+#endif
+    return p.board.celab_repetition_hash(ep);
+}
 bool native_has_legal_en_passant(const ChessCore& core, const Position& position) {
     (void)cast<Core>(core);
     const auto& p = cast<Pos>(position);
@@ -379,6 +463,113 @@ struct NativeMoveBatch {
 };
 void NativeMoveBatchDeleter::operator()(NativeMoveBatch* batch) const noexcept {
     delete batch;
+}
+// S1.7a: Compact, legally generated tactical batch. The original complete
+// generator remains available and is unchanged. The source move list is a
+// fixed-capacity chess::Movelist; only native uint16 identities are retained.
+NativeMoveBatchOwner prepare_native_qsearch_batch(
+    const ChessCore& core, const Position& position,
+    bool checked, bool include_quiet_promotions) {
+    (void)cast<Core>(core);
+    const auto& p=cast<Pos>(position);
+    NativeMoveBatchOwner batch(new NativeMoveBatch);
+    batch->owner=p.identity;
+    batch->top=p.top;
+    chess::Movelist legal;
+    if(checked)chess::movegen::legalmoves(legal,p.board);
+    else if(include_quiet_promotions)
+        chess::movegen::legalmoves<chess::movegen::MoveGenType::TACTICAL>(legal,p.board);
+    else
+        chess::movegen::legalmoves<chess::movegen::MoveGenType::CAPTURE>(legal,p.board);
+    for(auto move:legal)batch->identities.at(batch->size++)=move.move();
+    return batch;
+}
+// Populate the final repetition storage directly, without a detached Snap.
+void native_read_search_identity(const ChessCore& core,const Position& position,
+    std::array<PieceCode,64>& pieces, Side& side, std::array<bool,4>& rights,
+    NativeSearchMetadata& metadata) {
+    (void)cast<Core>(core);
+    const auto& p=cast<Pos>(position);
+    const auto& native=p.board.celab_native_squares();
+    static_assert(sizeof(native)==64 && sizeof(pieces)==64);
+    std::memcpy(pieces.data(),native.data(),sizeof(pieces));
+    side=p.board.sideToMove()==chess::Color::WHITE?Side::white:Side::black;
+    const auto cr=p.board.castlingRights();
+    using CS=chess::Board::CastlingRights::Side;
+    rights={cr.has(chess::Color::WHITE,CS::KING_SIDE),cr.has(chess::Color::WHITE,CS::QUEEN_SIDE),
+            cr.has(chess::Color::BLACK,CS::KING_SIDE),cr.has(chess::Color::BLACK,CS::QUEEN_SIDE)};
+    metadata={p.meta.ep,p.meta.half,p.meta.full};
+#if defined(CELAB_S112_VERIFY)
+    const auto ref=core.snapshot(position);
+    if (!std::equal(pieces.begin(),pieces.end(),ref->squares().begin()) ||
+        side!=ref->side_to_move() || metadata.raw_ep!=ref->en_passant_square() ||
+        metadata.half!=ref->halfmove_clock() || metadata.full!=ref->fullmove_number() ||
+        rights!=std::array<bool,4>{ref->can_castle_kingside(Side::white),
+            ref->can_castle_queenside(Side::white),ref->can_castle_kingside(Side::black),
+            ref->can_castle_queenside(Side::black)})
+        throw std::logic_error("S1.12 direct identity mismatch");
+#endif
+}
+bool native_refresh_search_snapshot(const ChessCore& core,const Position& position,
+    std::unique_ptr<const PositionSnapshot>& owner) {
+    if (!owner || typeid(core)!=typeid(Core) || typeid(position)!=typeid(Pos) ||
+        typeid(*owner)!=typeid(Snap)) return false;
+    // Core::snapshot allocates a mutable Snap, then transfers const ownership.
+    // This private operation requires unique ownership with no live readers.
+    fill_native_snapshot(static_cast<const Pos&>(position),
+        const_cast<Snap&>(static_cast<const Snap&>(*owner)));
+    return true;
+}
+// S1.13: Populate the stable evaluator ABI directly from the live native frame.
+// No SEE king-square queries, intermediate masks or virtual snapshot reads.
+bool native_fill_evaluation_position(const ChessCore& core, const Position& position,
+                                     ChessEvalPosition& out) noexcept {
+    if (typeid(core) != typeid(Core) || typeid(position) != typeid(Pos)) return false;
+    const auto& p = static_cast<const Pos&>(position);
+    const auto& board = p.board;
+    out.struct_size = sizeof out;
+    out.schema_major = CHESS_EVAL_SNAPSHOT_MAJOR;
+    out.schema_minor = CHESS_EVAL_SNAPSHOT_MINOR;
+    const auto white = board.us(chess::Color::WHITE);
+    const auto black = board.us(chess::Color::BLACK);
+    const chess::PieceType kinds[] = {chess::PieceType::PAWN, chess::PieceType::KNIGHT,
+        chess::PieceType::BISHOP, chess::PieceType::ROOK, chess::PieceType::QUEEN,
+        chess::PieceType::KING};
+    for (unsigned i = 0; i < 6; ++i) {
+        const auto mask = board.pieces(kinds[i]);
+        out.bitboards[i] = (mask & white).getBits();
+        out.bitboards[i+6] = (mask & black).getBits();
+    }
+    out.side_to_move = board.sideToMove() == chess::Color::BLACK;
+    const auto cr = board.castlingRights();
+    using CS = chess::Board::CastlingRights::Side;
+    out.castling_rights =
+        static_cast<std::uint64_t>(cr.has(chess::Color::WHITE, CS::KING_SIDE)) |
+        (static_cast<std::uint64_t>(cr.has(chess::Color::WHITE, CS::QUEEN_SIDE)) << 1) |
+        (static_cast<std::uint64_t>(cr.has(chess::Color::BLACK, CS::KING_SIDE)) << 2) |
+        (static_cast<std::uint64_t>(cr.has(chess::Color::BLACK, CS::QUEEN_SIDE)) << 3);
+    // Board EP can be normalized; the evaluator contract requires raw FEN EP.
+    out.en_passant_square = p.meta.ep ? *p.meta.ep : CHESS_EVAL_EP_NONE;
+    out.halfmove_clock = p.meta.half;
+    out.fullmove_number = p.meta.full;
+    return true;
+}
+bool native_see_masks(const ChessCore& core, const Position& position,
+                      NativeSeeMasks& masks) noexcept {
+    if (typeid(core) != typeid(Core) || typeid(position) != typeid(Pos)) return false;
+    const auto& board=static_cast<const Pos&>(position).board;
+    masks.sides[0]=board.us(chess::Color::BLACK).getBits();
+    masks.sides[1]=board.us(chess::Color::WHITE).getBits();
+    masks.kinds[0]=0;
+    masks.kinds[1]=board.pieces(chess::PieceType::PAWN).getBits();
+    masks.kinds[2]=board.pieces(chess::PieceType::KNIGHT).getBits();
+    masks.kinds[3]=board.pieces(chess::PieceType::BISHOP).getBits();
+    masks.kinds[4]=board.pieces(chess::PieceType::ROOK).getBits();
+    masks.kinds[5]=board.pieces(chess::PieceType::QUEEN).getBits();
+    masks.kinds[6]=board.pieces(chess::PieceType::KING).getBits();
+    masks.kings[0]=board.kingSq(chess::Color::BLACK).index();
+    masks.kings[1]=board.kingSq(chess::Color::WHITE).index();
+    return true;
 }
 NativeMoveBatchOwner prepare_native_move_batch(const ChessCore& core,
                                                const Position& position) {

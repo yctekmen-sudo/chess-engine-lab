@@ -1,5 +1,13 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+## S1 production consolidation — accepted local candidate, 2026-11-24 (America/New_York)
+
+Exact pre-S1 main `84ea6ba22ffc52a5a4c42e5218c969052c0e99cb`. The user accepted production v2 after Windows/WSL native validation in `CELab-S1-production-evidence-s1prod-20261125T042518Z-6e77aa73.zip`. 384 native tests, 20,660 frozen search records, 256 additional verification searches and 600 PGO training searches completed; all 36 exported production files matched across platforms. Final commit preparation updates documentation and removes one trailing LF from `scripts/performance/targeting.py` (no Python AST or meaningful-token change); all other validated non-documentation bytes are preserved. See [S1 production validation and performance](s1-production-validation.md) and [policy/build workflow](s1-production.md).
+
+Same-configuration QS-off NPS gains vs main: Windows MSVC +24.12%, WSL GCC +21.66%, optimized Windows Clang +34.82%, WSL Clang +32.56%. QS-on elapsed time fell on all four configurations. No aggregate tactical strength gain established. Native O3 + Full LTO + PGO is the accepted opt-in local configuration; portable builds remain supported.
+
+The candidate is not merged. Local commit preparation and a single committed-revision Full CI run are next; reference review, publication and merge remain separate gates. No historical reference replacement is authorized. Older checkpoints below describe their historical scope, not current publication status.
+
 ## C1+C2+C3 accepted stack — 2026-11-14: draft integration candidate
 
 C1 (packed UCI text comparison, conditional canonical resort, promotion validation),

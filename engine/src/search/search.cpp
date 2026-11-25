@@ -7,6 +7,7 @@
 #include "repeated_claim_targets.hpp"
 #include "persistent_ordering.hpp"
 #include "../native_move_batch.hpp"
+#include "../evaluation/native_eval_snapshot.hpp"
 #include "../native_undo_fastpath.hpp"
 #include <algorithm>
 #include <array>
@@ -15,7 +16,10 @@
 #include <cstdio>
 #include <chess_lab/search.hpp>
 #include <cmath>
+#include <bit>
+#include <span>
 #include <limits>
+#include <cstdlib>
 #include <type_traits>
 
 namespace chess_lab {
@@ -103,6 +107,550 @@ struct OrderedMove {
   }
 };
 static_assert(sizeof(OrderedMove) <= 24, "B4.1 search move records must remain compact");
+
+
+// Accepted S1.7a generator: lazy tactical generation including quiet promotions.
+constexpr unsigned s17a_mode() noexcept { return 3U; }
+constexpr bool s17a_lazy() noexcept {return true;}
+constexpr bool s17a_include_quiet_promotion() noexcept {return true;}
+#if defined(CHESS_LAB_S1_DIAGNOSTICS) && CHESS_LAB_S1_DIAGNOSTICS
+bool s17a_trace() noexcept {
+  static const bool v=[]() noexcept {const char* e=std::getenv("CELAB_S17A_TRACE");
+    return e && e[0]=='1' && e[1]=='\0';}();
+  return v;
+}
+#else
+constexpr bool s17a_trace() noexcept { return false; }
+#endif
+
+// Production S1: accepted policy is fixed; the process-local QS opt-out is
+// retained for the fixed-depth compatibility oracle and controlled benchmarks.
+// Process-local opt-out; default is selected by the supported CMake option.
+#ifndef CHESS_LAB_QUIESCENCE_DEFAULT
+#define CHESS_LAB_QUIESCENCE_DEFAULT 1
+#endif
+bool s11_quiescence_enabled() noexcept {
+  static const bool enabled=[]() noexcept {
+    const char *v=std::getenv("CELAB_S1_QUIESCENCE");
+    if(v && v[0]=='0' && v[1]=='\0')return false;
+    if(v && v[0]=='1' && v[1]=='\0')return true;
+    return CHESS_LAB_QUIESCENCE_DEFAULT != 0;
+  }();
+  return enabled;
+}
+bool s11_see_order_enabled() noexcept { return s11_quiescence_enabled(); }
+#if defined(CHESS_LAB_S1_DIAGNOSTICS) && CHESS_LAB_S1_DIAGNOSTICS
+bool s11_trace_enabled() noexcept {
+  static const bool enabled = [] { const char *v=std::getenv("CELAB_S11_TRACE");
+    return v && v[0]=='1' && v[1]=='\0'; }();
+  return enabled;
+}
+#else
+constexpr bool s11_trace_enabled() noexcept { return false; }
+#endif
+// Values are material-evaluator DEFAULTS, in arbitrary units, scaled by 4.
+// This is an ordering heuristic, not a second evaluator or centipawn score.
+int s11_piece_kind(PieceCode p) noexcept {
+  switch (p) {
+    case PieceCode::white_pawn: case PieceCode::black_pawn: return 1;
+    case PieceCode::white_knight: case PieceCode::black_knight: return 2;
+    case PieceCode::white_bishop: case PieceCode::black_bishop: return 3;
+    case PieceCode::white_rook: case PieceCode::black_rook: return 4;
+    case PieceCode::white_queen: case PieceCode::black_queen: return 5;
+    case PieceCode::white_king: case PieceCode::black_king: return 6;
+    case PieceCode::empty: return 0;
+  }
+  return 0;
+}
+bool s11_white_piece(PieceCode p) noexcept {
+  return p==PieceCode::white_pawn||p==PieceCode::white_knight||
+    p==PieceCode::white_bishop||p==PieceCode::white_rook||
+    p==PieceCode::white_queen||p==PieceCode::white_king;
+}
+int s11_value(PieceCode p) noexcept {
+  constexpr int values[7]={0,4,12,13,20,36,400};
+  return values[s11_piece_kind(p)];
+}
+PieceCode s11_promotion(bool white, char suffix) noexcept {
+  switch(suffix) {
+    case 'n': return white?PieceCode::white_knight:PieceCode::black_knight;
+    case 'b': return white?PieceCode::white_bishop:PieceCode::black_bishop;
+    case 'r': return white?PieceCode::white_rook:PieceCode::black_rook;
+    default: return white?PieceCode::white_queen:PieceCode::black_queen;
+  }
+}
+// Board-local attack and king-safety tests; no ChessCore adapter assumptions.
+// Re-evaluate rays after each recapture to recognize x-ray discoveries.
+bool s11_attacks(const std::array<PieceCode,64> &b, int from, int to) noexcept {
+  const auto p=b[from];const int kind=s11_piece_kind(p);
+  if (!kind || from==to) return false;
+  const int dx=to%8-from%8,dy=to/8-from/8;
+  const int ax=std::abs(dx),ay=std::abs(dy);
+  if (kind==1) return ax==1 && dy==(s11_white_piece(p)?1:-1);
+  if (kind==2) return (ax==1&&ay==2)||(ax==2&&ay==1);
+  if (kind==6) return ax<=1&&ay<=1;
+  const bool diag=ax==ay,straight=(dx==0||dy==0);
+  if (!((kind==3&&diag)||(kind==4&&straight)||
+        (kind==5&&(diag||straight)))) return false;
+  const int sx=(dx>0)-(dx<0),sy=(dy>0)-(dy<0);
+  int x=from%8+sx,y=from/8+sy;
+  while (x!=to%8||y!=to/8) {
+    if(b[y*8+x]!=PieceCode::empty)return false;
+    x+=sx;y+=sy;
+  }
+  return true;
+}
+bool s11_attacked(const std::array<PieceCode,64> &b, int target,
+                  bool by_white) noexcept {
+  for (int i=0;i<64;++i)
+    if(b[i]!=PieceCode::empty&&s11_white_piece(b[i])==by_white&&
+       s11_attacks(b,i,target))return true;
+  return false;
+}
+int s11_king_square(const std::array<PieceCode,64> &b,bool white) noexcept {
+  const auto king=white?PieceCode::white_king:PieceCode::black_king;
+  for(int i=0;i<64;++i)if(b[i]==king)return i;
+  return -1;
+}
+// LVA SEE with legal recaptures: pinned movers and unsafe king captures are
+// excluded, while discovered sliders and EP/promotion effects are modeled.
+// As with standard LVA SEE, this is *not* a proof about all chess tactics.
+// Trace-only SEE recapture-step instrumentation. This pointer is null
+// during normal performance runs. Count the original candidate separately
+// via s11_see_calls; this tracks subsequent hypothetical recaptures only.
+thread_local std::uint64_t *s15_see_step_sink=nullptr;
+int s11_recapture(std::array<PieceCode,64> &b,int target,bool white,
+                  int remaining) noexcept {
+  if(remaining==0 || s11_piece_kind(b[target])==6)return 0;
+  int from=-1,attacker_value=99999;
+  for(int i=0;i<64;++i) {
+    const auto moving=b[i];
+    if(moving==PieceCode::empty||s11_white_piece(moving)!=white||
+       !s11_attacks(b,i,target))continue;
+    const auto captured=b[target];
+    const bool promoting=s11_piece_kind(moving)==1 &&
+        target/8==(white?7:0);
+    const auto placed=promoting?s11_promotion(white,'q'):moving;
+    b[i]=PieceCode::empty;b[target]=placed;
+    const int king=s11_king_square(b,white);
+    const bool legal=king>=0 && !s11_attacked(b,king,!white);
+    b[i]=moving;b[target]=captured;
+    if(legal && s11_value(moving)<attacker_value) {
+      attacker_value=s11_value(moving);from=i;
+    }
+  }
+  if(from<0)return 0;
+  if(s15_see_step_sink) ++*s15_see_step_sink;
+  const auto moving=b[from],captured=b[target];
+  const bool promoting=s11_piece_kind(moving)==1 &&
+      target/8==(white?7:0);
+  const auto placed=promoting?s11_promotion(white,'q'):moving;
+  const int gain=s11_value(captured)+(promoting?s11_value(placed)-s11_value(moving):0);
+  b[from]=PieceCode::empty;b[target]=placed;
+  const int reply=s11_recapture(b,target,!white,remaining-1);
+  b[from]=moving;b[target]=captured;
+  return std::max(0,gain-reply);
+}
+int s11_see(const PositionSnapshot &snap,const OrderedMove &m) noexcept {
+  std::array<PieceCode,64> b = empty_piece_squares();
+  const auto squares=snap.squares();
+  std::copy(squares.begin(),squares.end(),b.begin());
+  const int from=static_cast<int>(m.text.from()),to=static_cast<int>(m.text.to());
+  const auto moving=b[from];
+  if(moving==PieceCode::empty)return -100000; // Defensive, never legal.
+  const bool white=s11_white_piece(moving);
+  const auto captured=m.legal_ep?(white?PieceCode::black_pawn:PieceCode::white_pawn):b[to];
+  const bool promoting=m.text.size()==5;
+  const auto placed=promoting?s11_promotion(white,m.text[4]):moving;
+  const int gain=s11_value(captured)+(promoting?s11_value(placed)-s11_value(moving):0);
+  if(m.legal_ep)b[to+(white?-8:8)]=PieceCode::empty;
+  b[from]=PieceCode::empty;b[to]=placed;
+  return gain-s11_recapture(b,to,!white,31);
+}
+
+// Optional scalar SEE/check/input differential verification.
+bool s17c_verify() noexcept {
+  static const bool on=[]() noexcept {
+    const char *p=std::getenv("CELAB_S17C_VERIFY");
+    return p && p[0]=='1' && p[1]=='\0';
+  }();
+  return on;
+}
+struct S17CBoard {
+  std::array<PieceCode,64> b = empty_piece_squares();
+  std::uint64_t sides[2]{}; // [0]=black, [1]=white, updated for each recapture
+  int kings[2]{-1,-1};
+  static unsigned color(bool white) noexcept {return white?1U:0U;}
+  void initialize(std::span<const PieceCode> sq) noexcept {
+    for(unsigned i=0;i<64;++i) {
+      b[i]=sq[i];
+      if(b[i]==PieceCode::empty)continue;
+      const bool white=s11_white_piece(b[i]);
+      sides[color(white)]|=std::uint64_t{1}<<i;
+      if(s11_piece_kind(b[i])==6)kings[color(white)]=static_cast<int>(i);
+    }
+  }
+  struct Undo {int from,to;PieceCode moving,captured;int oldKing,oldCapturedKing;};
+  Undo push(int from,int to,PieceCode placed) noexcept {
+    const auto moving=b[from], captured=b[to];
+    const bool white=s11_white_piece(moving);
+    const unsigned mine=color(white),theirs=color(!white);
+    Undo u{from,to,moving,captured,kings[mine],kings[theirs]};
+    sides[mine]&=~(std::uint64_t{1}<<from);
+    sides[mine]|=std::uint64_t{1}<<to;
+    if(captured!=PieceCode::empty && s11_white_piece(captured)!=white)
+      sides[theirs]&=~(std::uint64_t{1}<<to);
+    b[from]=PieceCode::empty;b[to]=placed;
+    if(s11_piece_kind(moving)==6)kings[mine]=to;
+    if(s11_piece_kind(captured)==6 && s11_white_piece(captured)!=white)kings[theirs]=-1;
+    return u;
+  }
+  void pop(const Undo &u) noexcept {
+    const bool white=s11_white_piece(u.moving);
+    const unsigned mine=color(white),theirs=color(!white);
+    b[u.from]=u.moving;b[u.to]=u.captured;
+    sides[mine]|=std::uint64_t{1}<<u.from;
+    sides[mine]&=~(std::uint64_t{1}<<u.to);
+    if(u.captured!=PieceCode::empty && s11_white_piece(u.captured)!=white)
+      sides[theirs]|=std::uint64_t{1}<<u.to;
+    kings[mine]=u.oldKing;kings[theirs]=u.oldCapturedKing;
+  }
+  void remove(int square) noexcept {
+    if(b[square]==PieceCode::empty)return;
+    const bool white=s11_white_piece(b[square]);
+    sides[color(white)]&=~(std::uint64_t{1}<<square);
+    b[square]=PieceCode::empty;
+  }
+};
+// S1.7d: target-centric native bitboards. The existing C3 board/king state
+// remains the source of truth; piece-kind masks are updated for every push/pop.
+// A square's eight rays are constant; only the nearest blocker can attack it.
+// No vendored generator changes or dependencies on a particular CPU ISA.
+constexpr std::uint64_t s17d_bit(int i) noexcept { return std::uint64_t{1}<<i; }
+struct S17DRays {
+  std::uint64_t rays[64][8]{}, knight[64]{}, king[64]{}, pawn[2][64]{};
+  constexpr S17DRays() noexcept {
+    constexpr int dx[8]={1,0,1,-1,-1,0,-1,1};
+    constexpr int dy[8]={0,1,1,1,0,-1,-1,-1};
+    // Directions 0..3 increase square index, 4..7 decrease it.
+    for(int t=0;t<64;++t) {
+      for(int d=0;d<8;++d)
+        for(int x=t%8+dx[d],y=t/8+dy[d];x>=0&&x<8&&y>=0&&y<8;x+=dx[d],y+=dy[d])
+          rays[t][d]|=s17d_bit(y*8+x);
+      constexpr int nx[8]={1,2,2,1,-1,-2,-2,-1};
+      constexpr int ny[8]={2,1,-1,-2,-2,-1,1,2};
+      for(int d=0;d<8;++d) {
+        const int x=t%8+nx[d],y=t/8+ny[d];
+        if(x>=0&&x<8&&y>=0&&y<8)knight[t]|=s17d_bit(y*8+x);
+        const int kx=t%8+dx[d],ky=t/8+dy[d];
+        if(kx>=0&&kx<8&&ky>=0&&ky<8)king[t]|=s17d_bit(ky*8+kx);
+      }
+      for(int x=t%8-1;x<=t%8+1;x+=2)if(x>=0&&x<8) {
+        if(t/8<7)pawn[0][t]|=s17d_bit(t+8-t%8+x);
+        if(t/8>0)pawn[1][t]|=s17d_bit(t-8-t%8+x);
+      }
+    }
+  }
+};
+constexpr S17DRays s17d_rays{};
+struct S17DBoard : S17CBoard {
+  std::uint64_t kinds[7]{}; // both colors, intersect with existing side masks
+  void initialize(std::span<const PieceCode> sq) noexcept {
+    for(int i=0;i<64;++i) {
+      b[i]=sq[i];
+      const int kind=s11_piece_kind(b[i]);
+      if(!kind)continue;
+      const unsigned side=color(s11_white_piece(b[i]));
+      sides[side]|=s17d_bit(i);kinds[kind]|=s17d_bit(i);
+      if(kind==6)kings[side]=i;
+    }
+  }
+  Undo push(int from,int to,PieceCode placed) noexcept {
+    const auto frombit=s17d_bit(from),tobit=s17d_bit(to);
+    kinds[s11_piece_kind(b[from])]&=~frombit;
+    if(b[to]!=PieceCode::empty)kinds[s11_piece_kind(b[to])]&=~tobit;
+    kinds[s11_piece_kind(placed)]|=tobit;
+    return S17CBoard::push(from,to,placed);
+  }
+  void pop(const Undo &u) noexcept {
+    const auto frombit=s17d_bit(u.from),tobit=s17d_bit(u.to);
+    kinds[s11_piece_kind(b[u.to])]&=~tobit;
+    kinds[s11_piece_kind(u.moving)]|=frombit;
+    if(u.captured!=PieceCode::empty)kinds[s11_piece_kind(u.captured)]|=tobit;
+    S17CBoard::pop(u);
+  }
+  void remove(int square) noexcept {
+    if(b[square]!=PieceCode::empty)kinds[s11_piece_kind(b[square])]&=~s17d_bit(square);
+    S17CBoard::remove(square);
+  }
+};
+template<class MaskState>
+std::uint64_t s17d_attackers(const MaskState &state,int target,bool white) noexcept {
+  const auto us=state.sides[S17CBoard::color(white)],occ=state.sides[0]|state.sides[1];
+  const auto diag=us&(state.kinds[3]|state.kinds[5]);
+  const auto straight=us&(state.kinds[4]|state.kinds[5]);
+  std::uint64_t result=us&((s17d_rays.pawn[S17CBoard::color(white)][target]&state.kinds[1])|
+      (s17d_rays.knight[target]&state.kinds[2])|(s17d_rays.king[target]&state.kinds[6]));
+  for(int d=0;d<8;++d) {
+    const auto sliders=(d%4>=2)?diag:straight;
+    const auto ray=s17d_rays.rays[target][d];
+    if(!(ray&sliders))continue;
+    const auto blockers=ray&occ; // nonzero because sliders are occupied
+    const int first=d<4?static_cast<int>(std::countr_zero(blockers)):
+        63-static_cast<int>(std::countl_zero(blockers));
+    result|=s17d_bit(first)&sliders;
+  }
+  return result;
+}
+struct S17EFullStages {
+  const S17DBoard &s;
+  std::uint64_t attackers;
+  S17EFullStages(const S17DBoard &state,int t,bool white) noexcept:
+    s(state),attackers(s17d_attackers(state,t,white)) {}
+  template<int Kind> std::uint64_t get() const noexcept {
+    /* E_STAGE */
+    return attackers&s.kinds[Kind];
+  }
+};
+template<unsigned Mode> int s17e_recapture(S17DBoard &,int,bool,int) noexcept;
+// Static kind recursion is compiled away; no runtime sort or value comparisons.
+template<unsigned Mode,int Kind=1,class Stages>
+int s17e_choose(S17DBoard &s,Stages &g,int target,bool white,int remaining) noexcept {
+  auto candidates=g.template get<Kind>();
+  while(candidates) {
+    const int from=int(std::countr_zero(candidates));candidates&=candidates-1;
+    const auto moving=s.b[from],captured=s.b[target];
+    const bool promoting=Kind==1 && target/8==(white?7:0);
+    const auto placed=promoting?s11_promotion(white,'q'):moving;
+    const int gain=s11_value(captured)+(promoting?s11_value(placed)-s11_value(moving):0);
+    /* E_TRIAL */
+    const auto undo=s.push(from,target,placed);
+    const int king=s.kings[S17CBoard::color(white)];
+    bool legal=false;
+    if(king>=0) {
+      /* E_SAFETY */
+      legal=!s17d_attackers(s,king,!white);
+    }
+    if(legal) {
+      /* E_SELECTED */
+      const int reply=s17e_recapture<Mode>(s,target,!white,remaining-1);
+      s.pop(undo);return std::max(0,gain-reply);
+    }
+    s.pop(undo);
+  }
+  if constexpr(Kind<6)return s17e_choose<Mode,Kind+1>(s,g,target,white,remaining);
+  return 0;
+}
+template<unsigned Mode>
+int s17e_recapture(S17DBoard &s,int target,bool white,int remaining) noexcept {
+  /* E_RECAPTURE */
+  if(remaining==0 || s11_piece_kind(s.b[target])==6)return 0;
+  /* E_DISCOVERY */
+  static_assert(Mode==5,"Only accepted E5 recapture is supported");
+  S17EFullStages g(s,target,white);
+  if(!g.attackers)return 0;
+  return s17e_choose<Mode>(s,g,target,white,remaining);
+}
+template<unsigned Mode>
+int s17e_optimized_see(const PositionSnapshot &snap,const OrderedMove &m) noexcept {
+  S17DBoard s;s.initialize(snap.squares());
+  const int from=int(m.text.from()),to=int(m.text.to());
+  const auto moving=s.b[from];if(moving==PieceCode::empty)return -100000;
+  const bool white=s11_white_piece(moving);
+  const auto captured=m.legal_ep?(white?PieceCode::black_pawn:PieceCode::white_pawn):s.b[to];
+  const bool promoting=m.text.size()==5;
+  const auto placed=promoting?s11_promotion(white,m.text[4]):moving;
+  const int gain=s11_value(captured)+(promoting?s11_value(placed)-s11_value(moving):0);
+  if(m.legal_ep)s.remove(to+(white?-8:8));
+  s.push(from,to,placed);
+  return gain-s17e_recapture<Mode>(s,to,!white,31);
+}
+
+
+// S1.7f: a node-local scratchboard, constructed only after delta pruning
+// has allowed the first SEE call. No child search shares this object.
+bool s17f_same(const S17DBoard &a,const S17DBoard &b) noexcept {
+  if(a.b!=b.b || a.sides[0]!=b.sides[0] || a.sides[1]!=b.sides[1] ||
+     a.kings[0]!=b.kings[0] || a.kings[1]!=b.kings[1])return false;
+  for(int i=0;i<7;++i)if(a.kinds[i]!=b.kinds[i])return false;
+  return true;
+}
+int s17f_reused_see(S17DBoard &s,const OrderedMove &m) noexcept {
+  const int from=int(m.text.from()),to=int(m.text.to());
+  const auto moving=s.b[from];if(moving==PieceCode::empty)return -100000;
+  const bool white=s11_white_piece(moving);
+  const int ep_square=to+(white?-8:8);
+  const auto captured=m.legal_ep?(white?PieceCode::black_pawn:PieceCode::white_pawn):s.b[to];
+  const bool promoting=m.text.size()==5;
+  const auto placed=promoting?s11_promotion(white,m.text[4]):moving;
+  const int gain=s11_value(captured)+(promoting?s11_value(placed)-s11_value(moving):0);
+  PieceCode ep_piece=PieceCode::empty;
+  if(m.legal_ep){ep_piece=s.b[ep_square];s.remove(ep_square);}
+  const auto undo=s.push(from,to,placed);
+  const int result=gain-s17e_recapture<5>(s,to,!white,31);
+  s.pop(undo);
+  if(ep_piece!=PieceCode::empty){
+    s.b[ep_square]=ep_piece;
+    s.sides[S17CBoard::color(s11_white_piece(ep_piece))]|=s17d_bit(ep_square);
+    s.kinds[s11_piece_kind(ep_piece)]|=s17d_bit(ep_square);
+    if(s11_piece_kind(ep_piece)==6)s.kings[S17CBoard::color(s11_white_piece(ep_piece))]=ep_square;
+  }
+  return result;
+}
+// S1.7g.1: copy the existing snapshot's square array, not reconstruct masks.
+bool s17g1_initialize(S17DBoard &state,const PositionSnapshot &snap,
+                       const ChessCore &core,const Position &position) noexcept {
+  detail::NativeSeeMasks masks;
+  if(!detail::native_see_masks(core,position,masks))return false;
+  const auto squares=snap.squares();
+  std::copy(squares.begin(),squares.end(),state.b.begin());
+  std::copy_n(masks.sides,2,state.sides);
+  std::copy_n(masks.kinds,7,state.kinds);
+  std::copy_n(masks.kings,2,state.kings);
+  return true;
+}
+struct S17FNode {
+  std::optional<S17DBoard> state;
+  /* F_NODE_FIELDS */
+  int see(const PositionSnapshot &snap,const OrderedMove &m,const ChessCore &core,const Position &position) noexcept {
+    /* F_NODE_CALL */
+    /* F_SCOPE */
+    if(!state){
+      /* F_INIT_START */
+      state.emplace();
+      const bool direct=s17g1_initialize(*state,snap,core,position);
+      if(!direct)state->initialize(snap.squares());
+      /* G1_COUNTS */
+      if(s17c_verify()){
+        S17DBoard expected;expected.initialize(snap.squares());
+        if(!s17f_same(*state,expected)){
+          std::fprintf(stderr,"CELAB_S17G1_INITIAL_STATE_MISMATCH\n");std::abort();
+        }
+      }
+      /* F_INIT_END */
+    }else { /* F_REUSE */ }
+    const int result=s17f_reused_see(*state,m);
+    if(s17c_verify()){
+      S17DBoard fresh;fresh.initialize(snap.squares());
+      const int e5=s17e_optimized_see<5>(snap,m),original=s11_see(snap,m);
+      if(!s17f_same(*state,fresh)||result!=e5||result!=original){
+        std::fprintf(stderr,"CELAB_S17F_SEE_OR_RESTORE_MISMATCH from=%u to=%u got=%d E5=%d S11=%d\n",unsigned(m.text.from()),unsigned(m.text.to()),result,e5,original);std::abort();
+      }
+    }
+    return result;
+  }
+};
+
+
+// Accepted nonpositive-SEE pruning, restricted to default material.
+// ALL in-check evasions, promotions and EP captures remain unpruned.
+// This is a tactical heuristic, not a correctness proof.
+bool s12_prune_candidate(unsigned mode,unsigned /*qply*/,bool checked,
+                         const OrderedMove &m,int see) noexcept {
+  return mode==17 && !checked && m.capture && m.text.size()!=5 && !m.legal_ep && see<=0;
+}
+
+// Accepted delta-0 is restricted to the default material-v1 configuration.
+// SEE ordering values use 4 units / pawn.
+// The pre-SEE delta test is a heuristic, NOT a proof of a safe cutoff.
+constexpr bool s16_delta_mode(unsigned mode) noexcept {return mode==17;}
+constexpr double s16_delta_margin(unsigned) noexcept {return 0.0;}
+bool s16_delta_reject(unsigned mode,bool checked,bool capture,bool ep,
+                      bool promotion,bool white,double static_score,
+                      double bound,double captured_value) noexcept {
+  const double margin=s16_delta_margin(mode);
+  if(!s16_delta_mode(mode) || checked || !capture || ep || promotion)return false;
+  if(!std::isfinite(static_score)||!std::isfinite(bound)||
+     !std::isfinite(captured_value))return false;
+  // White-positive evaluation. Test only the side-to-move active bound.
+  return white ? static_score+captured_value+margin<=bound :
+                 static_score-captured_value-margin>=bound;
+}
+bool s16_default_material(const EvaluationIdentity &id) noexcept {
+  return id.module_id=="org.chesslab.material" &&
+      id.canonical_configuration==
+      "{\"bishop_value\":3.25,\"knight_value\":3,\"pawn_value\":1,\"queen_value\":9,\"rook_value\":5}";
+}
+
+// Board-local postmove test: protect *every* capture that gives check,
+// including discovered, slider, and knight checks. Never makes a real move.
+bool s12_gives_check(const PositionSnapshot &snap,const OrderedMove &m) noexcept {
+  std::array<PieceCode,64> b = empty_piece_squares();
+  const auto squares=snap.squares();
+  std::copy(squares.begin(),squares.end(),b.begin());
+  const int from=static_cast<int>(m.text.from()),to=static_cast<int>(m.text.to());
+  const auto moving=b[from];
+  if(moving==PieceCode::empty)return true; // fail-open: do not prune
+  const bool white=s11_white_piece(moving);
+  if(m.legal_ep)b[to+(white?-8:8)]=PieceCode::empty;
+  const auto placed=m.text.size()==5?s11_promotion(white,m.text[4]):moving;
+  b[from]=PieceCode::empty;b[to]=placed;
+  const int king=s11_king_square(b,!white);
+  return king<0 || s11_attacked(b,king,white); // fail-open for bad snapshot
+}
+
+// S1.7h: root masks are immutable for the lifetime of the ranking loop.
+// Only the hypothetical piece/occupancy masks are changed; no square copy,
+// real make/undo, or vendor board escapes the private adapter.
+bool s17h_mask_check(const detail::NativeSeeMasks &root,const PositionSnapshot &snap,
+                     const OrderedMove &m) noexcept {
+  const auto sq=snap.squares();
+  const int from=int(m.text.from()),to=int(m.text.to());
+  const auto moving=sq[from];
+  if(moving==PieceCode::empty)return true;
+  const bool white=s11_white_piece(moving);
+  const unsigned side=S17CBoard::color(white),enemy=S17CBoard::color(!white);
+  const int king=root.kings[enemy];
+  if(king<0 || king==to || (m.legal_ep && king==to+(white?-8:8)))return true;
+  auto masks=root;
+  const auto erase=[&](int i) noexcept {
+    const auto p=sq[i];if(p==PieceCode::empty)return;
+    const auto bit=s17d_bit(i);
+    masks.sides[S17CBoard::color(s11_white_piece(p))]&=~bit;
+    masks.kinds[s11_piece_kind(p)]&=~bit;
+  };
+  if(m.legal_ep)erase(to+(white?-8:8));
+  erase(from);erase(to);
+  const auto placed=m.text.size()==5?s11_promotion(white,m.text[4]):moving;
+  masks.sides[side]|=s17d_bit(to);
+  masks.kinds[s11_piece_kind(placed)]|=s17d_bit(to);
+  return s17d_attackers(masks,king,white)!=0;
+}
+// S1.10: direct native input on actual evaluation calls only.
+ChessEvalPosition s110_eval_snapshot(const ChessCore &core,const Position &position,
+                                    const PositionSnapshot &snap) {
+  /* I_START */
+  bool direct=false;
+  auto value=detail::native_evaluation_snapshot(core,position,snap,direct,s17c_verify());
+  /* I_END */
+  return value;
+}
+struct S17HNode {
+  // State 0: unqueried, 1: native masks ready, 2: unsupported adapter.
+  unsigned status=0;
+  detail::NativeSeeMasks root;
+  bool check(const PositionSnapshot &snap,const OrderedMove &m,
+             const ChessCore &core,const Position &position,unsigned reason) noexcept {
+    (void)reason;
+    bool result;
+    if(status!=2){
+      if(!status){status=detail::native_see_masks(core,position,root)?1U:2U; /* H_COPY */}
+      else { /* H_REUSE */ }
+    }
+    if(status==1){
+      /* H_NATIVE */
+      result=s17h_mask_check(root,snap,m);
+      if(s17c_verify() && result!=s12_gives_check(snap,m)){
+        std::fprintf(stderr,"CELAB_S17H_CHECK_MISMATCH from=%u to=%u\n",unsigned(m.text.from()),unsigned(m.text.to()));std::abort();
+      }
+    }else{
+      /* H_LEGACY */
+      result=s12_gives_check(snap,m);
+    }
+    /* H_END */
+    return result;
+  }
+};
 // H2-C1.1 experimental: ONE capture and ONE promotion index, recorded during
 // native move-fact preparation. Each compiled variant pays only for its policy.
 struct H2C11Candidates {
@@ -461,6 +1009,7 @@ struct PreparedNode {
   std::size_t native_legal_count = 0;
   PreparationMode mode = PreparationMode::eager;
   RepetitionSignature repetition;
+  detail::NativeSearchMetadata native_meta{};
   bool claims_ready = false;
   bool claim_now_threefold = false;
   bool claim_now_fifty = false;
@@ -470,6 +1019,38 @@ struct PreparedNode {
     return (mode == PreparationMode::native_claim_free_leaf ||
             mode == PreparationMode::native_inner_deferred) ? native_legal_count : legal.size();
   }
+};
+// Stack-only compatibility adapter for existing snapshot consumers. It is
+// created after the node reaches its destination, never stored in the node,
+// never points to the live board, and is never returned outside traversal.
+class PreparedView final : public PositionSnapshot {
+    const PreparedNode& n;
+public:
+    explicit PreparedView(const PreparedNode& node) noexcept : n(node) {}
+    std::span<const PieceCode,64> squares() const noexcept override {
+        return n.snapshot ? n.snapshot->squares() : std::span<const PieceCode,64>(n.repetition.pieces);
+    }
+    Side side_to_move() const noexcept override {
+        return n.snapshot ? n.snapshot->side_to_move() : n.repetition.side;
+    }
+    bool can_castle_kingside(Side s) const noexcept override {
+        return n.snapshot ? n.snapshot->can_castle_kingside(s) : n.repetition.castling[s==Side::white?0:2];
+    }
+    bool can_castle_queenside(Side s) const noexcept override {
+        return n.snapshot ? n.snapshot->can_castle_queenside(s) : n.repetition.castling[s==Side::white?1:3];
+    }
+    std::optional<std::uint8_t> en_passant_square() const noexcept override {
+        return n.snapshot ? n.snapshot->en_passant_square() : n.native_meta.raw_ep;
+    }
+    std::uint32_t halfmove_clock() const noexcept override {
+        return n.snapshot ? n.snapshot->halfmove_clock() : n.native_meta.half;
+    }
+    std::uint32_t fullmove_number() const noexcept override {
+        return n.snapshot ? n.snapshot->fullmove_number() : n.native_meta.full;
+    }
+    std::uint32_t schema_version() const noexcept override {
+        return n.snapshot ? n.snapshot->schema_version() : position_snapshot_schema_version;
+    }
 };
 RepetitionSignature snapshot_repetition(const PositionSnapshot &s) {
   RepetitionSignature r;
@@ -491,23 +1072,59 @@ bool history_contains(std::span<const RepetitionSignature> history,
   }
   return false;
 }
+// S1.11a: retain a native snapshot allocation per child recursion slot.
+using S111SnapshotOwner=std::unique_ptr<const PositionSnapshot>;
+S111SnapshotOwner s111_snapshot(const ChessCore &c,const Position &p,
+                                S111SnapshotOwner *spare) {
+  /* J_START */
+  const bool reused=spare && detail::native_refresh_search_snapshot(c,p,*spare);
+  auto result=reused?std::move(*spare):c.snapshot(p);
+  /* J_END */
+  if(reused && s17c_verify()) {
+    const auto ref=c.snapshot(p);
+    const auto &a=*result;const auto &b=*ref;
+    bool same=std::equal(a.squares().begin(),a.squares().end(),b.squares().begin()) &&
+       a.side_to_move()==b.side_to_move() && a.en_passant_square()==b.en_passant_square() &&
+       a.halfmove_clock()==b.halfmove_clock() && a.fullmove_number()==b.fullmove_number() &&
+       a.schema_version()==b.schema_version();
+    for(auto side:{Side::white,Side::black})same=same &&
+      a.can_castle_kingside(side)==b.can_castle_kingside(side) &&
+      a.can_castle_queenside(side)==b.can_castle_queenside(side);
+    if(!same)throw std::logic_error("S1.11a recycled snapshot mismatch");
+  }
+  return result;
+}
+// Only recursive native frames in the accepted mode use direct identity.
+// Root, generic, and other experimental modes retain detached snapshots.
+void s112_prepare_identity(PreparedNode& node,const ChessCore& c,const Position& p,
+                           S111SnapshotOwner* spare) {
+    if (spare && native_chess_core(c)) {
+        /* S112_START */
+        detail::native_read_search_identity(c,p,node.repetition.pieces,
+            node.repetition.side,node.repetition.castling,node.native_meta);
+        /* S112_END */
+    } else {
+        node.snapshot=s111_snapshot(c,p,spare);
+    }
+}
 PreparedNode prepare_node(const ChessCore &c, const Position &p,
                           const CancellationToken *token = nullptr,
                           std::optional<std::span<const RepetitionSignature>> leaf_history = {},
                           bool tt_search_horizon = false,
                           bool parent_has_duplicate = false,
                           bool native_search_inner = false,
-                          std::vector<OrderedMove> *recycled = nullptr) {
+                          std::vector<OrderedMove> *recycled = nullptr,
+                          S111SnapshotOwner *snapshot_spare = nullptr) {
   PreparedNode node;
   if (recycled) {
     assert(recycled->empty());
     node.legal.swap(*recycled); // Take capacity, no copy or allocation.
   }
   try {
-  node.snapshot = c.snapshot(p);
+  s112_prepare_identity(node,c,p,snapshot_spare);
   if (leaf_history && native_chess_core(c) &&
-      !node.snapshot->en_passant_square() && node.snapshot->halfmove_clock() < 99) {
-    node.repetition = snapshot_repetition(*node.snapshot);
+      !PreparedView(node).en_passant_square() && PreparedView(node).halfmove_clock() < 99) {
+    if(node.snapshot) node.repetition = snapshot_repetition(*node.snapshot);
     if (token) detail::tt_poll(*token);
     if (!parent_has_duplicate && !history_contains(*leaf_history, node.repetition, token)) {
       // C4.2: certified claim-free horizon needs existence, not an exact
@@ -530,15 +1147,15 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
     if (token) detail::tt_poll(*token);
     node.batch = detail::prepare_native_move_batch(c, p);
     if (token) detail::tt_poll(*token); // Including zero-legal terminal positions.
-    batch_ordered_moves_into(node.legal, c, p, *node.batch, token, *node.snapshot, &node.h2c11);
+    batch_ordered_moves_into(node.legal, c, p, *node.batch, token, PreparedView(node), &node.h2c11);
     node.mode = native_search_horizon ? PreparationMode::native_horizon_batch
                                   : PreparationMode::native_inner_batch;
   } else {
     ordered_moves_into(node.legal, c, p, token, node.snapshot.get());
   }
-  node.repetition = snapshot_repetition(*node.snapshot);
+  if(node.snapshot) node.repetition = snapshot_repetition(*node.snapshot);
   auto &r = node.repetition;
-  if (auto ep = node.snapshot->en_passant_square())
+  if (auto ep = PreparedView(node).en_passant_square())
     for (const auto &move : node.legal)
       if (move.legal_ep) { r.legal_ep = ep; break; }
   return node;
@@ -554,20 +1171,21 @@ PreparedNode prepare_node(const ChessCore &c, const Position &p,
 // there is no second native move-generation pass after a TT miss.
 PreparedNode prepare_deferred_inner(const ChessCore &c, const Position &p,
                                    const CancellationToken *token,
-                                   std::vector<OrderedMove> *recycled) {
+                                   std::vector<OrderedMove> *recycled,
+                                   S111SnapshotOwner *snapshot_spare = nullptr) {
   PreparedNode node;
   if (recycled) {
     assert(recycled->empty());
     node.legal.swap(*recycled);
   }
   try {
-    node.snapshot = c.snapshot(p);
+    s112_prepare_identity(node,c,p,snapshot_spare);
     if (token) detail::tt_poll(*token);
     node.batch = detail::prepare_native_move_batch(c, p);
     if (token) detail::tt_poll(*token);
     node.native_legal_count = detail::native_move_batch_size(*node.batch);
-    node.repetition = snapshot_repetition(*node.snapshot);
-    if (auto ep = node.snapshot->en_passant_square(); ep &&
+    if(node.snapshot) node.repetition = snapshot_repetition(*node.snapshot);
+    if (auto ep = PreparedView(node).en_passant_square(); ep &&
         detail::native_has_legal_en_passant(c, p))
       node.repetition.legal_ep = ep;
     node.mode = PreparationMode::native_inner_deferred;
@@ -582,13 +1200,13 @@ void expand_deferred_inner(PreparedNode &node, const ChessCore &c,
                            const Position &p, const CancellationToken *token) {
   assert(node.mode == PreparationMode::native_inner_deferred && node.batch);
   try {
-    batch_ordered_moves_into(node.legal,c,p,*node.batch,token,*node.snapshot,&node.h2c11);
+    batch_ordered_moves_into(node.legal,c,p,*node.batch,token,PreparedView(node),&node.h2c11);
     if (node.legal.size() != node.native_legal_count)
       throw std::logic_error("T1.3a deferred native batch count drift");
     // The native legality helper must agree with the original batch-derived
     // repetition signature, including rare legal en-passant transitions.
-    auto expected=snapshot_repetition(*node.snapshot);
-    if (auto ep=node.snapshot->en_passant_square())
+    auto expected=snapshot_repetition(PreparedView(node));
+    if (auto ep=PreparedView(node).en_passant_square())
       for (const auto &m:node.legal)
         if (m.legal_ep) { expected.legal_ep=ep; break; }
     if (!(expected == node.repetition))
@@ -626,10 +1244,12 @@ bool canonical_before(const ChessDecision &a, const ChessDecision &b) {
 struct ReclaimPreparedMoves {
   std::optional<PreparedNode> &prepared;
   std::vector<OrderedMove> &spare;
+  S111SnapshotOwner *snapshot_spare=nullptr;
   ~ReclaimPreparedMoves() noexcept {
     if (!prepared) return;
     prepared->legal.clear(); // Destroy owners before reusing capacity.
     spare.swap(prepared->legal);
+    if(snapshot_spare) *snapshot_spare=std::move(prepared->snapshot);
   }
 };
 struct Traversal {
@@ -650,6 +1270,24 @@ struct Traversal {
   }
 #endif
 
+  std::uint64_t s11_qnodes=0,s11_see_calls=0,s11_see_ns=0,
+      s11_standpat_cutoffs=0,s11_search_cutoffs=0,s11_sorted_nodes=0,
+      s11_searched=0,s11_captures=0,s11_promotions=0,s11_ep=0,
+      s11_evasions=0,s11_emergency=0,s11_see_negative=0,
+      s11_see_zero=0,s11_see_positive=0;
+  std::array<std::uint64_t,65> s11_qhist{};
+  std::uint64_t s12_candidates=0,s12_pruned=0,s12_check_protected=0;
+  std::uint64_t s15_zero_pruned=0,s15_check_pruned=0,
+    s15_ep_pruned=0,s15_see_recaptures=0;
+  std::uint64_t s16_delta_tested=0,s16_delta_pruned=0,
+    s16_delta_check_protected=0,s16_positive_pruned=0,
+    s16_top_pruned=0,s16_positive_check_protected=0;
+  std::uint64_t s17a_stage5=0,s17a_lazy_expansions=0,
+    s17a_claim_fallbacks=0,s17a_generated=0,
+    s17a_quiet_promo_generated=0,s17a_capture_promo_generated=0,
+    s17a_quiet_promo_eligible=0,s17a_capture_promo_eligible=0,
+    s17a_quiet_promo_searched=0,s17a_capture_promo_searched=0,
+    s17a_excluded_quiet_promo=0;
   CancellationToken cancellation{};
   const CompletedDepth *previous = nullptr;
   std::vector<detail::SearchMoveIdentity> path{};
@@ -658,6 +1296,7 @@ struct Traversal {
   // Retain capacity by ply between siblings; no globally shared storage.
   std::size_t root_history_size = history.size();
   std::array<std::vector<OrderedMove>,65> recycled_moves{};
+  std::array<S111SnapshotOwner,65> recycled_snapshots{};
   bool has_duplicate = detail::initial_history_has_duplicates(history);
   detail::OrderingTree *ordering = nullptr;
   detail::OrderingTree::Index ordering_node = 0;
@@ -762,7 +1401,9 @@ struct Traversal {
         throw std::logic_error("search recursion exceeds move-storage frames");
       auto &spare = recycled_moves[history.size() - root_history_size];
       std::optional<PreparedNode> prepared;
-      ReclaimPreparedMoves reclaim{prepared,spare};
+      auto *snapshot_spare=native_chess_core(core)
+          ? &recycled_snapshots[history.size()-root_history_size] : nullptr;
+      ReclaimPreparedMoves reclaim{prepared,spare,snapshot_spare};
       try {
         std::optional<std::span<const RepetitionSignature>> leaf_history;
         if (purpose == PreparationPurpose::search_horizon)
@@ -770,11 +1411,11 @@ struct Traversal {
         const auto preparation_start=detail::audit.enabled?detail::audit_clock():0;
         if (t13a_mode() == 2 && purpose == PreparationPurpose::search_inner &&
             cache && cache->numeric() && native_chess_core(core))
-          prepared.emplace(prepare_deferred_inner(core,position,&cancellation,&spare));
+          prepared.emplace(prepare_deferred_inner(core,position,&cancellation,&spare,snapshot_spare));
         else
           prepared.emplace(prepare_node(core, position, &cancellation, leaf_history,
               purpose == PreparationPurpose::search_horizon && cache, has_duplicate,
-              purpose == PreparationPurpose::search_inner, &spare));
+              purpose == PreparationPurpose::search_inner, &spare,snapshot_spare));
         if(detail::audit.enabled)prepared->audit_prepare_ns=detail::audit_clock()-preparation_start;
         history.push_back(prepared->repetition);
       } catch (...) {
@@ -807,7 +1448,7 @@ struct Traversal {
     }
   }
   std::optional<Line> terminal(std::uint64_t ply, const PreparedNode &prepared) {
-    const auto &s = *prepared.snapshot;
+    const PreparedView s(prepared);
     // This adapter's legal list has already established terminal move
     // availability. Synthetic test adapters retain their independent status.
     auto status = native_chess_core(core)
@@ -847,7 +1488,7 @@ struct Traversal {
   void annotate_claims(PreparedNode &prepared) {
     if (prepared.claims_ready || !native_chess_core(core)) return;
     prepared.claims_ready = true;
-    const auto &s = *prepared.snapshot;
+    const PreparedView s(prepared);
     prepared.claim_now_threefold = count(history.back()) >= 3;
     prepared.claim_now_fifty = s.halfmove_clock() >= 100;
     if (prepared.claim_now_threefold || prepared.claim_now_fifty) return;
@@ -903,7 +1544,7 @@ struct Traversal {
   }
   std::optional<Line> claim(PreparedNode &prepared) {
     poll();
-    const auto &s = *prepared.snapshot;
+    const PreparedView s(prepared);
     if (native_chess_core(core) && !has_duplicate && s.halfmove_clock() < 99)
       return {};
     auto &canonical_moves = prepared.legal;
@@ -927,7 +1568,7 @@ struct Traversal {
             ? (m.claim_threefold || m.claim_fifty)
             : child(prepared, m, [&](PreparedNode &next) {
                 return count(history.back()) >= 3 ||
-                       next.snapshot->halfmove_clock() >= 100;
+                       PreparedView(next).halfmove_clock() >= 100;
               });
         if (eligible) {
           // Native generator order governs traversal, but the established
@@ -944,6 +1585,194 @@ struct Traversal {
       }
     return best;
   }
+
+  // S1.0 reconstruction: tactical leaf stability, NOT a second main search.
+  Line s11_quiesce(std::uint64_t ply, PreparedNode &prepared,
+                   std::optional<SearchScore> alpha,
+                   std::optional<SearchScore> beta,unsigned qply) {
+    poll();
+    ++stats.visited_nodes;
+    ++s11_qnodes;
+    if(qply<s11_qhist.size())++s11_qhist[qply];
+    if(auto end=terminal(ply,prepared))return std::move(*end);
+    if(prepared.legal_count()==0)
+      throw std::runtime_error("S1 ongoing node without legal moves");
+    const PreparedView s(prepared);
+    const bool white=s.side_to_move()==Side::white;
+    const bool checked=core.in_check(position);
+    if(!native_chess_core(core)||prepared.mode!=PreparationMode::native_claim_free_leaf)
+      annotate_claims(prepared);
+    std::optional<Line> best=claim(prepared);
+    // Material-unit pruning is certified only for the accepted default material
+    // identity/configuration. Other evaluators still receive SEE ordering and
+    // all tactical continuations/evasions, without material-unit pruning.
+    const unsigned s16_mode=s16_default_material(evaluator.identity()) ? 17U : 0U;
+    std::optional<double> s16_static;
+    auto better=[&](SearchScore a,SearchScore b){return white?a>b:a<b;};
+    auto update=[&] {
+      if(!options.alpha_beta_enabled||!best)return false;
+      if(white) {if(!alpha||best->score>*alpha)alpha=best->score;}
+      else {if(!beta||best->score<*beta)beta=best->score;}
+      return alpha&&beta&&*beta<=*alpha;
+    };
+    // qply>=64 is the emergency static approximation, including if in check.
+    // Ordinary in-check nodes NEVER stand-pat (nor omit quiet evasions).
+    if(!checked || ply>=64) {
+      poll();++stats.evaluator_calls;
+      const double raw=evaluator.evaluate(s110_eval_snapshot(core,position,s));
+      if(s16_delta_mode(s16_mode))s16_static=raw;
+      auto score=SearchScore::finite(raw);
+      if(!best||better(score,best->score))
+        best=Line{score,{DecisionKind::play,{}},{},PVEnd::horizon,{}};
+      if(ply>=64)++s11_emergency;
+      if(update()) {++stats.alpha_beta_cutoffs;++s11_standpat_cutoffs;return *best;}
+    }
+    if(ply>=64 || (!checked&&qply>=8)) return *best;
+    // S1.7a: only after ALL terminal/standpat/claim/depth exits, create
+    // search candidates. A certified claim-free native leaf used ONE_MOVE_ONLY
+    // up to this point.  In-check nodes need all legal evasions; in ordinary
+    // nodes either CAPTURE or TACTICAL generation is sufficient.
+    if(s17a_trace())++s17a_stage5;
+    if(s17a_lazy() && prepared.mode==PreparationMode::native_claim_free_leaf) {
+      prepared.batch=detail::prepare_native_qsearch_batch(
+          core,position,checked,s17a_include_quiet_promotion());
+      batch_ordered_moves_into(prepared.legal,core,position,*prepared.batch,
+          &cancellation,s,nullptr);
+      // Existing binary batch execution avoids heap Move construction.
+      prepared.mode=PreparationMode::native_inner_batch;
+      if(s17a_trace())++s17a_lazy_expansions;
+    } else if(s17a_lazy() &&
+              prepared.mode==PreparationMode::native_horizon_batch) {
+      // Claim-/EP-sensitive horizon nodes already have a FULL native batch,
+      // with valid native ordinals but NO materialized Move objects. Their
+      // terminal/claim handling has completed above. The recursive QS child
+      // executor accepts native_inner_batch; leaving native_horizon_batch
+      // here would wrongly enter executable(parent,m) and throw.
+      if(!prepared.batch)
+        throw std::logic_error("S1.7a native horizon fallback missing batch");
+      prepared.mode=PreparationMode::native_inner_batch;
+      if(s17a_trace())++s17a_claim_fallbacks;
+    } else if(s17a_lazy() && s17a_trace()) {
+      // Synthetic adapters still use the old eager path with boxed Move.
+      ++s17a_claim_fallbacks;
+    }
+    // Candidate ordering remains the same as filtering full legal moves;
+    // checked nodes keep ALL evasions (including quiet promotions).
+    std::vector<std::size_t> eligible;
+    eligible.reserve(prepared.legal.size());
+    for(std::size_t i=0;i<prepared.legal.size();++i) {
+      const auto &m=prepared.legal[i];
+      const bool promotion=m.text.size()==5;
+      if(s17a_trace()) {
+        ++s17a_generated;
+        if(promotion) {
+          if(m.capture)++s17a_capture_promo_generated;
+          else ++s17a_quiet_promo_generated;
+        }
+      }
+      const bool allowed=checked || m.capture ||
+          (promotion && s17a_include_quiet_promotion());
+      if(allowed) {
+        eligible.push_back(i);
+        if(s17a_trace() && promotion) {
+          if(m.capture)++s17a_capture_promo_eligible;
+          else ++s17a_quiet_promo_eligible;
+        }
+      } else if(s17a_trace() && promotion && !m.capture) {
+        ++s17a_excluded_quiet_promo;
+      }
+    }
+    // Index-only sorting preserves PreparedNode native certificates and
+    // original list order for exact SEE ties. Quiet evasions always survive.
+    if(s11_see_order_enabled() && (eligible.size()>1 || s16_mode!=0)) {
+      struct Entry {std::size_t i;int priority;};
+      S17FNode see_node;
+      S17HNode check_node;
+      std::vector<Entry> rank;
+      rank.reserve(eligible.size());
+      for(auto i:eligible) {
+        poll();const auto &m=prepared.legal[i];
+        int priority=-100001; // Quiet evasion stays behind tactical moves.
+        if(m.capture||m.text.size()==5) {
+          // Delta pruning is deliberately BEFORE the potentially expensive
+          // SEE calculation. No check evasion, promotion, EP, or checking
+          // capture is discarded by this new rule.
+          if(s16_delta_mode(s16_mode) && s16_static) {
+            const auto &active_bound=white?alpha:beta;
+            if(active_bound && active_bound->kind()==SearchScore::Kind::finite &&
+               s16_delta_reject(s16_mode,checked,m.capture,m.legal_ep,
+                 m.text.size()==5,white,*s16_static,active_bound->value(),
+                 0.25*s11_value(s.squares()[m.text.to()]))) {
+              ++s16_delta_tested;
+              if(check_node.check(s,m,core,position,0))++s16_delta_check_protected;
+              else {++s16_delta_pruned;continue;}
+            }
+          }
+          auto t0=s11_trace_enabled()?std::chrono::steady_clock::now():
+                 std::chrono::steady_clock::time_point{};
+          if(s11_trace_enabled())s15_see_step_sink=&s15_see_recaptures;
+          priority=see_node.see(s,m,core,position);
+          s15_see_step_sink=nullptr;
+          ++s11_see_calls;
+          if(priority<0)++s11_see_negative;
+          else if(priority==0)++s11_see_zero;
+          else ++s11_see_positive;
+          if(s11_trace_enabled())s11_see_ns+=static_cast<std::uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                 std::chrono::steady_clock::now()-t0).count());
+        }
+        if(s12_prune_candidate(s16_mode,qply,checked,m,priority)) {
+          ++s12_candidates;
+          // Accepted SEE pruning does not protect checking captures; the
+          // delta rule above does. Classify pruned checks only in diagnostics.
+          {
+            if(priority==0) ++s15_zero_pruned;
+            if(m.legal_ep) ++s15_ep_pruned;
+            if(s11_trace_enabled() &&
+               check_node.check(s,m,core,position,1)) ++s15_check_pruned;
+            ++s12_pruned;
+            continue;
+          }
+        }
+        rank.push_back({i,priority});
+      }
+      std::stable_sort(rank.begin(),rank.end(),[](const auto &a,const auto &b){
+        return a.priority>b.priority;});
+
+      eligible.resize(rank.size());
+      for(std::size_t j=0;j<rank.size();++j)eligible[j]=rank[j].i;
+      ++s11_sorted_nodes;
+    }
+    for(std::size_t j=0;j<eligible.size();++j) {
+      poll();auto &m=prepared.legal[eligible[j]];
+      ++s11_searched;
+      if(m.capture)++s11_captures;
+      if(m.text.size()==5) {
+        ++s11_promotions;
+        if(s17a_trace()) {
+          if(m.capture)++s17a_capture_promo_searched;
+          else ++s17a_quiet_promo_searched;
+        }
+      }
+      if(m.legal_ep)++s11_ep;
+      if(checked)++s11_evasions;
+      auto line=child(prepared,m,[&](PreparedNode &next) {
+        return s11_quiesce(ply+1,next,alpha,beta,qply+1);
+      },s17a_lazy()?PreparationPurpose::search_horizon:PreparationPurpose::eager);
+      if(!best||better(line.score,best->score)||
+         (line.score==best->score&&!m.text.native()&&
+           canonical_before({DecisionKind::play,m.text},best->action))) {
+        line.action={DecisionKind::play,m.text};
+        line.pv.prepend(m.text);
+        best=std::move(line);
+      }
+      if(update()&&j+1<eligible.size()) {
+        ++stats.alpha_beta_cutoffs;++s11_search_cutoffs;break;
+      }
+    }
+    if(!best)throw std::logic_error("S1 qsearch lacks standpat/evasions/claim");
+    return *best;
+  }
   // exact=true is used only with an unbounded window. An ordered child can
   // return a bound on equality. Re-search promising/canonically earlier ties
   // with a full window and exact PV before letting them become publishable.
@@ -952,6 +1781,8 @@ struct Traversal {
             bool exact = false,
             bool root_play_only = false) {
     poll();
+    if(depth==0 && s11_quiescence_enabled())
+      return s11_quiesce(ply,prepared,alpha,beta,0);
     const auto audit_node_start=detail::audit.enabled?detail::audit_clock():0;
     std::uint64_t audit_preprobe_ns=0;
     // Outside the previous-PV prefix all descendants retain M3's canonical
@@ -972,10 +1803,22 @@ struct Traversal {
     assert(prepared.mode != PreparationMode::native_inner_deferred ||
            (depth > 0 && native_chess_core(core) && prepared.batch));
     const auto original_alpha = alpha, original_beta = beta;
-    const auto &s = prepared.snapshot;
+    const PreparedView view(prepared);
+    const auto *s = &view;
     // This cache is scoped to a single node; children cannot overwrite it.
     // A TT hash is computed only if this node actually probes or stores.
     std::optional<std::uint64_t> node_tt_hash;
+    // Compute only on a real TT operation, once per node. At each call the
+    // current board is this frame's board (children have been undone).
+    // Synthetic adapters retain TTSession's exact-signature hash fallback.
+    auto tt_hash_for_node = [&]() -> std::optional<std::uint64_t>* {
+      if (!node_tt_hash && cache->enabled() && native_chess_core(core)) {
+        detail::Timer timer(detail::audit.enabled?&detail::audit.hash_ns:nullptr);
+        if(detail::audit.enabled)++detail::audit.hashes;
+        node_tt_hash = detail::native_tt_repetition_key(core,position,history.back().legal_ep);
+      }
+      return &node_tt_hash;
+    };
     auto finish = [&](Line line) {
       if (ordering && depth > 0) ordering->seal(ordering_node);
       if (cache && !root_play_only && raw_leaf && !cache->numeric()) poll(); // Preserve hint-only skipped store boundary.
@@ -986,7 +1829,7 @@ struct Traversal {
         poll();
         cache->store(history.back(), depth, line.score,
           detail::classify_bound(line.score, original_alpha, original_beta),
-          line.action, ply, *s, &node_tt_hash);
+          line.action, ply, *s, tt_hash_for_node());
       }
       return line;
     };
@@ -1005,7 +1848,7 @@ struct Traversal {
         if (!evaluator.usable()) throw EvaluationError("evaluator is quarantined");
         poll();
         if(detail::audit.enabled)audit_preprobe_ns=detail::audit_clock()-audit_node_start;
-        preprobe.emplace(cache->probe(history.back(),depth,ply,*s,&node_tt_hash));
+        preprobe.emplace(cache->probe(history.back(),depth,ply,*s,tt_hash_for_node()));
         ++t13a_counts.early_probes;
         poll();
         if (preprobe->score && !exact) {
@@ -1091,7 +1934,7 @@ struct Traversal {
       poll();
       if(detail::audit.enabled)audit_preprobe_ns=detail::audit_clock()-audit_node_start;
       auto hit = preprobe ? std::move(*preprobe) :
-          cache->probe(history.back(), depth, ply, *s, &node_tt_hash);
+          cache->probe(history.back(), depth, ply, *s, tt_hash_for_node());
       if (!hit.hint.empty() || hit.native_hint) {
         if (raw_leaf) {
           // The table may still report a move hint for a previously searched
@@ -1178,7 +2021,7 @@ struct Traversal {
       poll();
       ++stats.evaluator_calls;
       auto score =
-          SearchScore::finite(evaluator.evaluate(evaluation_snapshot(*s)));
+          SearchScore::finite(evaluator.evaluate(s110_eval_snapshot(core,position,*s)));
       if (!best || better(score, best->score))
         return finish({score, {DecisionKind::play, {}}, {}, PVEnd::horizon, {}});
       return finish(*best);
@@ -1251,7 +2094,7 @@ struct Traversal {
       bool direct_exact = exact && (!options.alpha_beta_enabled || (!alpha && !beta));
       auto line = child(prepared, m, [&](PreparedNode &next) {
         return node(depth - 1, ply + 1, next, alpha, beta, direct_exact);
-      }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
+      }, depth == 1 ? (s11_quiescence_enabled() ? (s17a_lazy() ? PreparationPurpose::search_horizon : PreparationPurpose::eager) : PreparationPurpose::search_horizon) : PreparationPurpose::search_inner);
       detail::PrivateDecision action{DecisionKind::play,m.text};
       // C4.6b experiment: native first-encounter tie policy. An alpha-beta
       // bound equal to the incumbent does not certify that a later lexical
@@ -1269,7 +2112,7 @@ struct Traversal {
           if (ordering) ordering->refinement();
           line = child(prepared, m, [&](PreparedNode &next) {
             return node(depth - 1, ply + 1, next, {}, {}, true);
-          }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
+          }, depth == 1 ? (s11_quiescence_enabled() ? (s17a_lazy() ? PreparationPurpose::search_horizon : PreparationPurpose::eager) : PreparationPurpose::search_horizon) : PreparationPurpose::search_inner);
         }
         if (competitive()) {
           line.action = std::move(action);
@@ -1451,7 +2294,7 @@ IterativeSearchResult iterative_search(
           // shared traversal refines internal ordering ties before publishing.
           auto line = t.child(root_prepared, m, [&](PreparedNode &next) {
             return t.node(depth - 1, 1, next, {}, {}, true);
-          }, depth == 1 ? PreparationPurpose::search_horizon : PreparationPurpose::search_inner);
+          }, depth == 1 ? (s11_quiescence_enabled() ? (s17a_lazy() ? PreparationPurpose::search_horizon : PreparationPurpose::eager) : PreparationPurpose::search_horizon) : PreparationPurpose::search_inner);
           if (t.ordering) {
             const bool improving = std::all_of(ranking.begin(),ranking.end(),[&](const auto &v){
               return snapshot->side_to_move()==Side::white?line.score>v.score:line.score<v.score;});
@@ -1482,6 +2325,59 @@ IterativeSearchResult iterative_search(
         t.previous = nullptr;
         if (t.ordering) t.ordering->commit();
         r.completed = std::move(next);
+        if (s11_trace_enabled()) {
+          std::fprintf(stderr,"CELAB_S11_DEPTH depth=%d mode=%d see=%d prune=%u total=%llu q=%llu see_calls=%llu see_ns=%llu sorted=%llu searched=%llu captures=%llu promotions=%llu ep=%llu evasions=%llu standpat_cut=%llu q_cut=%llu emergency=%llu negative=%llu zero=%llu positive=%llu s12_candidates=%llu s12_pruned=%llu s12_check_protected=%llu s15_zero_pruned=%llu s15_check_pruned=%llu s15_ep_pruned=%llu s15_see_recaptures=%llu s16_delta_tested=%llu s16_delta_pruned=%llu s16_delta_check_protected=%llu s16_positive_pruned=%llu s16_top_pruned=%llu s16_positive_check_protected=%llu\n",
+            depth,int(s11_quiescence_enabled()),int(s11_see_order_enabled()),
+            unsigned(s11_quiescence_enabled() && s16_default_material(e.identity()) ? 17U : 0U),
+            static_cast<unsigned long long>(r.statistics.visited_nodes),
+            static_cast<unsigned long long>(t.s11_qnodes),
+            static_cast<unsigned long long>(t.s11_see_calls),
+            static_cast<unsigned long long>(t.s11_see_ns),
+            static_cast<unsigned long long>(t.s11_sorted_nodes),
+            static_cast<unsigned long long>(t.s11_searched),
+            static_cast<unsigned long long>(t.s11_captures),
+            static_cast<unsigned long long>(t.s11_promotions),
+            static_cast<unsigned long long>(t.s11_ep),
+            static_cast<unsigned long long>(t.s11_evasions),
+            static_cast<unsigned long long>(t.s11_standpat_cutoffs),
+            static_cast<unsigned long long>(t.s11_search_cutoffs),
+            static_cast<unsigned long long>(t.s11_emergency),
+            static_cast<unsigned long long>(t.s11_see_negative),
+            static_cast<unsigned long long>(t.s11_see_zero),
+            static_cast<unsigned long long>(t.s11_see_positive),
+            static_cast<unsigned long long>(t.s12_candidates),
+            static_cast<unsigned long long>(t.s12_pruned),
+            static_cast<unsigned long long>(t.s12_check_protected),
+            static_cast<unsigned long long>(t.s15_zero_pruned),
+            static_cast<unsigned long long>(t.s15_check_pruned),
+            static_cast<unsigned long long>(t.s15_ep_pruned),
+            static_cast<unsigned long long>(t.s15_see_recaptures),
+            static_cast<unsigned long long>(t.s16_delta_tested),
+            static_cast<unsigned long long>(t.s16_delta_pruned),
+            static_cast<unsigned long long>(t.s16_delta_check_protected),
+            static_cast<unsigned long long>(t.s16_positive_pruned),
+            static_cast<unsigned long long>(t.s16_top_pruned),
+            static_cast<unsigned long long>(t.s16_positive_check_protected));
+          if(s17a_trace())std::fprintf(stderr,
+            "CELAB_S17A_DEPTH depth=%d mode=%u stage5=%llu expansions=%llu fallback=%llu generated=%llu quiet_promos_generated=%llu capture_promos_generated=%llu quiet_promos_eligible=%llu capture_promos_eligible=%llu quiet_promos_searched=%llu capture_promos_searched=%llu quiet_promos_excluded=%llu\n",
+            depth,s17a_mode(),
+            static_cast<unsigned long long>(t.s17a_stage5),
+            static_cast<unsigned long long>(t.s17a_lazy_expansions),
+            static_cast<unsigned long long>(t.s17a_claim_fallbacks),
+            static_cast<unsigned long long>(t.s17a_generated),
+            static_cast<unsigned long long>(t.s17a_quiet_promo_generated),
+            static_cast<unsigned long long>(t.s17a_capture_promo_generated),
+            static_cast<unsigned long long>(t.s17a_quiet_promo_eligible),
+            static_cast<unsigned long long>(t.s17a_capture_promo_eligible),
+            static_cast<unsigned long long>(t.s17a_quiet_promo_searched),
+            static_cast<unsigned long long>(t.s17a_capture_promo_searched),
+            static_cast<unsigned long long>(t.s17a_excluded_quiet_promo));
+          std::fprintf(stderr,"CELAB_S11_HIST depth=%d qply=",depth);
+          for(std::size_t q=0;q<t.s11_qhist.size();++q)
+            std::fprintf(stderr,"%s%llu",q?",":"",
+              static_cast<unsigned long long>(t.s11_qhist[q]));
+          std::fprintf(stderr,"\n");
+        }
         if (progress) {
           try {
             progress(*r.completed); // value-copy: no alias to engine state

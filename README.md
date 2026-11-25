@@ -1,5 +1,7 @@
 # Chess Engine Lab
 
+See [S1 production policy and optimized local builds](docs/s1-production.md) for the candidate quiescence policy, compatibility controls, and reproducible opt-in Clang/PGO workflow; see [production validation results](docs/s1-production-validation.md) for the accepted isolated native evidence and pending Full CI.
+
 C++20 chess engine, headless controller and local desktop GUI following the
 [approved architecture](docs/architecture-v1.0.md).
 
