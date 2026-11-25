@@ -26,6 +26,10 @@ public:
   // WASM callers provide the encompassing .wasm artifact digest from packaging.
   static EvaluatorModule bundled(const std::string &provider,
                                  const std::string &wasm_sha256);
+  // Omit the provider name to select the production bundled default (material-v2).
+  static EvaluatorModule bundled(const std::string &wasm_sha256) {
+    return bundled("default", wasm_sha256);
+  }
   // Also permits independently linked providers and controlled contract
   // fixtures.
   static EvaluatorModule provider(ChessEvalGetApiFn entry,

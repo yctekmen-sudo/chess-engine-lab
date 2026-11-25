@@ -102,6 +102,8 @@ async function numericTtExactHits(c) {
 test('numeric TT packaged-material default, explicit opt-out, external and replacement policy',async t=>{
  // Packaged default must perform actual numeric-score reuse.
  const built=client(t);await handshake(built);
+ assert(built.lines.some(s=>s.startsWith('option name Evaluator type string default ') && /material_evaluator\.(dll|so|dylib)$/.test(s)),'material default module path');
+ assert(built.lines.some(s=>s.startsWith('info string chesslab evaluator config ') && JSON.parse(s.slice('info string chesslab evaluator config '.length)).pawn_cp===100),'material default configuration');
  assert(built.lines.includes('option name NumericTT type check default true'));
  assert((await numericTtExactHits(built))>0,'packaged material numeric default is active');
  built.send('setoption name NumericTT value false');

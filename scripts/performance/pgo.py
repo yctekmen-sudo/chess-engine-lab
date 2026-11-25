@@ -31,7 +31,7 @@ def extra_flags(stage,profile=None,windows=None):
     require(stage=='full','unknown PGO stage');return []
 
 def flags(stage,profile=None,windows=None):return ' '.join([lto.flags_for('full',windows),*extra_flags(stage,profile,windows)])
-PRODUCTION_TARGETS={'chess_core','chess_evaluation','material_provider','material_evaluator','chess_search','chess_lab_uci'}
+PRODUCTION_TARGETS={'chess_core','chess_evaluation','material_provider','material_evaluator','material_pst_evaluator','chess_search','chess_lab_uci'}
 def disable_flag(stage,windows):
     require(stage in ('gen','pgo'),'invalid scoped stage')
     return ('/clang:' if windows else '')+'-fno-profile-instr-'+('generate' if stage=='gen' else 'use')
@@ -124,9 +124,13 @@ def train(build,e,stage,tools,data):
     dest,exe,env=build;out=e/'training'/stage;out.mkdir(parents=True);raw=out/'raw';raw.mkdir();cases=validate_training(data)
     configurations=[('qs-off',False,False,cases),('qs-off-tt-off',False,True,cases[::4])]
     if stage!='main':configurations += [('qs-on',True,False,cases),('qs-on-tt-off',True,True,cases[::4])]
-    for name,on,tt_off,selected in configurations:
+    material=exe.parent/('material_evaluator.dll' if os.name=='nt' else 'libmaterial_evaluator.so')
+    pst=exe.parent/('material_pst_evaluator.dll' if os.name=='nt' else 'libmaterial_pst_evaluator.so')
+    require(material.is_file() and pst.is_file(),'both packaged native evaluators required for training')
+    configurations=[(name+'-C1',on,off,selected,pst) for name,on,off,selected in configurations]+[(name+'-material',on,off,selected,None) for name,on,off,selected in configurations]
+    for name,on,tt_off,selected,module in configurations:
         local=dict(env);local.update({k:v for k,v in native_env(on,tt_off=tt_off).items() if k.startswith('CELAB_S')});local['LLVM_PROFILE_FILE']=str(raw/(name+'-%m-%p.profraw'))
-        engine=Engine(exe,local,out/(name+'-stderr.log'))
+        engine=Engine(exe,local,out/(name+'-stderr.log'),module)
         try:
             for c in selected:
                 r=engine.search(c['fen'],c['depth']);r.update(id=c['id'],fen=c['fen'],depth=c['depth'],arm=name);append(out/'searches.jsonl',r)
@@ -141,7 +145,7 @@ def train(build,e,stage,tools,data):
     if stage!='main':
         for fn in ('s17e_recapture','native_read_search_identity') + (('native_fill_evaluation_position',) if stage in ('s113','profile13') else ()):
             require(any(fn in block.splitlines()[0] and re.search(r'Function count: [1-9]\d*',block) for block in re.split(r'(?m)^  (?=\S)',show) if block.strip()),'expected executed hot function absent: '+fn)
-    shutil.copyfile(merged,out/'merged.profdata');write(out/'inventory.json',dict(profileSha256=digest(merged),raw=[dict(path=p.name,bytes=p.stat().st_size,sha256=digest(p)) for p in paths],searches=sum(len(c) for _,_,_,c in configurations),trainingSHA256=digest(e/'training-corpus.json')))
+    shutil.copyfile(merged,out/'merged.profdata');write(out/'inventory.json',dict(profileSha256=digest(merged),raw=[dict(path=p.name,bytes=p.stat().st_size,sha256=digest(p)) for p in paths],searches=sum(len(c) for _,_,_,c,_ in configurations),trainingSHA256=digest(e/'training-corpus.json')))
     return merged
 
 def preflight(pair,env,root,e,tools):

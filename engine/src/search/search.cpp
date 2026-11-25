@@ -6,6 +6,7 @@
 #include "history_duplicates.hpp"
 #include "repeated_claim_targets.hpp"
 #include "persistent_ordering.hpp"
+#include "q_pruning_policy.hpp"
 #include "../native_move_batch.hpp"
 #include "../evaluation/native_eval_snapshot.hpp"
 #include "../native_undo_fastpath.hpp"
@@ -29,6 +30,27 @@ bool native_chess_core(const ChessCore &) noexcept;
 std::size_t native_legal_move_count(const ChessCore &, const Position &);
 bool native_has_any_legal_move(const ChessCore &, const Position &);
 namespace {
+// SearchScore is a White-perspective integer centipawn domain.
+// Only narrow a finite incumbent that is the actual active bound. Never
+// manufacture a mate-distance successor/predecessor or an infinite score.
+bool s21_scout_window(bool white, SearchScore incumbent,
+                      std::optional<SearchScore> &alpha,
+                      std::optional<SearchScore> &beta) {
+  if (incumbent.kind() != SearchScore::Kind::finite) return false;
+  const auto &bound = white ? alpha : beta;
+  if (!bound || *bound != incumbent) return false;
+  const auto cp = incumbent.value();
+  if (white ? cp == finite_limit : cp == -finite_limit) return false;
+  const auto edge = SearchScore::finite(cp + (white ? 1 : -1));
+  if (white) {
+    if (beta && edge >= *beta) return false;
+    beta = edge;
+  } else {
+    if (alpha && edge <= *alpha) return false;
+    alpha = edge;
+  }
+  return true;
+}
 // T1.3a experimental controls. 0=unchanged, 1=defer ordering to after TT,
 // 2=add native positive-depth batch materialization deferral.
 int t13a_mode() noexcept {
@@ -494,32 +516,21 @@ struct S17FNode {
 };
 
 
-// Accepted nonpositive-SEE pruning, restricted to default material.
+using detail::QPruningPolicy;
+using detail::q_pruning_policy;
 // ALL in-check evasions, promotions and EP captures remain unpruned.
-// This is a tactical heuristic, not a correctness proof.
-bool s12_prune_candidate(unsigned mode,unsigned /*qply*/,bool checked,
+// Material SEE and delta tests are heuristics, not exact positional bounds.
+bool s12_prune_candidate(const QPruningPolicy &policy,unsigned /*qply*/,bool checked,
                          const OrderedMove &m,int see) noexcept {
-  return mode==17 && !checked && m.capture && m.text.size()!=5 && !m.legal_ep && see<=0;
+  return policy.see_enabled && !checked && m.capture && m.text.size()!=5 && !m.legal_ep && see<=policy.see_cutoff_cp;
 }
-
-// Accepted delta-0 is restricted to the default material-v2 configuration.
-// SEE and delta use integer centipawns.
-// The pre-SEE delta test is a heuristic, NOT a proof of a safe cutoff.
-constexpr bool s16_delta_mode(unsigned mode) noexcept {return mode==17;}
-constexpr int s16_delta_margin(unsigned) noexcept {return 0;}
-bool s16_delta_reject(unsigned mode,bool checked,bool capture,bool ep,
+bool s16_delta_reject(const QPruningPolicy &policy,bool checked,bool capture,bool ep,
                       bool promotion,bool white,ChessEvalCentipawns static_score,
                       ChessEvalCentipawns bound,int captured_value) noexcept {
-  const int margin=s16_delta_margin(mode);
-  if(!s16_delta_mode(mode) || checked || !capture || ep || promotion)return false;
-  // White-positive evaluation. Test only the side-to-move active bound.
+  const int margin=policy.delta_margin_cp;
+  if(!policy.delta_enabled || checked || !capture || ep || promotion)return false;
   return white ? static_score+captured_value+margin<=bound :
                  static_score-captured_value-margin>=bound;
-}
-bool s16_default_material(const EvaluationIdentity &id) noexcept {
-  return id.module_id=="org.chesslab.material" && id.abi_major==2 && id.module_version=="2.0.0" &&
-      id.canonical_configuration==
-      "{\"bishop_cp\":325,\"knight_cp\":300,\"pawn_cp\":100,\"queen_cp\":900,\"rook_cp\":500}";
 }
 
 // Board-local postmove test: protect *every* capture that gives check,
@@ -1209,6 +1220,7 @@ struct Traversal {
   SearchOptions options;
   SearchStatistics &stats;
   std::vector<RepetitionSignature> history;
+  const QPruningPolicy q_policy=q_pruning_policy(evaluator.identity());
 #if defined(CELAB_H2_POLICY) && CELAB_H2_POLICY >= 1 && CELAB_H2_POLICY <= 4
   // Place experimental fields after the six positional aggregate-initialized
   // Traversal members. Every new field is self-initialized.
@@ -1553,11 +1565,8 @@ struct Traversal {
     if(!native_chess_core(core)||prepared.mode!=PreparationMode::native_claim_free_leaf)
       annotate_claims(prepared);
     std::optional<Line> best=claim(prepared);
-    // Material-unit pruning is certified only for the accepted default material
-    // identity/configuration. Other evaluators still receive SEE ordering and
-    // all tactical continuations/evasions, without material-unit pruning.
-    const unsigned s16_mode=s16_default_material(evaluator.identity()) ? 17U : 0U;
     std::optional<ChessEvalCentipawns> s16_static;
+    std::optional<SearchScore> s21_delta_bound;
     auto better=[&](SearchScore a,SearchScore b){return white?a>b:a<b;};
     auto update=[&] {
       if(!options.alpha_beta_enabled||!best)return false;
@@ -1570,7 +1579,7 @@ struct Traversal {
     if(!checked || ply>=64) {
       poll();++stats.evaluator_calls;
       const ChessEvalCentipawns raw=evaluator.evaluate(s110_eval_snapshot(core,position,s));
-      if(s16_delta_mode(s16_mode))s16_static=raw;
+      if(q_policy.delta_enabled)s16_static=raw;
       auto score=SearchScore::finite(raw);
       if(!best||better(score,best->score))
         best=Line{score,{DecisionKind::play,{}},{},PVEnd::horizon,{}};
@@ -1634,7 +1643,7 @@ struct Traversal {
     }
     // Index-only sorting preserves PreparedNode native certificates and
     // original list order for exact SEE ties. Quiet evasions always survive.
-    if(s11_see_order_enabled() && (eligible.size()>1 || s16_mode!=0)) {
+    if(s11_see_order_enabled() && (eligible.size()>1 || (q_policy.see_enabled || q_policy.delta_enabled))) {
       struct Entry {std::size_t i;int priority;};
       S17FNode see_node;
       S17HNode check_node;
@@ -1647,15 +1656,19 @@ struct Traversal {
           // Delta pruning is deliberately BEFORE the potentially expensive
           // SEE calculation. No check evasion, promotion, EP, or checking
           // capture is discarded by this new rule.
-          if(s16_delta_mode(s16_mode) && s16_static) {
+          if(q_policy.delta_enabled && s16_static) {
             const auto &active_bound=white?alpha:beta;
             if(active_bound && active_bound->kind()==SearchScore::Kind::finite &&
-               s16_delta_reject(s16_mode,checked,m.capture,m.legal_ep,
+               s16_delta_reject(q_policy,checked,m.capture,m.legal_ep,
                  m.text.size()==5,white,*s16_static,active_bound->value(),
                  s11_value(s.squares()[m.text.to()]))) {
               ++s16_delta_tested;
               if(check_node.check(s,m,core,position,0))++s16_delta_check_protected;
-              else {++s16_delta_pruned;continue;}
+              else {
+                ++s16_delta_pruned;
+                s21_delta_bound=active_bound;
+                continue;
+              }
             }
           }
           auto t0=s11_trace_enabled()?std::chrono::steady_clock::now():
@@ -1671,7 +1684,7 @@ struct Traversal {
               std::chrono::duration_cast<std::chrono::nanoseconds>(
                  std::chrono::steady_clock::now()-t0).count());
         }
-        if(s12_prune_candidate(s16_mode,qply,checked,m,priority)) {
+        if(s12_prune_candidate(q_policy,qply,checked,m,priority)) {
           ++s12_candidates;
           // Accepted SEE pruning does not protect checking captures; the
           // delta rule above does. Classify pruned checks only in diagnostics.
@@ -1721,6 +1734,11 @@ struct Traversal {
       }
     }
     if(!best)throw std::logic_error("S1 qsearch lacks standpat/evasions/claim");
+    // A delta-pruned move was not searched: the pruning bound, not the
+    // weaker fail-soft value of the searched subset, is all we can claim.
+    if (s21_delta_bound && (white ? best->score < *s21_delta_bound
+                                  : best->score > *s21_delta_bound))
+      best->score=*s21_delta_bound;
     return *best;
   }
   // exact=true is used only with an unbounded window. An ordered child can
@@ -2036,15 +2054,31 @@ struct Traversal {
                     moves_here.begin()+candidate+1);
     }
 #endif
+    const bool pvs = depth > 1 && options.alpha_beta_enabled &&
+                     native_chess_core(core);
     for (std::size_t i = 0; i < moves_here.size(); ++i) {
       auto &m = moves_here[i];
       poll();
-      const auto child_alpha = alpha, child_beta = beta;
+      auto child_alpha = alpha, child_beta = beta;
       bool refined = false;
       bool direct_exact = exact && (!options.alpha_beta_enabled || (!alpha && !beta));
+      const bool scout = pvs && i != 0 && m.text.native() && best &&
+          best->action.kind == DecisionKind::play &&
+          s21_scout_window(white, best->score, child_alpha, child_beta);
       auto line = child(prepared, m, [&](PreparedNode &next) {
-        return node(depth - 1, ply + 1, next, alpha, beta, direct_exact);
+        return node(depth - 1, ply + 1, next, child_alpha, child_beta, direct_exact);
       }, depth == 1 ? (s11_quiescence_enabled() ? (s17a_lazy() ? PreparationPurpose::search_horizon : PreparationPurpose::eager) : PreparationPurpose::search_horizon) : PreparationPurpose::search_inner);
+      // A scout that crosses the incumbent is only a bound. Re-search at the
+      // original window, even for an apparent cutoff. Existing exact-PV
+      // refinement below remains responsible for publishing an exact line.
+      // Native equal scores retain the incumbent; synthetic ties never scout.
+      if (scout && better(line.score, best->score)) {
+        child_alpha = alpha;
+        child_beta = beta;
+        line = child(prepared, m, [&](PreparedNode &next) {
+          return node(depth - 1, ply + 1, next, child_alpha, child_beta, direct_exact);
+        }, PreparationPurpose::search_inner);
+      }
       detail::PrivateDecision action{DecisionKind::play,m.text};
       // C4.6b experiment: native first-encounter tie policy. An alpha-beta
       // bound equal to the incumbent does not certify that a later lexical
@@ -2194,6 +2228,10 @@ IterativeSearchResult iterative_search(
     auto p = c.clone(root);
     Traversal t{c, *p, e, {1, options.alpha_beta_enabled}, r.statistics,
                 h.occurrences()};
+    if(std::getenv("CELAB_E1_QPOLICY_TRACE"))
+      std::fprintf(stderr,"CELAB_E1_QPOLICY id=%u see=%d cutoff=%d delta=%d margin=%d\n",
+          t.q_policy.id,int(t.q_policy.see_enabled),t.q_policy.see_cutoff_cp,
+          int(t.q_policy.delta_enabled),t.q_policy.delta_margin_cp);
     if (ordering.enabled()) t.ordering = &ordering;
     // Validation/terminal detection and safe fallback enumeration precede
     // attaching the observer: a cancelled terminal never becomes a fallback.
@@ -2278,7 +2316,7 @@ IterativeSearchResult iterative_search(
         if (s11_trace_enabled()) {
           std::fprintf(stderr,"CELAB_S11_DEPTH depth=%d mode=%d see=%d prune=%u total=%llu q=%llu see_calls=%llu see_ns=%llu sorted=%llu searched=%llu captures=%llu promotions=%llu ep=%llu evasions=%llu standpat_cut=%llu q_cut=%llu emergency=%llu negative=%llu zero=%llu positive=%llu s12_candidates=%llu s12_pruned=%llu s12_check_protected=%llu s15_zero_pruned=%llu s15_check_pruned=%llu s15_ep_pruned=%llu s15_see_recaptures=%llu s16_delta_tested=%llu s16_delta_pruned=%llu s16_delta_check_protected=%llu s16_positive_pruned=%llu s16_top_pruned=%llu s16_positive_check_protected=%llu\n",
             depth,int(s11_quiescence_enabled()),int(s11_see_order_enabled()),
-            unsigned(s11_quiescence_enabled() && s16_default_material(e.identity()) ? 17U : 0U),
+            unsigned(s11_quiescence_enabled() ? t.q_policy.id : 0U),
             static_cast<unsigned long long>(r.statistics.visited_nodes),
             static_cast<unsigned long long>(t.s11_qnodes),
             static_cast<unsigned long long>(t.s11_see_calls),
