@@ -1465,7 +1465,7 @@ class Board;
 
 class movegen {
    public:
-    enum class MoveGenType : std::uint8_t { ALL, CAPTURE, QUIET };
+    enum class MoveGenType : std::uint8_t { ALL, CAPTURE, QUIET, TACTICAL };
     enum class GenMode : std::uint8_t { ALL_MOVES, ONE_MOVE_ONLY };
 
     /**
@@ -2421,6 +2421,12 @@ class Board {
         }
     }
 
+    // CELab adapter-private read-only access to the native square storage.
+    // No reference escapes the adapter; callers must not retain it across mutation.
+    [[nodiscard]] const std::array<Piece,64>& celab_native_squares() const noexcept {
+        return board_;
+    }
+
     /**
      * @brief Checks if a move is a capture, enpassant moves are also considered captures.
      * @param move
@@ -2456,6 +2462,16 @@ class Board {
      * @return
      */
     [[nodiscard]] U64 hash() const noexcept { return key_; }
+
+    // CELab search-private index: legal_ep is the already normalized repetition
+    // field, not the raw FEN target or the library's pseudo-legal EP square.
+    [[nodiscard]] U64 celab_repetition_hash(Square legal_ep) const noexcept {
+        if (ep_sq_ == legal_ep) return key_;
+        auto key = key_;
+        if (ep_sq_ != Square::NO_SQ) key ^= Zobrist::enpassant(ep_sq_.file());
+        if (legal_ep != Square::NO_SQ) key ^= Zobrist::enpassant(legal_ep.file());
+        return key;
+    }
 
     [[nodiscard]] Color sideToMove() const noexcept { return stm_; }
     [[nodiscard]] Square enpassantSq() const noexcept { return ep_sq_; }
@@ -3990,7 +4006,7 @@ inline bool movegen::generatePawnMoves(const Board& board, Movelist& moves, Bitb
 
         // Skip quiet promotions if we are only generating captures.
         // Generates at ALL and QUIET
-        while (mt != MoveGenType::CAPTURE && promo_push) {
+        while ((mt != MoveGenType::CAPTURE) && promo_push) {
             const auto index = promo_push.pop();
             moves.add(Move::make<Move::PROMOTION>(index + DOWN, index, PieceType::QUEEN));
             if (gm == GenMode::ONE_MOVE_ONLY) return true;
@@ -4016,13 +4032,13 @@ inline bool movegen::generatePawnMoves(const Board& board, Movelist& moves, Bitb
         if (gm == GenMode::ONE_MOVE_ONLY) return true;
     }
 
-    while (mt != MoveGenType::CAPTURE && single_push) {
+    while ((mt == MoveGenType::ALL || mt == MoveGenType::QUIET) && single_push) {
         const auto index = single_push.pop();
         moves.add(Move::make<Move::NORMAL>(index + DOWN, index));
         if (gm == GenMode::ONE_MOVE_ONLY) return true;
     }
 
-    while (mt != MoveGenType::CAPTURE && double_push) {
+    while ((mt == MoveGenType::ALL || mt == MoveGenType::QUIET) && double_push) {
         const auto index = double_push.pop();
         moves.add(Move::make<Move::NORMAL>(index + DOWN + DOWN, index));
         if (gm == GenMode::ONE_MOVE_ONLY) return true;
@@ -4205,7 +4221,7 @@ inline void movegen::legalmoves(Movelist& movelist, const Board& board, int piec
     // Slider, Knights and King moves can only go to enemy or empty squares.
     if constexpr (mt == MoveGenType::ALL)
         movable_square = opp_empty;
-    else if constexpr (mt == MoveGenType::CAPTURE)
+    else if constexpr (mt == MoveGenType::CAPTURE || mt == MoveGenType::TACTICAL)
         movable_square = occ_opp;
     else  // QUIET moves
         movable_square = ~occ_all;
@@ -4218,7 +4234,7 @@ inline void movegen::legalmoves(Movelist& movelist, const Board& board, int piec
             return;
         }
 
-        if (mt != MoveGenType::CAPTURE && checks == 0) {
+        if ((mt == MoveGenType::ALL || mt == MoveGenType::QUIET) && checks == 0) {
             Bitboard moves_bb = generateCastleMoves<c>(board, king_sq, seen, pin_hv);
 
             while (moves_bb) {

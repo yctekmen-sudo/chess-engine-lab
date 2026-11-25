@@ -38,7 +38,7 @@ static_assert(sizeof(SearchScore) == 24 && alignof(SearchScore) == 8);
 // Exact repetition evidence; raw EP is normalized through legal move
 // generation.
 struct RepetitionSignature {
-  std::array<PieceCode, 64> pieces{};
+  std::array<PieceCode, 64> pieces = empty_piece_squares();
   Side side{};
   std::array<bool, 4> castling{};
   std::optional<std::uint8_t> legal_ep;

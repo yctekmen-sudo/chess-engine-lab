@@ -69,7 +69,7 @@ public:
     if (text.size() == 5) {
       const unsigned type = text[4] == 'n' ? 2 : text[4] == 'b' ? 3
                           : text[4] == 'r' ? 4 : 5;
-      result = PieceCode(type + (white ? 0 : 6));
+      result = PieceCode(type - 1 + (white ? 0 : 6));
     }
     std::array<unsigned, 4> squares{};
     std::array<PieceCode, 4> values{};

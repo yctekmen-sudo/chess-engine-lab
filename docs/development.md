@@ -1,5 +1,7 @@
 # Development workflow
 
+For the S1 production candidate and opt-in performance build, see [S1 production policy and optimized local builds](s1-production.md). See [production validation results](s1-production-validation.md) for the accepted isolated native evidence. Use `scripts/validation/full-ci.ps1` on the clean committed revision; reference review remains mandatory. Historical experiments below retain their original scope.
+
 ## M7.6 production ordering candidate
 
 B2 is the production build default; select P1 or NONE with the single

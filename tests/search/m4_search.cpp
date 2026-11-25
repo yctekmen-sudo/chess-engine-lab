@@ -224,7 +224,7 @@ void check_native_semantic_ranking(const ChessCore &c,const Position&p,
             real_reference(c,*cursor,history,depth-int(ply)).score;
         const auto &text=v.principal_variation[ply];
         auto next=history.after_move(c,*cursor,text);
-        auto m=c.decode_move(*cursor,text);c.make_move(*cursor,*m);
+        auto m=c.decode_move(*cursor,text);auto undo=c.make_move(*cursor,*m);(void)undo;
         const auto chosen=real_reference(c,*cursor,next,depth-int(ply)-1).score.one_ply_farther();
         check(chosen==required,"C4.6 independently optimal native PV ply");
         history=std::move(next);
@@ -235,7 +235,7 @@ void check_native_semantic_ranking(const ChessCore &c,const Position&p,
       if(v.decision.kind==DecisionKind::claim_draw_with_intended_move) {
         auto next=h.after_move(c,p,v.decision.move);
         auto cursor=c.clone(p);
-        auto m=c.decode_move(*cursor,v.decision.move);c.make_move(*cursor,*m);
+        auto m=c.decode_move(*cursor,v.decision.move);auto undo=c.make_move(*cursor,*m);(void)undo;
         auto sig=repetition_signature(c,*cursor);
         check(std::count(next.occurrences().begin(),next.occurrences().end(),sig)>=3 ||
               c.snapshot(*cursor)->halfmove_clock()>=100,"native intended claim eligible");

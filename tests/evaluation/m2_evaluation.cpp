@@ -26,9 +26,9 @@ void rejects(const std::function<void()> &fn) {
 }
 std::string sha(64, 'a');
 struct SourceFixture : PositionSnapshot {
-  std::array<PieceCode, 64> board{};
+  std::array<PieceCode, 64> board = empty_piece_squares();
   Side turn = Side::white;
-  uint32_t version = 1, full = 1;
+  uint32_t version = position_snapshot_schema_version, full = 1;
   std::optional<uint8_t> ep;
   SourceFixture() {
     board[4] = PieceCode::white_king;
@@ -51,9 +51,9 @@ void source_validation() {
   SourceFixture s;
   test(evaluation_snapshot(s).halfmove_clock == UINT32_MAX,
        "lossless source counter");
-  s.version = 2;
+  s.version = 1; // obsolete square-code schema
   rejects([&] { evaluation_snapshot(s); });
-  s.version = 1;
+  s.version = position_snapshot_schema_version;
   s.turn = static_cast<Side>(2);
   rejects([&] { evaluation_snapshot(s); });
   s.turn = Side::white;
@@ -246,7 +246,7 @@ void golden(const EvaluatorModule &module) {
         mask |= 1u << i;
     test(p.struct_size == 160 && p.schema_major == 1 && p.schema_minor == 0,
          "snapshot header");
-    test(p.side_to_move == (turn == "b") && p.castling_rights == mask &&
+    test(p.side_to_move == (turn == "b" ? 1ULL : 0ULL) && p.castling_rights == mask &&
              p.halfmove_clock == half && p.fullmove_number == full,
          "golden metadata");
     test(p.en_passant_square ==

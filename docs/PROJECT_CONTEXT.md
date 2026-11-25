@@ -1,7 +1,9 @@
 # Chess Engine Lab — Project Context
 
+**S1 candidate note (2026-11-24):** the accepted architectural stack and COMP1 local optimization configuration are documented in [S1 production policy and optimized local builds](s1-production.md). Production v2 passed isolated native validation (see [validation report](s1-production-validation.md)); committed-revision Full CI and separate publication approval remain pending. Stable evaluator ABI and portable builds remain authoritative. Quiescence is default-on in the candidate with supported opt-out; non-default evaluators retain an unpruned fallback. Native O3 + Full LTO + PGO is an opt-in local build workflow.
+
 **Document role:** Long-lived engineering handoff for ChatGPT, Codex, and collaborators.
-**Updated:** 2026-10-23 (America/New_York).
+**Updated:** 2026-11-24 (America/New_York).
 **Repository:** private `yctekmen-sudo/chess-engine-lab` — <https://github.com/yctekmen-sudo/chess-engine-lab>.
 **Authoritative sources:** the current repository code, approved specifications under `docs/`, and merged tests. This file is an orientation guide, not a substitute for the source or the approved specifications. Read the root [`AGENTS.md`](../AGENTS.md), [`README.md`](../README.md), and [`development.md`](development.md) before implementation. See [`CURRENT_STATUS.md`](CURRENT_STATUS.md) for moving milestones, benchmark results, and pending work.
 

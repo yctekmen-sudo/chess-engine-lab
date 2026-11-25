@@ -85,7 +85,7 @@ struct TreeUndo : UndoToken {
   TreeUndo(int a, int b) : from(a), to(b) {}
 };
 struct TreeSnapshot : PositionSnapshot {
-  std::array<PieceCode, 64> pieces{};
+  std::array<PieceCode, 64> pieces = empty_piece_squares();
   Node node;
   int id;
   TreeSnapshot(Node n, int i) : node(std::move(n)), id(i) {
@@ -107,7 +107,7 @@ struct TreeSnapshot : PositionSnapshot {
   }
   uint32_t halfmove_clock() const noexcept override { return node.clock; }
   uint32_t fullmove_number() const noexcept override { return id + 1; }
-  uint32_t schema_version() const noexcept override { return 1; }
+  uint32_t schema_version() const noexcept override { return position_snapshot_schema_version; }
 };
 struct Tree : ChessCore {
   std::vector<Node> nodes;
