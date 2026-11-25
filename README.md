@@ -1,6 +1,8 @@
 # Chess Engine Lab
 
-See [S1 production policy and optimized local builds](docs/s1-production.md) for the candidate quiescence policy, compatibility controls, and reproducible opt-in Clang/PGO workflow; see [production validation results](docs/s1-production-validation.md) for the accepted isolated native evidence and pending Full CI.
+**S2.0 accepted development candidate (2026-11-25):** PR #55 is merged at `0a23602e30ec0151200f5b874902b5c49d499e27`. The integer-centipawn migration passed standard and COMP1 optimized Windows/WSL development validation and was explicitly accepted. See [S2.0 scoring contract](docs/s2-centipawn.md) and [paired validation results](docs/s2-centipawn-validation.md). The committed-revision 54-gate Full CI, historical-reference review and separate publication/merge approvals remain pending. Older dated entries describe their historical scope.
+
+See [S1 production policy and optimized local builds](docs/s1-production.md) for the merged S1 quiescence policy, compatibility controls, and reproducible opt-in Clang/PGO workflow; see [production validation results](docs/s1-production-validation.md) for the historical isolated native evidence. The current scoring contract is S2.0.
 
 C++20 chess engine, headless controller and local desktop GUI following the
 [approved architecture](docs/architecture-v1.0.md).

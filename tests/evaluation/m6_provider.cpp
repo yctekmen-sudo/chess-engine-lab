@@ -6,7 +6,7 @@
 namespace {
 ChessEvalApi original;
 int calls=0;
-ChessEvalStatus CHESS_EVAL_CALL evaluate(ChessEvalHandle h,const ChessEvalPosition *p,double *out,char *e,uint64_t n) {
+ChessEvalStatus CHESS_EVAL_CALL evaluate(ChessEvalHandle h,const ChessEvalPosition *p,ChessEvalCentipawns *out,char *e,uint64_t n) {
   ++calls;
   const char *delay=std::getenv("CHESS_LAB_TEST_EVAL_DELAY_MS");
   if(delay)std::this_thread::sleep_for(std::chrono::milliseconds(std::atoi(delay)));

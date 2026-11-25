@@ -20,7 +20,14 @@ test('real native/mock paired match, durable identities, PGN, idempotent resume'
  const s=await resumeExperiment(d);assert.equal(s.completed,2);assert.equal(s.incompletePairs.length,0);assert.equal(s.counts.invalid,0);assert.equal(s.counts.technicalForfeits,0);
  const before=await readFile(join(d,'games/game-0-0.json'),'utf8'),again=await resumeExperiment(d);assert.equal(again.attempts.length,2);assert.equal(await readFile(join(d,'games/game-0-0.json'),'utf8'),before);
  const out=await exportExperiment(d);assert.match(out.pgn,/\[FEN /);assert.match(out.pgn,/\[Result "(?:1-0|1\/2-1\/2)"\]/);
- assert.equal(out.sidecar.attempts.length,2);assert(m.artifacts[0].length>=2);assert.match(m.identities[0].m2[0],/artifact_sha256/);
+ assert.equal(out.sidecar.attempts.length,2);assert(m.artifacts[0].length>=2);
+ const metadata=m.identities[0].m2;
+ assert(Array.isArray(metadata));
+ assert.equal(metadata[0],'info string chesslab evaluator score_units centipawns abi 2');
+ assert.match(metadata[1],/^info string chesslab evaluator artifact_sha256 [a-f0-9]{64} fingerprint [a-f0-9]{64}$/);
+ const prefix='info string chesslab evaluator config ';
+ assert(metadata[2].startsWith(prefix));
+ assert.deepEqual(JSON.parse(metadata[2].slice(prefix.length)),{pawn_cp:100,knight_cp:300,bishop_cp:325,rook_cp:500,queen_cp:900});
 });
 test('technical forfeit is separate from chess WDL and invalid-game policy',async t=>{
  for(const failurePolicy of ['technical_forfeit','invalid']) {

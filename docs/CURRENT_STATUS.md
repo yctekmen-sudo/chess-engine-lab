@@ -1,5 +1,7 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+**S2.0 accepted development candidate (2026-11-25):** PR #55 is merged at `0a23602e30ec0151200f5b874902b5c49d499e27`. The integer-centipawn migration passed standard and COMP1 optimized Windows/WSL development validation and was explicitly accepted. See [S2.0 scoring contract](s2-centipawn.md) and [paired validation results](s2-centipawn-validation.md). The committed-revision 54-gate Full CI, historical-reference review and separate publication/merge approvals remain pending. Older dated entries describe their historical scope.
+
 ## S1 production consolidation — accepted local candidate, 2026-11-24 (America/New_York)
 
 Exact pre-S1 main `84ea6ba22ffc52a5a4c42e5218c969052c0e99cb`. The user accepted production v2 after Windows/WSL native validation in `CELab-S1-production-evidence-s1prod-20261125T042518Z-6e77aa73.zip`. 384 native tests, 20,660 frozen search records, 256 additional verification searches and 600 PGO training searches completed; all 36 exported production files matched across platforms. Final commit preparation updates documentation and removes one trailing LF from `scripts/performance/targeting.py` (no Python AST or meaningful-token change); all other validated non-documentation bytes are preserved. See [S1 production validation and performance](s1-production-validation.md) and [policy/build workflow](s1-production.md).

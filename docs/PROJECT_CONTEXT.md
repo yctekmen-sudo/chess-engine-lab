@@ -1,9 +1,11 @@
 # Chess Engine Lab — Project Context
 
-**S1 candidate note (2026-11-24):** the accepted architectural stack and COMP1 local optimization configuration are documented in [S1 production policy and optimized local builds](s1-production.md). Production v2 passed isolated native validation (see [validation report](s1-production-validation.md)); committed-revision Full CI and separate publication approval remain pending. Stable evaluator ABI and portable builds remain authoritative. Quiescence is default-on in the candidate with supported opt-out; non-default evaluators retain an unpruned fallback. Native O3 + Full LTO + PGO is an opt-in local build workflow.
+**S2.0 accepted development candidate (2026-11-25):** PR #55 is merged at `0a23602e30ec0151200f5b874902b5c49d499e27`. The integer-centipawn migration passed standard and COMP1 optimized Windows/WSL development validation and was explicitly accepted. See [S2.0 scoring contract](s2-centipawn.md) and [paired validation results](s2-centipawn-validation.md). The committed-revision 54-gate Full CI, historical-reference review and separate publication/merge approvals remain pending. Older dated entries describe their historical scope.
+
+**Historical S1 candidate note (2026-11-24, subsequently merged in PR #55):** the accepted architectural stack and COMP1 local optimization configuration are documented in [S1 production policy and optimized local builds](s1-production.md). Production v2 passed isolated native validation (see [validation report](s1-production-validation.md)); committed-revision Full CI and separate publication approval remain pending. Stable evaluator ABI and portable builds remain authoritative. Quiescence is default-on in the candidate with supported opt-out; non-default evaluators retain an unpruned fallback. Native O3 + Full LTO + PGO is an opt-in local build workflow.
 
 **Document role:** Long-lived engineering handoff for ChatGPT, Codex, and collaborators.
-**Updated:** 2026-11-24 (America/New_York).
+**Updated:** 2026-11-25 (America/New_York).
 **Repository:** private `yctekmen-sudo/chess-engine-lab` — <https://github.com/yctekmen-sudo/chess-engine-lab>.
 **Authoritative sources:** the current repository code, approved specifications under `docs/`, and merged tests. This file is an orientation guide, not a substitute for the source or the approved specifications. Read the root [`AGENTS.md`](../AGENTS.md), [`README.md`](../README.md), and [`development.md`](development.md) before implementation. See [`CURRENT_STATUS.md`](CURRENT_STATUS.md) for moving milestones, benchmark results, and pending work.
 
@@ -26,14 +28,14 @@ Priorities, in order:
 | Rules adapter | Opaque `Position`, `Move`, `UndoToken`; FEN, legal moves, make/undo, state, snapshots; currently wraps vendored Disservin/chess-library | `engine/include/chess_lab/chess_core.hpp`, `engine/src/chess_core.cpp` |
 | Search | Minimax/alpha-beta, iterative deepening, MultiPV, previous-PV ordering, draw actions, exact PV/tie handling | `engine/include/chess_lab/search.hpp`, `engine/src/search/search.cpp` |
 | Transposition table | Optional, bounded, context-validated hints and numerical results; exact history verification, compatible depth/evaluator/policy | `engine/src/search/transposition_table.cpp`, `docs/m5-transposition-table-spec-v1.0.md` |
-| Evaluation | Replaceable current-position-only evaluator with versioned read-only C ABI; raw finite White-perspective score, material baseline | `engine/include/chess_lab/evaluation.hpp`, `engine/src/evaluation/`, `docs/evaluation-abi-v1.0.md` |
+| Evaluation | Replaceable current-position-only evaluator with versioned read-only C ABI; bounded integer White-perspective centipawns (ABI v2), material baseline | `engine/include/chess_lab/evaluation.hpp`, `engine/src/evaluation/`, `docs/s2-centipawn.md` |
 | Native protocol/controller | UCI process; Node.js/TypeScript owns authoritative game state, clocks, adjudication, sessions, experiment records | `engine/src/uci/`, `controller/`, `docs/m6-controller-spec-v1.0.md` |
 | Presentation | React/TypeScript user interface, distinct from engine rules and search | `gui/`, `docs/m7-gui-spec-v1.0.md` |
 | Validation and benchmarking | Native/WASM correctness suites, reference searches, automated benchmarks, release/profile/debug presets | `tests/`, `CMakeLists.txt`, `CMakePresets.json`, `scripts/ci/`, `docs/local-ci.md`, `docs/development.md` |
 
 The Node.js 24 controller is authoritative for actual moves, clock rules, and adjudication; the GUI renders that state. Engine output is a validated proposal. Only a **fully completed iterative-deepening depth** supplies authoritative searched rankings; intermediate callbacks remain provisional until the invocation's final status. Terminal roots return at depth zero without an evaluated move ranking. Cancellation may leave a deterministic but *unevaluated* legal fallback before depth 1 completes; later search/evaluator errors invalidate provisional results. Importing the controller library does not start its authenticated loopback server or GUI.
 
-`SearchScore` is structured: finite White-perspective score, WhiteMate(distance), or BlackMate(distance). Do not conflate terminal/mate results with ordinary numerical evaluations or assume unrestricted raw values represent centipawns.
+`SearchScore` uses one signed 32-bit integer with disjoint finite centipawn and mate-distance ranges. Do not conflate terminal/mate results with ordinary numerical evaluations. Historical ABI v1 records remain distinct.
 
 ## 3. Important search and chess-rule decisions
 

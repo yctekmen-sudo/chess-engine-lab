@@ -40,7 +40,7 @@ Tree generated(unsigned seed,Side side,int shape) {
     if(id&&shape==3&&id%19==0)t.nodes[id].status=PositionStatus::stalemate;
     return id;
   };add(4,side);values.resize(t.nodes.size());
-  for(auto &v:values){seed=seed*1664525U+1013904223U;v=shape==0?0:double(int(seed%7)-3);if(shape==4)v*=1e250;}
+  for(auto &v:values){seed=seed*1664525U+1013904223U;v=shape==0?0:int(seed%7)-3;if(shape==4)v*=300000;}
   return t;
 }
 void trees() {
@@ -66,7 +66,7 @@ void off_prefix_ties() {
   std::function<int(int,Side)> add=[&](int ply,Side side) {
     const int id=int(t.nodes.size());t.nodes.push_back({side,{}});values.push_back(0);
     if(ply==4) {
-      double v=path[1]==2?-5:5;
+      ChessEvalCentipawns v=path[1]==2?-5:5;
       if(path[2]!=2)v-=1;
       v+=2-path[3];values[id]=v;
     }

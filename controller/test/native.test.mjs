@@ -12,10 +12,10 @@ function client(t,env={},args=[]){
 }
 async function handshake(c){const w=c.wait(s=>s==='uciok');c.send('uci');await w;const r=c.wait(s=>s==='readyok');c.send('isready');await r;}
 async function search(c,position,go='go depth 1'){c.send(position);const p=c.wait(s=>s.startsWith('bestmove '));c.send(go);return p;}
-test('real handshake, honest raw scores, responsive isready, stop and serialization',async t=>{
+test('real handshake, integer centipawn scores, responsive isready, stop and serialization',async t=>{
  const c=client(t);await handshake(c);assert(c.lines.some(s=>s.includes('option name Evaluator ')));
  const first=await search(c,'position startpos');assert.match(first,/^bestmove [a-h][1-8][a-h][1-8]/);
- assert(c.lines.some(s=>s.includes('score raw white')));assert(!c.lines.some(s=>s.includes('score cp')));
+ assert(!c.lines.some(s=>s.includes('score raw white')));assert(c.lines.some(s=>s.includes('score cp')));
  const best=c.wait(s=>s.startsWith('bestmove '));c.send('go infinite');
  const ready=c.wait(s=>s==='readyok',1000);c.send('isready');await ready;c.send('stop');await best;
  c.send('stop');const second=await search(c,'position startpos moves e2e4');assert.match(second,/bestmove/);
@@ -38,10 +38,10 @@ test('terminal 0000, mate polarity and bounded zero-time fallback',async t=>{
 test('single-PV final score is adjacent and recommends PLAY without root claims',async t=>{
  const c=client(t);await handshake(c);
  await search(c,'position fen 7k/8/8/8/8/8/q7/4K3 w - - 100 1');
- let i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));assert.match(c.lines[i-1],/^info string chesslab final_score v1 search 1 depth 1 status completed bestmove .* score finite -9$/);
+ let i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));assert.match(c.lines[i-1],/^info string chesslab final_score v2 search 1 depth 1 status completed bestmove .* score finite -900$/);
  const before=c.lines.length;
  await search(c,'position fen 7k/8/8/8/8/8/q7/4K3 w - - 99 1');
- i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));assert.match(c.lines[i-1],/^info string chesslab final_score v1 /);
+ i=c.lines.findLastIndex(s=>s.startsWith('bestmove '));assert.match(c.lines[i-1],/^info string chesslab final_score v2 /);
  assert(!c.lines.some(s=>s.startsWith('info string chesslab decision ')));
  assert(c.lines.slice(before).filter(s=>s.startsWith('info depth ')).every(s=>s.includes('multipv 1 ')));
 });

@@ -1,6 +1,6 @@
 #pragma once
 #include <bit>
-#include <chess_lab/chess_eval_abi_v1.h>
+#include <chess_lab/chess_eval_abi_v2.h>
 namespace chess_lab::eval_detail {
 inline ChessEvalStatus validate(const ChessEvalPosition &p) noexcept {
   if (p.struct_size < 160 || p.schema_major != 1)

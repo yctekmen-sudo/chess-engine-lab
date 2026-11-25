@@ -49,7 +49,7 @@ void generated() {
     Tree t;values.clear();
     std::function<int(int,Side)> gen=[&](int depth,Side side) {
       int id=t.nodes.size();t.nodes.push_back({side,{}});
-      values.push_back(std::array<double,7>{-1e300,-4,-0.0,0,2,7,1e300}[next()%7]);
+      values.push_back(std::array<ChessEvalCentipawns,7>{CHESS_EVAL_CP_MIN,-4,0,0,2,7,CHESS_EVAL_CP_MAX}[next()%7]);
       auto k=next()%29;
       if(id && k==0)t.nodes[id].status=PositionStatus::checkmate;
       if(id && k==1)t.nodes[id].status=PositionStatus::stalemate;
@@ -141,7 +141,7 @@ void context_and_bounds() {
   table.clear();
   {TTSession session(certified(table),fp,true,stats,{});session.start({sig,other,sig});session.store(s,sig,1,SearchScore::finite(7),TTBound::exact,{DecisionKind::play,"a1a2"},0);}
   {TTSession session(certified(table),fp,true,stats,{});session.start({other,sig,sig});check(session.probe(s,sig,1,0).score==SearchScore::finite(7),"canonical counts permit different chronological histories");}
-  auto f=SearchScore::finite;
+  auto f=[](int cp){return SearchScore::finite(cp);};
   check(classify_bound(f(0),f(0),f(3))==TTBound::upper && classify_bound(f(3),f(0),f(3))==TTBound::lower &&
         classify_bound(f(2),f(0),f(3))==TTBound::exact && classify_bound(f(0),{}, {})==TTBound::exact,"original-window inclusive bound classification");
   // The claim raises local alpha to zero; original alpha was -1, so zero is
@@ -155,7 +155,7 @@ void context_and_bounds() {
     check(hit.score==(white?SearchScore::white_mate(17):SearchScore::black_mate(17)) && hit.bound==bound,"mate/bound normalization at distinct root plies");
   }
   check(!to_node_score(SearchScore::white_mate(2),3) && !to_node_score(SearchScore::black_mate(2),3),"ancestor-relative invalid subtraction refused");
-  check(!to_root_score(SearchScore::white_mate(UINT64_MAX),1) && !to_root_score(SearchScore::black_mate(UINT64_MAX),1),"mate overflow refused");
+  check(!to_root_score(SearchScore::white_mate(mate_distance_limit),1) && !to_root_score(SearchScore::black_mate(mate_distance_limit),1),"mate overflow refused");
   std::cout<<"exact count/snapshot/depth/evaluator/policy verification, forced collisions, original bounds and mate transforms passed\n";
 }
 void mate_races() {
@@ -181,7 +181,7 @@ void real_rules() {
                "7k/6Q1/5K2/8/8/8/8/8 b - - 150 1","7k/5K2/6Q1/8/8/8/8/8 b - - 0 1",
                "4k3/8/8/8/8/8/8/4K3 w - - 0 1","4k3/8/8/8/8/8/8/R3K3 w - - 150 1"}) {
     auto p=c->load_fen(fen);auto h=GameHistory::starting_at(*c,*p);
-    for(double v:{-1e300,-0.0,1e300}) {
+    for(ChessEvalCentipawns v:{CHESS_EVAL_CP_MIN,0,CHESS_EVAL_CP_MAX}) {
       constant=v;auto e=evaluator();TranspositionTable table(1024*1024);
       for(bool order:{false,true}) {
         auto ref=legacy_iterative_search(*c,*p,h,*e,{2,false,256,order});
@@ -361,7 +361,7 @@ void ordered_trap_and_certification() {
   for(int i=7;i<15;++i)t.nodes.push_back({Side::black,{i}});
   values.assign(15,0);values[1]=-3;values[2]=7;values[3]=8;values[4]=-2;values[5]=9;values[6]=6;tree_values=true;
   auto p=t.initial_position();auto h=GameHistory::starting_at(t,*p);
-  for(double hidden:{0.0,4.0}) {
+  for(ChessEvalCentipawns hidden:{0,4}) {
     values[12]=hidden;TranspositionTable table(16384);auto e=evaluator();
     auto ref=legacy_iterative_search(t,*p,h,*e,{3,false,8,false});
     for(int pass=0;pass<4;++pass)equal_result(legacy_iterative_search(t,*p,h,*e,{3,true,8,bool(pass%2)},{},{},certified(table)),ref);
@@ -464,9 +464,9 @@ void local_draw_claim_dominance() {
              {claimant,{4},PositionStatus::ongoing,static_cast<uint32_t>(intended?99:100)},
              {root_side,{3}},{root_side,{4},PositionStatus::ongoing,static_cast<uint32_t>(intended?100:0)}};
     tree_values=true;
-    const double first = bounded?(root_side==Side::white?+10:-10):
+    const ChessEvalCentipawns first = bounded?(root_side==Side::white?+10:-10):
                                  (root_side==Side::white?-3:+3);
-    const double losing=white_claimant?-9:+9;
+    const ChessEvalCentipawns losing=white_claimant?-9:+9;
     values={0,0,0,first,losing};
     auto root=t.initial_position();auto history=GameHistory::starting_at(t,*root,true);
     auto e=evaluator();

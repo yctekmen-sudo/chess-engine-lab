@@ -1,27 +1,29 @@
-#include "material.hpp"
 #include <chess_lab/evaluation.hpp>
-#include <chess_lab/chess_eval_abi_v1.h>
-#include <cstddef>
-#include <cstring>
+#include <chess_lab/search.hpp>
+#include "material.hpp"
 #include <iostream>
-#include <limits>
-#include <stdexcept>
+#include <type_traits>
+#include <cstring>
 using namespace chess_lab;
-static_assert(sizeof(ChessEvalApi)==72 && sizeof(ChessEvalApiV1_1)==80);
-static_assert(offsetof(ChessEvalApiV1_1,get_calibration_json)==72);
-std::string descriptor;
-ChessEvalStatus CHESS_EVAL_CALL calibration(ChessEvalHandle,char *o,uint64_t n,uint64_t*r,char*e,uint64_t en){if(en)e[0]=0;*r=descriptor.size()+1;if(!o&&!n)return 0;if(n<*r)return CHESS_EVAL_BUFFER_TOO_SMALL;std::memcpy(o,descriptor.c_str(),*r);return 0;}
-ChessEvalStatus CHESS_EVAL_CALL provider(uint64_t a,uint64_t b,void *o,uint64_t n,char*e,uint64_t en){auto s=chess_lab_material_provider(a,0,o,n,e,en);if(!s&&b>=1&&n>=80){auto *v=static_cast<ChessEvalApiV1_1*>(o);v->v1.struct_size=80;v->v1.abi_minor=1;v->get_calibration_json=calibration;}return s;}
-void check(bool b){if(!b)throw std::runtime_error("calibration check failed");}
-int main(){auto module=EvaluatorModule::provider(provider,std::string(64,'a'),"calibration-fixture");
- descriptor=R"({"schema_version":1,"target":"centipawns","kind":"linear","scale":100})";auto a=module.create("{}");check(a->centipawns(.005)==1);check(a->centipawns(-.005)==-1);check(!a->centipawns(1e300));check(!a->centipawns(-1e300));check(!a->centipawns(std::numeric_limits<double>::infinity()));check(!a->centipawns(std::numeric_limits<double>::quiet_NaN()));check(a->calibration_digest().size()==64);
- descriptor=R"({"schema_version":1,"target":"centipawns","kind":"lookup_table","interpolation":"linear","out_of_range":"raw_only","points":[[-3,-600],[-1,-100],[0,0],[1,100],[3,600]]})";auto table=module.create("{}");check(table->centipawns(2)==350);check(table->centipawns(-2)==-350);check(table->centipawns(3)==600);check(!table->centipawns(4));check(table->calibration_digest()!=a->calibration_digest());check(table->identity().fingerprint==a->identity().fingerprint);
- for(const auto &bad:{"{}",R"({"schema_version":1,"target":"centipawns","kind":"linear","scale":-1})",R"({"schema_version":1,"target":"centipawns","kind":"lookup_table","interpolation":"linear","out_of_range":"raw_only","points":[[-1,3],[0,0],[1,1]]})"}){descriptor=bad;auto x=module.create("{}");check(!x->centipawns(1));check(x->usable());}
- descriptor=R"({"schema_version":1,"target":"centipawns","kind":"lookup_table","interpolation":"linear","out_of_range":"raw_only","points":[[-1,-100],[1,100]]})";auto missing_zero=module.create("{}");check(!missing_zero->centipawns(0));check(missing_zero->usable());
- descriptor=R"({"schema_version":1,"target":"centipawns","kind":"lookup_table","interpolation":"linear","out_of_range":"raw_only","points":[[-1e308,-1e308],[0,0],[1e308,1e308]]})";auto extreme=module.create("{}");check(extreme->centipawns(-1)==-1);check(extreme->centipawns(1)==1);check(extreme->centipawns(0)==0);
- descriptor=std::string(65537,'x');auto oversized=module.create("{}");check(!oversized->centipawns(1));check(oversized->usable());
- ChessEvalApiV1_1 legacy_request{};legacy_request.get_calibration_json=calibration;
- check(provider(1,0,&legacy_request,72,nullptr,0)==0);check(legacy_request.v1.struct_size==72);check(legacy_request.get_calibration_json==calibration);
- auto configured=module.create("{\"pawn_value\":2}");check(configured->identity().fingerprint!=a->identity().fingerprint);
- auto old=EvaluatorModule::provider(chess_lab_material_provider,std::string(64,'b'),"old").create("{}");check(!old->centipawns(1));check(old->identity().abi_minor==0);std::cout<<"M7 legacy72/extended80 calibration native/WASM checks passed\n";
+static ChessEvalApi original;
+static int mode=0;
+static void check(bool b){if(!b)throw std::runtime_error("integer ABI contract check");}
+template<class F> void rejects(F f){try{f();}catch(const std::exception&){return;}throw std::runtime_error("expected rejection");}
+static ChessEvalStatus CHESS_EVAL_CALL output(ChessEvalHandle h,const ChessEvalPosition *p,ChessEvalCentipawns *out,char *e,uint64_t n){
+ if(mode==1){*out=CHESS_EVAL_CP_MAX+1;return 0;}if(mode==2){*out=CHESS_EVAL_CP_MIN-1;return 0;}if(mode==3)return 0;
+ if(mode==4){*out=CHESS_EVAL_CP_MAX;return 0;}if(mode==5){*out=CHESS_EVAL_CP_MIN;return 0;}return original.evaluate(h,p,out,e,n);
 }
+static ChessEvalStatus CHESS_EVAL_CALL provider(uint64_t a,uint64_t b,void*o,uint64_t n,char*e,uint64_t en){auto status=chess_lab_material_provider(a,b,o,n,e,en);if(!status){original=*static_cast<ChessEvalApi*>(o);static_cast<ChessEvalApi*>(o)->evaluate=output;}return status;}
+static ChessEvalStatus CHESS_EVAL_CALL legacy(uint64_t a,uint64_t,void*,uint64_t,char*e,uint64_t en){if(en)e[0]=0;check(a==2);return CHESS_EVAL_INCOMPATIBLE_ABI;}
+int main(){try{
+ static_assert(sizeof(SearchScore)==4);static_assert(sizeof(ChessEvalCentipawns)==4);static_assert(sizeof(ChessEvalApi)==72);
+ auto core=create_chess_core();auto pos=core->load_fen("4k3/8/8/8/8/8/B7/4K3 w - - 0 1");auto snap=evaluation_snapshot(*core->snapshot(*pos));
+ auto module=EvaluatorModule::provider(provider,std::string(64,'a'),"cp-fixture");auto good=module.create("{}");check(good->evaluate(snap)==325);check(good->identity().abi_major==2);
+ for(int m:{1,2,3}){mode=m;auto bad=module.create("{}");rejects([&]{bad->evaluate(snap);});check(!bad->usable());rejects([&]{bad->evaluate(snap);});}
+ mode=4;check(good->evaluate(snap)==CHESS_EVAL_CP_MAX);mode=5;check(good->evaluate(snap)==CHESS_EVAL_CP_MIN);mode=0;
+ rejects([&]{EvaluatorModule::provider(legacy,std::string(64,'b'),"legacy");});
+ auto alternate=module.create("{\"bishop_cp\":326}");check(alternate->evaluate(snap)==326);check(alternate->identity().fingerprint!=good->identity().fingerprint);
+ for(auto c:{"{\"bishop_value\":3.25}","{\"bishop_cp\":3.25}","{\"bishop_cp\":16001}"})rejects([&]{module.create(c);});
+ ChessEvalApi api{};check(chess_lab_material_provider(1,0,&api,sizeof api,nullptr,0)==CHESS_EVAL_INCOMPATIBLE_ABI);check(chess_lab_material_provider(2,0,&api,sizeof api,nullptr,0)==0);
+ std::cout<<"integer centipawn ABI v2 range, quarantine, units and legacy rejection passed\n";return 0;
+ }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

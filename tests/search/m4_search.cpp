@@ -55,7 +55,7 @@ void generated() {
     std::function<int(int, Side)> gen = [&](int depth, Side side) {
       int id = int(t.nodes.size());
       t.nodes.push_back({side, {}});
-      values.push_back(std::array<double, 7>{-1e300, -3, -0.0, 0, 2, 4, 1e300}[next() % 7]);
+      values.push_back(std::array<ChessEvalCentipawns, 7>{CHESS_EVAL_CP_MIN, -3, 0, 0, 2, 4, CHESS_EVAL_CP_MAX}[next() % 7]);
       unsigned kind = next() % 23;
       if (id && kind == 0) t.nodes[id].status = PositionStatus::checkmate;
       if (id && kind == 1) t.nodes[id].status = PositionStatus::stalemate;
@@ -115,7 +115,7 @@ void tie_trap() {
   values[3]=8; values[4]=-2; values[5]=9; values[6]=6;
   tree_values=true;
   auto p=t.initial_position(); auto h=GameHistory::starting_at(t,*p);
-  for (double hidden : {0.0,4.0}) for (bool order : {false,true}) {
+  for (ChessEvalCentipawns hidden : {0,4}) for (bool order : {false,true}) {
     values[12]=hidden; // a tied bound can hide a worse exact value for Black
     auto e=evaluator();
     auto r=legacy_iterative_search(t,*p,h,*e,{3,true,8,order},{},[&](CompletedDepth d) {
@@ -309,7 +309,7 @@ void real_rules_m4() {
   for(auto fen:{"7k/8/5KQ1/8/8/8/8/8 w - - 149 1", "4k3/8/8/8/8/8/P7/4K3 b - - 0 1",
                 "4k3/8/8/8/8/8/8/R3K3 w - - 99 1", "4k3/8/8/8/8/8/8/R3K3 b - - 100 1"}) {
     auto p=c->load_fen(fen); auto h=GameHistory::starting_at(*c,*p);
-    for(double v:{-1e300,-0.0,1e300}) {constant=v;real_case(*c,*p,h);}
+    for(ChessEvalCentipawns v:{CHESS_EVAL_CP_MIN,0,CHESS_EVAL_CP_MAX}) {constant=v;real_case(*c,*p,h);}
   }
   constant=0;
   for(auto fen:{"4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2",

@@ -44,7 +44,7 @@ function parseSearch(lines,fixture,depth){
  if(errors.length)throw Error('UCI rejected search: '+errors.join(' | '));
  const final=lines.filter(s=>s.startsWith('info string chesslab final_score '));
  if(final.length!==1)throw Error(`Expected 1 structured final score, got ${final.length}`);
- const match=/^info string chesslab final_score v1 search (\d+) depth (\d+) status (\S+) bestmove (\S+) score (finite|white_mate|black_mate) (\S+)$/.exec(final[0]);
+ const match=/^info string chesslab final_score v[12] search (\d+) depth (\d+) status (\S+) bestmove (\S+) score (finite|white_mate|black_mate) (\S+)$/.exec(final[0]);
  if(!match||match[3]!=='completed'||Number(match[2])!==depth)throw Error('Incomplete or malformed final score: '+final[0]);
  const best=lines.filter(s=>s.startsWith('bestmove '));if(best.length!==1||best[0]!=='bestmove '+match[4])throw Error('Bestmove mismatch');
  if(!isUci(match[4]))throw Error('Unexpected illegal-looking UCI move '+match[4]);
@@ -55,7 +55,7 @@ function parseSearch(lines,fixture,depth){
  if(depths[depths.length-1].pv[0]!==match[4])throw Error('Final PV does not start with structured bestmove');
  if(depths.some(x=>x.pv.some(m=>!isUci(m))))throw Error('Malformed UCI PV');
  const result=depths.map(x=>({...x,firstMove:x.pv[0]||null,hit:verdict(fixture,x.pv[0]||'')}));
- const full=Object.assign({}, {bestmove:match[4],scoreKind:match[5],scoreValue:match[6],
+ const full=Object.assign({}, {scoreContract:final[0].split(' ')[4],bestmove:match[4],scoreKind:match[5],scoreValue:match[6],
    evalCalls:Number(mm[1]),ttLookups:Number(mm[2]),ttExactHits:Number(mm[3]),depths:result});
  return full;
 }

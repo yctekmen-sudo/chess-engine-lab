@@ -61,8 +61,8 @@ check implementation and current contracts before treating a feature as present.
 - `engine/src/evaluation/` implements the evaluator host, snapshot bridge, and
   material provider. Native plugins use the versioned C ABI; WASM uses bundled
   providers. Evaluators receive current-position snapshots, not move history or
-  search state. Raw scores are finite White-perspective values; centipawn
-  presentation requires explicit calibration.
+  search state. ABI v2 scores are bounded signed integer centipawns, White-perspective;
+  mate encodings are reserved for search. See docs/s2-centipawn.md.
 - `engine/src/search/` implements fixed-depth and iterative alpha-beta search,
   MultiPV, cancellation, and optional history-aware transposition tables. Only
   completed depths supply authoritative rankings; later failures invalidate

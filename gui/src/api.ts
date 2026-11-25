@@ -185,7 +185,7 @@ export class Gateway {
 }
 export function scoreLabel(
   line: string,
-  provenance: "external" | "calibrated" = "external",
+  provenance: "external" | "calibrated" | "native" = "external",
 ): string {
   const mate = /score mate (-?\d+)/.exec(line);
   if (mate) return `Mate ${mate[1]}`;
@@ -193,7 +193,7 @@ export function scoreLabel(
   if (raw) return `Raw (White) ${raw[1]}`;
   const cp = /score cp (-?\d+)/.exec(line);
   if (cp)
-    return `${provenance === "calibrated" ? "Calibrated" : "Engine-reported"} centipawns (side to move) ${cp[1]}`;
+    return `${provenance === "native" ? "Native" : provenance === "calibrated" ? "Calibrated" : "Engine-reported"} centipawns (side to move) ${cp[1]}`;
   return line;
 }
 
@@ -212,4 +212,11 @@ export function hasCalibration(metadata: unknown): boolean {
       metadata[current - 1],
     )
   );
+}
+
+// ABI v2 declares native centipawn units, not a host calibration descriptor.
+export function hasNativeCentipawns(metadata: unknown): boolean {
+  if (!Array.isArray(metadata)) return false;
+  const current = metadata.findLastIndex((line) => typeof line === "string" && line.startsWith("info string chesslab evaluator artifact_sha256 "));
+  return current > 0 && metadata[current - 1] === "info string chesslab evaluator score_units centipawns abi 2";
 }

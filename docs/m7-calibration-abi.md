@@ -1,3 +1,5 @@
+> Historical ABI v1 specification. The S2.0 development candidate uses ABI v2; see [S2.0 scoring contract](s2-centipawn.md).
+
 # M7 optional evaluator calibration
 
 This documents the compatible extension implemented under D127–D128. The frozen

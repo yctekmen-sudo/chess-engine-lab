@@ -7,11 +7,11 @@
 using namespace chess_lab::eval_detail;
 namespace {
 constexpr char metadata[] =
-    R"({"module_id":"org.chesslab.material","display_name":"Material Evaluator","module_version":"1.0.0","description":"Material balance from the current board","parameter_schema_version":1,"required_snapshot_major":1,"minimum_snapshot_minor":0,"score_units":"arbitrary"})";
+    R"({"module_id":"org.chesslab.material","display_name":"Material Evaluator","module_version":"2.0.0","description":"Material balance from the current board","parameter_schema_version":1,"required_snapshot_major":1,"minimum_snapshot_minor":0,"score_units":"centipawns"})";
 constexpr char parameter_schema[] =
-    R"({"schema_version":1,"type":"object","properties":{"pawn_value":{"type":"number","default":1,"minimum":0,"maximum":1e100},"knight_value":{"type":"number","default":3,"minimum":0,"maximum":1e100},"bishop_value":{"type":"number","default":3.25,"minimum":0,"maximum":1e100},"rook_value":{"type":"number","default":5,"minimum":0,"maximum":1e100},"queen_value":{"type":"number","default":9,"minimum":0,"maximum":1e100}},"additionalProperties":false})";
+    R"({"schema_version":1,"type":"object","properties":{"pawn_cp":{"type":"integer","default":100,"minimum":0,"maximum":16000},"knight_cp":{"type":"integer","default":300,"minimum":0,"maximum":16000},"bishop_cp":{"type":"integer","default":325,"minimum":0,"maximum":16000},"rook_cp":{"type":"integer","default":500,"minimum":0,"maximum":16000},"queen_cp":{"type":"integer","default":900,"minimum":0,"maximum":16000}},"additionalProperties":false})";
 struct Instance {
-  std::array<double, 5> weights;
+  std::array<ChessEvalCentipawns, 5> weights;
   std::string effective;
 };
 ChessEvalStatus result(ChessEvalStatus s, const char *message, char *e,
@@ -57,10 +57,10 @@ ChessEvalStatus create(const char *c, uint64_t n, ChessEvalHandle *out, char *e,
     schema(s);
     auto config = resolve(s, parse(std::string_view(c, n)));
     auto instance = std::make_unique<Instance>();
-    const char *names[] = {"pawn_value", "knight_value", "bishop_value",
-                           "rook_value", "queen_value"};
+    const char *names[] = {"pawn_cp", "knight_cp", "bishop_cp",
+                           "rook_cp", "queen_cp"};
     for (size_t i = 0; i < 5; ++i)
-      instance->weights[i] = config[names[i]].get<double>();
+      instance->weights[i] = config[names[i]].get<ChessEvalCentipawns>();
     instance->effective = canonical(config);
     *out = instance.release();
     return result(0, "", e, en);
@@ -78,20 +78,20 @@ ChessEvalStatus config(ChessEvalHandle h, char *o, uint64_t n, uint64_t *r,
   return json(static_cast<Instance *>(h)->effective, o, n, r, e, en);
 }
 ChessEvalStatus evaluate(ChessEvalHandle h, const ChessEvalPosition *p,
-                         double *score, char *e, uint64_t en) noexcept {
+                         ChessEvalCentipawns *score, char *e, uint64_t en) noexcept {
   if (!h || !p || !score || (!e && en))
     return result(CHESS_EVAL_INVALID_ARGUMENT, "invalid evaluation arguments",
                   e, en);
   auto status = validate(*p);
   if (status)
     return result(status, "invalid snapshot", e, en);
-  double v = 0;
+  ChessEvalCentipawns v = 0; // At most 62 non-king pieces x 16000 cp.
   auto &weights = static_cast<Instance *>(h)->weights;
   for (size_t i = 0; i < 5; ++i)
     v += weights[i] *
          (std::popcount(p->bitboards[i]) - std::popcount(p->bitboards[i + 6]));
-  if (!std::isfinite(v))
-    return result(CHESS_EVAL_INTERNAL_ERROR, "nonfinite material result", e,
+  if (v < CHESS_EVAL_CP_MIN || v > CHESS_EVAL_CP_MAX)
+    return result(CHESS_EVAL_INTERNAL_ERROR, "material result outside centipawn range", e,
                   en);
   *score = v;
   return result(0, "", e, en);
@@ -104,13 +104,13 @@ chess_lab_material_provider(uint64_t major, uint64_t minor, void *out,
   (void)minor;
   if (!out || (!e && en))
     return result(CHESS_EVAL_INVALID_ARGUMENT, "invalid API buffer", e, en);
-  if (major != 1)
+  if (major != CHESS_EVAL_ABI_MAJOR)
     return result(CHESS_EVAL_INCOMPATIBLE_ABI, "unsupported ABI major", e, en);
   if (n < sizeof(ChessEvalApi))
     return result(CHESS_EVAL_BUFFER_TOO_SMALL, "API buffer too small", e, en);
   ChessEvalApi api{};
   api.struct_size = sizeof api;
-  api.abi_major = 1;
+  api.abi_major = CHESS_EVAL_ABI_MAJOR;
   api.get_module_info_json = info;
   api.get_parameter_schema_json = schema_json;
   api.create_evaluator = create;
