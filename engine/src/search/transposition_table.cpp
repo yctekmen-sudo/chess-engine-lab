@@ -344,7 +344,7 @@ std::optional<SearchScore> to_node_score(SearchScore s, std::uint64_t ply) {
 }
 std::optional<SearchScore> to_root_score(SearchScore s, std::uint64_t ply) {
   if (s.kind() == SearchScore::Kind::finite) return s;
-  if (s.distance() > UINT64_MAX - ply) return {};
+  if (ply > mate_distance_limit || s.distance() > mate_distance_limit - ply) return {};
   return s.kind() == SearchScore::Kind::white_mate
       ? SearchScore::white_mate(s.distance() + ply)
       : SearchScore::black_mate(s.distance() + ply);

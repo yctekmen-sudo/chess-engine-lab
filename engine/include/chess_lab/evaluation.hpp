@@ -1,5 +1,5 @@
 #pragma once
-#include <chess_lab/chess_eval_abi_v1.h>
+#include <chess_lab/chess_eval_abi_v2.h>
 #include <chess_lab/position_snapshot.hpp>
 #include <memory>
 #include <stdexcept>
@@ -16,7 +16,7 @@ struct EvaluationIdentity {
   std::string module_id, module_version, canonical_configuration,
       artifact_sha256;
   std::string provider, build;
-  uint64_t abi_major = 1, abi_minor = 0, snapshot_major = 1, snapshot_minor = 0;
+  uint64_t abi_major = 2, abi_minor = 0, snapshot_major = 1, snapshot_minor = 0;
   std::string fingerprint;
 };
 class Evaluator;
@@ -45,14 +45,9 @@ public:
   ~Evaluator();
   Evaluator(const Evaluator &) = delete;
   Evaluator &operator=(const Evaluator &) = delete;
-  double evaluate(const ChessEvalPosition &position);
+  ChessEvalCentipawns evaluate(const ChessEvalPosition &position);
   const EvaluationIdentity &identity() const noexcept;
   bool usable() const;
-  // Presentation only: raw search/TT semantics and legacy identity stay intact.
-  const std::string &calibration_json() const noexcept;
-  const std::string &calibration_digest() const noexcept;
-  const std::string &calibration_diagnostic() const noexcept;
-  std::optional<int> centipawns(double raw_white) const noexcept;
 
 private:
   struct Impl;

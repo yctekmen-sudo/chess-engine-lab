@@ -75,7 +75,7 @@ int main(int argc,char **argv) {
   auto native=create_chess_core();ForwardCore f(*native);
   check(argc>=2 && (std::string(argv[argc-1])=="on" || std::string(argv[argc-1])=="off"),"expected QS mode argument");
   const bool enabled=std::string(argv[argc-1])=="on";
-  for(const auto &config:std::vector<std::string>{"{}","{\"queen_value\":8}"}) {
+  for(const auto &config:std::vector<std::string>{"{}","{\"queen_cp\":800}"}) {
     horizon_case(*native,config,enabled);
     horizon_case(f,config,enabled);
   }
@@ -85,8 +85,8 @@ int main(int argc,char **argv) {
     "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
     "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"}) {
     run_case(f,fen,"{}");
-    run_case(f,fen,"{\"queen_value\":8}");
-    run_case(*native,fen,"{\"queen_value\":8}");
+    run_case(f,fen,"{\"queen_cp\":800}");
+    run_case(*native,fen,"{\"queen_cp\":800}");
   }
   std::cout<<"S11_SYNTHETIC_SMOKE_PASS\n";
   return 0;

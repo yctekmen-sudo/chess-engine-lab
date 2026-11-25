@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
-import { Gateway, scoreLabel, hasCalibration, type Snapshot } from "./api";
+import { Gateway, scoreLabel, hasCalibration, hasNativeCentipawns, type Snapshot } from "./api";
 import { Board, MoveHistory } from "./Board";
 import "./style.css";
 const api = new Gateway();
@@ -756,7 +756,8 @@ export function App() {
                                 <p key={p.sequence}>
                                   {scoreLabel(
                                     p.line,
-                                    j.trusted && hasCalibration(j.identity?.m2)
+                                    j.trusted && hasNativeCentipawns(j.identity?.m2)
+                                      ? "native" : j.trusted && hasCalibration(j.identity?.m2)
                                       ? "calibrated"
                                       : "external",
                                   )}
@@ -1071,7 +1072,9 @@ export function EnginePanel({
               <pre>{JSON.stringify(p.identity, null, 2)}</pre>
             </details>
             <p className="calibration-status">
-              {p.config.kind === "chesslab" && hasCalibration(p.identity.m2)
+              {p.config.kind === "chesslab" && hasNativeCentipawns(p.identity.m2)
+                ? "Native centipawns · evaluator ABI v2"
+                : p.config.kind === "chesslab" && hasCalibration(p.identity.m2)
                 ? "Validated evaluator calibration · descriptor provenance recorded"
                 : p.config.kind === "chesslab"
                   ? "Raw only · no validated calibration"

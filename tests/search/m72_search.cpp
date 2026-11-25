@@ -388,7 +388,7 @@ void same_native_semantics(const ChessCore &c,const Position &p,
 void native_leaf_case(const ChessCore &c,const Position &p,const GameHistory &h,bool compact=false,int depth=1) {
   EagerRules eager(c);const auto fen=c.export_fen(p);const auto occurrences=h.occurrences();
   Checkpoint fixture("M7.4a.2 native fen="+fen+" complete="+std::to_string(h.complete()));
-  for(double value:{-2.0,0.0,2.0}) {
+  for(ChessEvalCentipawns value:{-2,0,2}) {
     if(compact&&value!=0)continue;constant=value;
     for(bool ab:{false,true}) {
       auto ref_eval=evaluator();++search_count;auto ref=search(eager,p,h,*ref_eval,{depth,ab});
@@ -784,7 +784,7 @@ int main(int argc,char **argv)try {
     "7k/6Q1/5K2/8/8/8/8/8 b - - 150 1", "7K/6q1/5k2/8/8/8/8/8 w - - 150 1"}) {
     auto p=c->load_fen(fen);auto h=GameHistory::starting_at(*c,*p);
     Checkpoint fixture("real case="+std::to_string(++case_number)+" fen="+fen);
-    for(double value:{-3.0,0.0,3.0}){
+    for(ChessEvalCentipawns value:{-3,0,3}){
       if(ci_matrix&&value!=0)continue;
       Checkpoint score("value="+std::to_string(value));constant=value;
       // Case 5 (legal EP): positive numeric reuse control.

@@ -1,4 +1,4 @@
-#include <chess_lab/chess_eval_abi_v1.h>
+#include <chess_lab/chess_eval_abi_v2.h>
 #include <stddef.h>
 #ifdef __cplusplus
 #define ASSERT static_assert
@@ -8,6 +8,7 @@
 #define ALIGN _Alignof
 #endif
 ASSERT(sizeof(ChessEvalStatus) == 4, "status width");
+ASSERT(sizeof(ChessEvalCentipawns) == 4, "score width");
 ASSERT(sizeof(ChessEvalPosition) == 160, "size");
 ASSERT(ALIGN(ChessEvalPosition) == 8, "alignment");
 ASSERT(offsetof(ChessEvalPosition, struct_size) == 0,

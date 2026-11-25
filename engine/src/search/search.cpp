@@ -28,53 +28,6 @@ static_assert(std::is_trivially_copyable_v<SearchScore>);
 bool native_chess_core(const ChessCore &) noexcept;
 std::size_t native_legal_move_count(const ChessCore &, const Position &);
 bool native_has_any_legal_move(const ChessCore &, const Position &);
-SearchScore SearchScore::finite(double v) {
-  if (!std::isfinite(v))
-    throw std::invalid_argument("nonfinite search score");
-  return {Kind::finite, v, 0};
-}
-SearchScore SearchScore::white_mate(std::uint64_t d) {
-  return {Kind::white_mate, 0, d};
-}
-SearchScore SearchScore::black_mate(std::uint64_t d) {
-  return {Kind::black_mate, 0, d};
-}
-double SearchScore::value() const {
-  if (kind_ != Kind::finite)
-    throw std::logic_error("mate has no finite value");
-  return value_;
-}
-std::uint64_t SearchScore::distance() const {
-  if (kind_ == Kind::finite)
-    throw std::logic_error("finite score has no mate distance");
-  return distance_;
-}
-SearchScore SearchScore::one_ply_farther() const {
-  if (kind_ == Kind::finite)
-    return *this;
-  if (distance_ == UINT64_MAX)
-    throw std::overflow_error("mate distance overflow");
-  return {kind_, 0, distance_ + 1};
-}
-std::strong_ordering
-SearchScore::operator<=>(const SearchScore &b) const noexcept {
-  auto rank = [](Kind k) {
-    return k == Kind::black_mate ? 0 : k == Kind::finite ? 1 : 2;
-  };
-  if (kind_ != b.kind_)
-    return rank(kind_) <=> rank(b.kind_);
-  if (kind_ == Kind::white_mate)
-    return b.distance_ <=> distance_;
-  if (kind_ == Kind::black_mate)
-    return distance_ <=> b.distance_;
-  return value_ < b.value_   ? std::strong_ordering::less
-         : value_ > b.value_ ? std::strong_ordering::greater
-                             : std::strong_ordering::equal;
-}
-bool SearchScore::operator==(const SearchScore &b) const noexcept {
-  return (*this <=> b) == 0;
-}
-
 namespace {
 // T1.3a experimental controls. 0=unchanged, 1=defer ordering to after TT,
 // 2=add native positive-depth batch materialization deferral.
@@ -148,8 +101,7 @@ bool s11_trace_enabled() noexcept {
 #else
 constexpr bool s11_trace_enabled() noexcept { return false; }
 #endif
-// Values are material-evaluator DEFAULTS, in arbitrary units, scaled by 4.
-// This is an ordering heuristic, not a second evaluator or centipawn score.
+// Default material centipawns; used only for tactical ordering/pruning.
 int s11_piece_kind(PieceCode p) noexcept {
   switch (p) {
     case PieceCode::white_pawn: case PieceCode::black_pawn: return 1;
@@ -168,7 +120,7 @@ bool s11_white_piece(PieceCode p) noexcept {
     p==PieceCode::white_queen||p==PieceCode::white_king;
 }
 int s11_value(PieceCode p) noexcept {
-  constexpr int values[7]={0,4,12,13,20,36,400};
+  constexpr int values[7]={0,100,300,325,500,900,10000};
   return values[s11_piece_kind(p)];
 }
 PieceCode s11_promotion(bool white, char suffix) noexcept {
@@ -550,26 +502,24 @@ bool s12_prune_candidate(unsigned mode,unsigned /*qply*/,bool checked,
   return mode==17 && !checked && m.capture && m.text.size()!=5 && !m.legal_ep && see<=0;
 }
 
-// Accepted delta-0 is restricted to the default material-v1 configuration.
-// SEE ordering values use 4 units / pawn.
+// Accepted delta-0 is restricted to the default material-v2 configuration.
+// SEE and delta use integer centipawns.
 // The pre-SEE delta test is a heuristic, NOT a proof of a safe cutoff.
 constexpr bool s16_delta_mode(unsigned mode) noexcept {return mode==17;}
-constexpr double s16_delta_margin(unsigned) noexcept {return 0.0;}
+constexpr int s16_delta_margin(unsigned) noexcept {return 0;}
 bool s16_delta_reject(unsigned mode,bool checked,bool capture,bool ep,
-                      bool promotion,bool white,double static_score,
-                      double bound,double captured_value) noexcept {
-  const double margin=s16_delta_margin(mode);
+                      bool promotion,bool white,ChessEvalCentipawns static_score,
+                      ChessEvalCentipawns bound,int captured_value) noexcept {
+  const int margin=s16_delta_margin(mode);
   if(!s16_delta_mode(mode) || checked || !capture || ep || promotion)return false;
-  if(!std::isfinite(static_score)||!std::isfinite(bound)||
-     !std::isfinite(captured_value))return false;
   // White-positive evaluation. Test only the side-to-move active bound.
   return white ? static_score+captured_value+margin<=bound :
                  static_score-captured_value-margin>=bound;
 }
 bool s16_default_material(const EvaluationIdentity &id) noexcept {
-  return id.module_id=="org.chesslab.material" &&
+  return id.module_id=="org.chesslab.material" && id.abi_major==2 && id.module_version=="2.0.0" &&
       id.canonical_configuration==
-      "{\"bishop_value\":3.25,\"knight_value\":3,\"pawn_value\":1,\"queen_value\":9,\"rook_value\":5}";
+      "{\"bishop_cp\":325,\"knight_cp\":300,\"pawn_cp\":100,\"queen_cp\":900,\"rook_cp\":500}";
 }
 
 // Board-local postmove test: protect *every* capture that gives check,
@@ -664,13 +614,13 @@ struct H2C11Candidates {
 #if CELAB_H2C11_POLICY == 2 || CELAB_H2C11_POLICY == 3
 static int h2c11_piece_value(PieceCode p) noexcept {
   switch(p) {
-    case PieceCode::white_pawn: case PieceCode::black_pawn: return 1;
-    case PieceCode::white_knight: case PieceCode::black_knight: return 3;
-    case PieceCode::white_bishop: case PieceCode::black_bishop: return 3;
-    case PieceCode::white_rook: case PieceCode::black_rook: return 5;
-    case PieceCode::white_queen: case PieceCode::black_queen: return 9;
+    case PieceCode::white_pawn: case PieceCode::black_pawn: return 100;
+    case PieceCode::white_knight: case PieceCode::black_knight: return 300;
+    case PieceCode::white_bishop: case PieceCode::black_bishop: return 300;
+    case PieceCode::white_rook: case PieceCode::black_rook: return 500;
+    case PieceCode::white_queen: case PieceCode::black_queen: return 900;
     // Legal moves cannot capture kings, but handle unexpected facts safely.
-    case PieceCode::white_king: case PieceCode::black_king: return 100;
+    case PieceCode::white_king: case PieceCode::black_king: return 10000;
     case PieceCode::empty: return 0;
   }
   return 0;
@@ -1607,7 +1557,7 @@ struct Traversal {
     // identity/configuration. Other evaluators still receive SEE ordering and
     // all tactical continuations/evasions, without material-unit pruning.
     const unsigned s16_mode=s16_default_material(evaluator.identity()) ? 17U : 0U;
-    std::optional<double> s16_static;
+    std::optional<ChessEvalCentipawns> s16_static;
     auto better=[&](SearchScore a,SearchScore b){return white?a>b:a<b;};
     auto update=[&] {
       if(!options.alpha_beta_enabled||!best)return false;
@@ -1619,7 +1569,7 @@ struct Traversal {
     // Ordinary in-check nodes NEVER stand-pat (nor omit quiet evasions).
     if(!checked || ply>=64) {
       poll();++stats.evaluator_calls;
-      const double raw=evaluator.evaluate(s110_eval_snapshot(core,position,s));
+      const ChessEvalCentipawns raw=evaluator.evaluate(s110_eval_snapshot(core,position,s));
       if(s16_delta_mode(s16_mode))s16_static=raw;
       auto score=SearchScore::finite(raw);
       if(!best||better(score,best->score))
@@ -1702,7 +1652,7 @@ struct Traversal {
             if(active_bound && active_bound->kind()==SearchScore::Kind::finite &&
                s16_delta_reject(s16_mode,checked,m.capture,m.legal_ep,
                  m.text.size()==5,white,*s16_static,active_bound->value(),
-                 0.25*s11_value(s.squares()[m.text.to()]))) {
+                 s11_value(s.squares()[m.text.to()]))) {
               ++s16_delta_tested;
               if(check_node.check(s,m,core,position,0))++s16_delta_check_protected;
               else {++s16_delta_pruned;continue;}

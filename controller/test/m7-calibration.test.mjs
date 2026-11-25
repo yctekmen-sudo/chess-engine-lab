@@ -49,38 +49,25 @@ async function transcript(t, kind, fen, descriptor) {
   assert(lines.some((l) => l.startsWith("bestmove ")));
   return lines;
 }
-test("native frozen v1.0 module stays raw-only after minor negotiation fallback", async (t) => {
-  const lines = await transcript(t, "legacy", "7k/8/8/8/8/8/q7/4K3 w - - 0 1");
-  assert(lines.some((l) => l.includes("score raw white")));
-  assert(!lines.some((l) => l.includes("score cp")));
+test("native frozen v1.0 module is rejected by the v2 host", async () => {
+  await assert.rejects(promisify(execFile)(nativeEngine,[sharedLibrary("m7_legacy_evaluator", process.env.CHESS_LAB_BUILD)],{timeout:5000}));
 });
-test("native calibrated cp has correct White/Black polarity and raw provenance", async (t) => {
+test("native centipawns have correct White/Black polarity and ABI provenance", async (t) => {
   for (const [fen, cp] of [
     ["7k/8/8/8/8/8/q7/4K3 w - - 0 1", "-900"],
     ["7k/8/8/8/8/8/Q7/4K3 b - - 0 1", "-900"],
   ]) {
     const lines = await transcript(t, "calibrated", fen);
     assert(lines.some((l) => l.includes(" score cp " + cp)));
-    assert(lines.some((l) => l.includes("score raw white")));
-    assert(lines.some((l) => /evaluator calibration [a-f0-9]{64}/.test(l)));
+    assert(!lines.some((l) => l.includes("score raw white")));
+    assert(lines.includes("info string chesslab evaluator score_units centipawns abi 2"));
   }
 });
-test("malformed optional calibration downgrades without evaluator failure; mate bypasses cp", async (t) => {
-  const malformed = await transcript(
-    t,
-    "calibrated",
-    "7k/8/8/8/8/8/q7/4K3 w - - 0 1",
-    '{"schema_version":1,"target":"centipawns","kind":"linear","scale":-1}',
-  );
-  assert(malformed.some((l) => l.includes("raw_only")));
-  assert(!malformed.some((l) => l.includes("score cp")));
-  const mate = await transcript(
-    t,
-    "calibrated",
-    "7k/6Q1/5K2/8/8/8/8/8 b - - 0 1",
-  );
-  assert(mate.includes("info score mate -0"));
-  assert(!mate.some((l) => l.includes("score cp")));
+test("mate bypasses cp; obsolete calibration environment cannot change ABI v2 output", async (t) => {
+  const lines = await transcript(t,"calibrated","7k/8/8/8/8/8/q7/4K3 w - - 0 1",'{"schema_version":1,"target":"centipawns","kind":"linear","scale":-1}');
+  assert(lines.some(l=>l.includes(" score cp -900")));
+  const mate = await transcript(t,"calibrated","7k/6Q1/5K2/8/8/8/8/8 b - - 0 1");
+  assert(mate.includes("info score mate -0"));assert(!mate.some(l=>l.includes("score cp")));
 });
 test("calibration fixtures honor CHESS_LAB_BUILD with UCI in a separate directory", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "m7-calibration-"));
@@ -90,7 +77,7 @@ test("calibration fixtures honor CHESS_LAB_BUILD with UCI in a separate director
   await promisify(execFile)(process.execPath, [
     "--test",
     "--test-isolation=none",
-    "--test-name-pattern=^native frozen v1\\.0 module stays raw-only after minor negotiation fallback$",
+    "--test-name-pattern=^native frozen v1\\.0 module is rejected by the v2 host$",
     import.meta.filename,
   ], {
     env: {

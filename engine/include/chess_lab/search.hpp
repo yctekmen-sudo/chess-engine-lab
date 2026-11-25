@@ -13,27 +13,52 @@
 
 namespace chess_lab {
 // Source-level value, not a wire ABI. All scores are White-perspective.
-class alignas(8) SearchScore {
+inline constexpr ChessEvalCentipawns finite_limit = CHESS_EVAL_CP_MAX;
+inline constexpr std::uint64_t mate_distance_limit = 1'000'000;
+inline constexpr std::int32_t mate_base = 2'000'001;
+class SearchScore {
 public:
-  enum class Kind : std::uint64_t { finite, white_mate, black_mate };
-  static SearchScore finite(double);
-  static SearchScore white_mate(std::uint64_t);
-  static SearchScore black_mate(std::uint64_t);
-  Kind kind() const noexcept { return kind_; }
-  double value() const;                // throws for a mate
-  std::uint64_t distance() const;      // throws for a finite value
-  SearchScore one_ply_farther() const; // checked increment
-  std::strong_ordering operator<=>(const SearchScore &) const noexcept;
-  bool operator==(const SearchScore &) const noexcept;
-
+    enum class Kind : std::uint64_t { finite, white_mate, black_mate };
+    template<class T> requires std::is_floating_point_v<T>
+    static SearchScore finite(T) = delete;
+    static constexpr SearchScore finite(std::int64_t cp) {
+        if (cp < -finite_limit || cp > finite_limit)
+            throw std::out_of_range("finite score outside centipawn range");
+        return SearchScore(static_cast<std::int32_t>(cp));
+    }
+    static constexpr SearchScore white_mate(std::uint64_t d) {
+        if (d > mate_distance_limit) throw std::out_of_range("mate distance");
+        return SearchScore(mate_base - static_cast<std::int32_t>(d));
+    }
+    static constexpr SearchScore black_mate(std::uint64_t d) {
+        if (d > mate_distance_limit) throw std::out_of_range("mate distance");
+        return SearchScore(-mate_base + static_cast<std::int32_t>(d));
+    }
+    constexpr Kind kind() const noexcept {
+        return code_ > finite_limit ? Kind::white_mate :
+               code_ < -finite_limit ? Kind::black_mate : Kind::finite;
+    }
+    constexpr ChessEvalCentipawns value() const {
+        if (kind() != Kind::finite) throw std::logic_error("mate has no finite score");
+        return code_;
+    }
+    constexpr std::uint64_t distance() const {
+        if (kind() == Kind::finite) throw std::logic_error("finite score has no mate distance");
+        return static_cast<std::uint64_t>(mate_base - (code_ < 0 ? -code_ : code_));
+    }
+    constexpr SearchScore one_ply_farther() const {
+        if (kind() == Kind::finite) return *this;
+        if (distance() == mate_distance_limit) throw std::overflow_error("mate distance overflow");
+        return SearchScore(code_ + (code_ < 0 ? 1 : -1));
+    }
+    constexpr auto operator<=>(const SearchScore&) const noexcept = default;
 private:
-  SearchScore(Kind k, double v, std::uint64_t d)
-      : kind_(k), value_(v), distance_(d) {}
-  Kind kind_;
-  double value_;
-  std::uint64_t distance_;
+    explicit constexpr SearchScore(std::int32_t code) noexcept : code_(code) {}
+    std::int32_t code_;
 };
-static_assert(sizeof(SearchScore) == 24 && alignof(SearchScore) == 8);
+static_assert(sizeof(SearchScore)==4 && std::is_trivially_copyable_v<SearchScore>);
+static_assert(SearchScore::black_mate(mate_distance_limit)<SearchScore::finite(-finite_limit));
+static_assert(SearchScore::finite(finite_limit)<SearchScore::white_mate(mate_distance_limit));
 
 // Exact repetition evidence; raw EP is normalized through legal move
 // generation.

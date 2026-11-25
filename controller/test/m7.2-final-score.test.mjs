@@ -47,7 +47,7 @@ test('malformed, conflicting, nonadjacent and mismatched trusted scores fail the
 });
 test('final parser rejects nonfinite, invalid depth/mate distance and unsupported envelopes',()=>{
  const line='info string chesslab final_score v1 search 1 depth 1 status completed bestmove a1a2 score finite 0';
- for(const bad of [line.replace('finite 0','finite 1e309'),line.replace('depth 1','depth 65'),line.replace('v1','v2'),line.replace('finite 0','white_mate 0'),line.replace('finite 0','black_mate 2')])assert.throws(()=>parseFinalSearch(bad,'a1a2'));
+ for(const bad of [line.replace('finite 0','finite 1e309'),line.replace('depth 1','depth 65'),line.replace('v1','v3'),line.replace('finite 0','white_mate 0'),line.replace('finite 0','black_mate 2')])assert.throws(()=>parseFinalSearch(bad,'a1a2'));
  assert.deepEqual(parseFinalSearch(line,'a1a2').score,{kind:'finite',value:0});
  assert.throws(()=>parseFinalSearch(line,'a1a2',64,2),/search/);
 });
@@ -134,4 +134,12 @@ test('generic UCI engines retain ordinary PLAY behavior for unsolicited cancelle
  const {game,e,pending}=await proposal(t,'final-cancelled',record('w'),false,{limit:{kind:'depth',depth:3}});const p=await pending;
  assert.equal(p.decision.kind,'play');assert.equal(p.finalSearch,undefined);assert(!e.lastSearchEvidence.stopRequested);
  game.accept(p);assert.equal(game.record().moves.length,1);
+});
+
+test('ABI v2 final envelope uses bounded integer centipawns and preserves legacy raw provenance',()=>{
+ const line='info string chesslab final_score v2 search 1 depth 1 status completed bestmove a1a2 score finite -325';
+ assert.equal(parseFinalSearch(line,'a1a2').contract,'chesslab-final-score-v2');
+ assert.equal(parseFinalSearch(line,'a1a2').score.value,-325);
+ for(const bad of ['1.5','1e2','1000001','-1000001','NaN'])assert.throws(()=>parseFinalSearch(line.replace('-325',bad),'a1a2'));
+ assert.equal(parseFinalSearch(line.replace('v2','v1').replace('-325','-3.25'),'a1a2').score.value,-3.25);
 });

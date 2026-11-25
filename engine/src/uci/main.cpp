@@ -29,8 +29,8 @@ std::string joined(const std::vector<std::string>&v,std::size_t a,std::size_t b)
 }
 std::string clean(std::string s) { for(auto &c:s) if(c=='\n'||c=='\r')c=' '; return s; }
 std::string score(const SearchScore &s,bool white) {
-  std::ostringstream o; o << std::setprecision(17);
-  if(s.kind()==SearchScore::Kind::finite) o << "info string chesslab score raw white " << s.value() << '\n';
+  std::ostringstream o;
+  if(s.kind()==SearchScore::Kind::finite) o << "info score cp " << (white?s.value():-s.value()) << '\n';
   else {
     bool won=(s.kind()==SearchScore::Kind::white_mate)==white;
     auto moves=(s.distance()+1)/2;
@@ -61,9 +61,7 @@ class Adapter {
   }
   void identity() {
     const auto &i=evaluation.active().identity();
-    const auto &ev=evaluation.active();
-    if(!ev.calibration_json().empty())emit("info string chesslab evaluator calibration "+ev.calibration_digest()+" "+ev.calibration_json()+"\n");
-    else if(ev.calibration_diagnostic()!="raw_only: optional capability absent")emit("info string chesslab evaluator calibration "+clean(ev.calibration_diagnostic())+"\n");
+    emit("info string chesslab evaluator score_units centipawns abi 2\n");
     emit("info string chesslab evaluator artifact_sha256 "+i.artifact_sha256+" fingerprint "+i.fingerprint+"\ninfo string chesslab evaluator config "+clean(i.canonical_configuration)+"\n");
   }
   void position(const std::vector<std::string>&v) {
@@ -146,9 +144,8 @@ class Adapter {
           std::ostringstream o;
           for(std::size_t i=0;i<std::min(multipv,d.multipv.size());++i) {
             const auto &v=d.multipv[i];
-            if(v.score.kind()==SearchScore::Kind::finite)o << score(v.score,white);
             o << "info depth " << d.depth << " time " << std::chrono::duration_cast<std::chrono::milliseconds>(d.statistics.elapsed).count() << " nodes " << d.statistics.visited_nodes << " multipv " << i+1;
-            if(v.score.kind()==SearchScore::Kind::finite){if(auto cp=evaluation.active().centipawns(v.score.value()))o << " score cp " << (white?*cp:-*cp);}
+            if(v.score.kind()==SearchScore::Kind::finite)o << " score cp " << (white?v.score.value():-v.score.value());
             if(v.score.kind()!=SearchScore::Kind::finite) {
               bool won=(v.score.kind()==SearchScore::Kind::white_mate)==white;
               o << " score mate " << (won?"":"-") << (v.score.distance()+1)/2;
@@ -174,7 +171,7 @@ class Adapter {
           const auto &tt=r.statistics.transposition;
           o << "info string chesslab metrics evaluator_calls " << r.statistics.evaluator_calls << " tt_lookups " << tt.lookups << " tt_exact_hits " << tt.exact_hits << '\n';
           if(multipv==1) {
-            o << std::setprecision(17) << "info string chesslab final_score v1 search " << sequence << " depth " << d.depth
+            o << "info string chesslab final_score v2 search " << sequence << " depth " << d.depth
               << " status " << (r.status==IterativeSearchStatus::cancelled?"cancelled":"completed")
               << " bestmove " << play->decision.move << " score ";
             if(play->score.kind()==SearchScore::Kind::finite)o << "finite " << play->score.value();

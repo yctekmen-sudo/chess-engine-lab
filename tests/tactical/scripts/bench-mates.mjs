@@ -52,7 +52,7 @@ function parseSearch(fixture,result,target){
  const errors=lines.filter(s=>s.includes('chesslab rejected')||s.includes('chesslab fatal'));if(errors.length)throw Error('UCI rejected mate fixture: '+errors.join(' | '));
  const best=lines.filter(s=>s.startsWith('bestmove '));if(best.length!==1)throw Error('No unique bestmove emitted');
  const finals=lines.filter(s=>s.startsWith('info string chesslab final_score '));
- const match=finals.length===1?/^info string chesslab final_score v1 search (\d+) depth (\d+) status (completed|cancelled) bestmove (\S+) score (finite|white_mate|black_mate) (\S+)$/.exec(finals[0]):null;
+ const match=finals.length===1?/^info string chesslab final_score v[12] search (\d+) depth (\d+) status (completed|cancelled) bestmove (\S+) score (finite|white_mate|black_mate) (\S+)$/.exec(finals[0]):null;
  const fallbacks=lines.filter(s=>s.includes('chesslab fallback unevaluated'));
  if(!match&&!fallbacks.length)throw Error('Missing final score without fallback');
  const depthRows=lines.map(s=>parseIteration(s,fixture)).filter(Boolean);
@@ -61,7 +61,7 @@ function parseSearch(fixture,result,target){
  if(match){if(Number(match[2])!==depthRows.length||best[0]!=='bestmove '+match[4])throw Error('Structured final score inconsistent with iterations');if(depthRows.at(-1)?.firstMove!==match[4])throw Error('Final PV differs from bestmove');}
  if(!timedOut&&depthRows.length!==target)throw Error('Depth missing without timeout');
  if(!timedOut&&match?.[3]!=='completed')throw Error('Uncancelled search has cancelled status');
- return {timedOut,completedAllDepths:depthRows.length===target,finalStatus:match?.[3]??'unevaluated_fallback',bestmove:best[0].split(' ')[1],scoreKind:match?.[5]??null,scoreValue:match?.[6]??null,depths:depthRows};
+ return {scoreContract:match?finals[0].split(' ')[4]:null,timedOut,completedAllDepths:depthRows.length===target,finalStatus:match?.[3]??'unevaluated_fallback',bestmove:best[0].split(' ')[1],scoreKind:match?.[5]??null,scoreValue:match?.[6]??null,depths:depthRows};
 }
 async function main(){
  const out=fs.createWriteStream(args.out,{flags:'wx'});let engine=new Engine(args.engine),count=0;

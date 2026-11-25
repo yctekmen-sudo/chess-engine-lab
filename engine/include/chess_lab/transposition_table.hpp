@@ -36,7 +36,7 @@ enum class EvaluatorCacheCompatibility {
   deterministic_position,
   // Stronger explicit certification: evaluator ignores the ABI snapshot fields
   // not determined by RepetitionSignature (halfmove/fullmove clocks, raw EP).
-  // Only use this for a verified position-only evaluator, e.g. material-v1.
+  // Only use this for a verified position-only evaluator, e.g. material-v2.
   history_independent_position
 };
 struct TranspositionTableUse {

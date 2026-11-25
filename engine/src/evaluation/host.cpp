@@ -62,7 +62,6 @@ void digest_valid(const std::string &d) {
 } // namespace
 struct EvaluatorModule::State {
   ChessEvalApi api{};
-  ChessEvalGetConfigFn calibration=nullptr;
   Json metadata, parameters;
   std::string artifact, provider;
 #ifndef __EMSCRIPTEN__
@@ -83,12 +82,8 @@ struct EvaluatorModule::State {
   void negotiate(ChessEvalGetApiFn entry) {
     require(entry, "missing evaluator entry point");
     std::array<char, 4096> error{};
-    ChessEvalApiV1_1 extended{};
-    auto status=entry(1,1,&extended,sizeof extended,error.data(),error.size());
-    if(status==CHESS_EVAL_INCOMPATIBLE_ABI){error.fill(0);check(entry(1,0,&api,sizeof api,error.data(),error.size()),error);}
-    else {check(status,error);api=extended.v1;}
-    require(api.abi_major==1 && ((api.struct_size==72 && api.abi_minor==0)||(api.struct_size==80 && api.abi_minor==1)),"inconsistent ABI table");
-    if(api.struct_size==80)calibration=extended.get_calibration_json;
+    check(entry(CHESS_EVAL_ABI_MAJOR,CHESS_EVAL_ABI_MINOR,&api,sizeof api,error.data(),error.size()),error);
+    require(api.abi_major==CHESS_EVAL_ABI_MAJOR && api.abi_minor==0 && api.struct_size==sizeof api,"inconsistent ABI v2 table");
     require(api.get_module_info_json && api.get_parameter_schema_json &&
                 api.create_evaluator && api.get_effective_configuration_json &&
                 api.evaluate && api.destroy_evaluator,
@@ -110,6 +105,7 @@ struct EvaluatorModule::State {
     require(metadata["required_snapshot_major"] == 1 &&
                 metadata["minimum_snapshot_minor"] == 0,
             "incompatible snapshot requirements");
+    require(metadata["score_units"]=="centipawns", "ABI v2 requires centipawns");
     parameters = fetch(api.get_parameter_schema_json);
     schema(parameters);
   }
@@ -120,8 +116,6 @@ struct Evaluator::Impl {
   EvaluationIdentity id;
   mutable std::mutex mutex;
   bool usable = true;
-  std::string calibration,calibration_hash,calibration_error="raw_only: optional capability absent";
-  Json descriptor;
   ~Impl() {
     if (handle)
       module->api.destroy_evaluator(handle);
@@ -154,8 +148,8 @@ EvaluatorModule EvaluatorModule::provider(ChessEvalGetApiFn entry,
 }
 EvaluatorModule EvaluatorModule::bundled(const std::string &name,
                                          const std::string &wasm) {
-  require(name == "material-v1", "unknown bundled evaluator provider");
-  return provider(chess_lab_material_provider, wasm, "bundled:material-v1");
+  require(name == "material-v2", "unknown bundled evaluator provider");
+  return provider(chess_lab_material_provider, wasm, "bundled:material-v2");
 }
 EvaluatorModule EvaluatorModule::native(const std::string &path) {
 #ifdef __EMSCRIPTEN__
@@ -205,25 +199,8 @@ EvaluatorModule::create(const std::string &json) const {
               canonical(effective) == canonical(resolved) &&
               canonical(effective) == canonical(expected),
           "effective configuration disagrees with requested values/defaults");
-  if(state_->calibration)try {
-    auto descriptor=fetch([&](char*o,uint64_t n,uint64_t*r,char*e,uint64_t en){return state_->calibration(p->handle,o,n,r,e,en);},65536);
-    require(descriptor.is_object() && descriptor.at("schema_version")==1 && descriptor.at("target")=="centipawns","unknown calibration schema/target");
-    const auto kind=descriptor.at("kind");
-    if(kind=="linear"){
-      require(descriptor.size()==4 && descriptor.at("scale").is_number(),"invalid linear descriptor");
-      const auto scale=descriptor.at("scale").get<double>();require(std::isfinite(scale)&&scale>0,"scale must be finite positive");
-    }else if(kind=="lookup_table"){
-      require(descriptor.size()==6 && descriptor.at("interpolation")=="linear" && descriptor.at("out_of_range")=="raw_only","invalid table policy");
-      const auto &points=descriptor.at("points");require(points.is_array()&&points.size()>=2&&points.size()<=1024,"invalid point count");
-      double previous_raw=-INFINITY,previous_cp=-INFINITY;bool zero=false;
-      for(const auto &point:points){require(point.is_array()&&point.size()==2&&point[0].is_number()&&point[1].is_number(),"invalid point");
-        const auto x=point[0].get<double>(),y=point[1].get<double>();require(std::isfinite(x)&&std::isfinite(y)&&x>previous_raw&&y>previous_cp,"nonfinite or nonmonotonic table");
-        require((x==0&&y==0)||(x<0&&y<0)||(x>0&&y>0),"sign/zero mismatch");zero|=x==0&&y==0;previous_raw=x;previous_cp=y;
-      }require(zero,"missing zero anchor");
-    }else throw EvaluationError("unknown calibration kind");
-    p->descriptor=descriptor;p->calibration=canonical(descriptor);p->calibration_hash=digest(p->calibration);p->calibration_error.clear();
-  }catch(const std::exception &e){p->calibration_error=std::string("raw_only: ")+e.what();}
   auto &id = p->id;
+  id.abi_major=state_->api.abi_major;
   id.abi_minor=state_->api.abi_minor;
   id.module_id = state_->metadata["module_id"];
   id.module_version = state_->metadata["module_version"];
@@ -259,7 +236,7 @@ EvaluatorModule::create(const std::string &json) const {
                    {"artifact_sha256", id.artifact_sha256},
                    {"provider", id.provider},
                    {"build", id.build},
-                   {"abi_major", 1},
+                   {"abi_major", id.abi_major},
                    {"abi_minor", id.abi_minor},
                    {"snapshot_major", 1},
                    {"snapshot_minor", 0},
@@ -272,42 +249,22 @@ Evaluator::~Evaluator() = default;
 const EvaluationIdentity &Evaluator::identity() const noexcept {
   return impl_->id;
 }
-const std::string &Evaluator::calibration_json() const noexcept{return impl_->calibration;}
-const std::string &Evaluator::calibration_digest() const noexcept{return impl_->calibration_hash;}
-const std::string &Evaluator::calibration_diagnostic() const noexcept{return impl_->calibration_error;}
-std::optional<int> Evaluator::centipawns(double raw) const noexcept {
-  if(impl_->calibration.empty()||!std::isfinite(raw))return {};
-  try {
-    const auto &d=impl_->descriptor;long double cp;
-    if(d.at("kind")=="linear")cp=static_cast<long double>(raw)*d.at("scale").get<double>();
-    else {
-      const auto &p=d.at("points");if(raw<p.front()[0].get<double>()||raw>p.back()[0].get<double>())return {};
-      std::size_t i=1;while(i+1<p.size()&&raw>p[i][0].get<double>())++i;
-      long double x0=p[i-1][0].get<double>(),x1=p[i][0].get<double>(),y0=p[i-1][1].get<double>(),y1=p[i][1].get<double>();
-      // Interpolate from the nearer anchor to avoid cancellation near zero.
-      const long double left=static_cast<long double>(raw)-x0,right=x1-static_cast<long double>(raw);
-      cp=left<=right?y0+left/(x1-x0)*(y1-y0):y1-right/(x1-x0)*(y1-y0);
-    }
-    if(!std::isfinite(cp)||cp<-2147483647.L||cp>2147483647.L)return {};
-    auto rounded=std::round(cp);if(rounded<-2147483647.L||rounded>2147483647.L)return {};return static_cast<int>(rounded);
-  }catch(...){return {};}
-}
 bool Evaluator::usable() const {
   std::lock_guard lock(impl_->mutex);
   return impl_->usable;
 }
-double Evaluator::evaluate(const ChessEvalPosition &p) {
+ChessEvalCentipawns Evaluator::evaluate(const ChessEvalPosition &p) {
   std::lock_guard lock(impl_->mutex);
   if (!impl_->usable)
     throw EvaluationError("evaluator quarantined until replacement");
   try {
     require(validate(p) == 0, "invalid host snapshot");
-    double score = std::numeric_limits<double>::quiet_NaN();
+    ChessEvalCentipawns score = INT32_MIN; // Detect success without writing output.
     std::array<char, 4096> e{};
     auto status = impl_->module->api.evaluate(impl_->handle, &p, &score,
                                               e.data(), e.size());
     check(status, e);
-    require(std::isfinite(score), "nonfinite evaluator score");
+    require(score>=CHESS_EVAL_CP_MIN && score<=CHESS_EVAL_CP_MAX, "evaluator score outside centipawn range");
     return score;
   } catch (const std::exception &e) {
     impl_->usable = false;

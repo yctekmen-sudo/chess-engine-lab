@@ -109,7 +109,7 @@ ChessEvalStatus metadata(char *o, uint64_t n, uint64_t *r, char *e,
     return text_output("{}", o, n, r, e, en);
   if (mode == "snapshot")
     return text_output(
-        R"({"module_id":"test","display_name":"test","description":"test","module_version":"1","parameter_schema_version":1,"required_snapshot_major":1,"minimum_snapshot_minor":1,"score_units":"arbitrary"})",
+        R"({"module_id":"test","display_name":"test","description":"test","module_version":"1","parameter_schema_version":1,"required_snapshot_major":1,"minimum_snapshot_minor":1,"score_units":"centipawns"})",
         o, n, r, e, en);
   return original.get_module_info_json(o, n, r, e, en);
 }
@@ -146,12 +146,12 @@ ChessEvalStatus config(ChessEvalHandle h, char *o, uint64_t n, uint64_t *r,
     return text_output("{}", o, n, r, e, en);
   if (mode == "substitute")
     return text_output(
-        R"({"pawn_value":2,"knight_value":3,"bishop_value":3.25,"rook_value":5,"queen_value":9})",
+        R"({"pawn_cp":200,"knight_cp":300,"bishop_cp":325,"rook_cp":500,"queen_cp":900})",
         o, n, r, e, en);
   return original.get_effective_configuration_json(h, o, n, r, e, en);
 }
 ChessEvalStatus evaluate(ChessEvalHandle h, const ChessEvalPosition *p,
-                         double *s, char *e, uint64_t en) {
+                         ChessEvalCentipawns *s, char *e, uint64_t en) {
   ++calls;
   *s = 0; // Diagnostic violations must fail independently of finite-score checks.
   if (mode == "unknown")
@@ -172,9 +172,8 @@ ChessEvalStatus evaluate(ChessEvalHandle h, const ChessEvalPosition *p,
     return mode == "utf8_diagnostic" ? CHESS_EVAL_INTERNAL_ERROR : CHESS_EVAL_OK;
   }
   if (mode == "nan" || mode == "inf" || mode == "-inf") {
-    *s = mode == "nan"   ? std::numeric_limits<double>::quiet_NaN()
-         : mode == "inf" ? std::numeric_limits<double>::infinity()
-                         : -std::numeric_limits<double>::infinity();
+    *s = mode == "nan" ? INT32_MIN
+         : mode == "inf" ? INT32_MAX : CHESS_EVAL_CP_MIN-1;
     return 0;
   }
   return original.evaluate(h, p, s, e, en);
@@ -184,7 +183,7 @@ ChessEvalStatus fixture(uint64_t a, uint64_t b, void *out, uint64_t n, char *e,
   auto status = chess_lab_material_provider(a, b, out, n, e, en);
   auto &api = *static_cast<ChessEvalApi *>(out);
   if (mode == "abi")
-    api.abi_major = 2;
+    api.abi_major = 1;
   if (mode == "minor")
     api.abi_minor = 1;
   if (mode == "table_size")
@@ -205,18 +204,18 @@ void golden(const EvaluatorModule &module) {
   auto instance = module.create("{}");
   struct Vector {
     const char *fen;
-    double score;
+    ChessEvalCentipawns score;
   };
   const Vector vectors[] = {
       {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 0},
       {"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
        0},
       {"4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 99", 0},
-      {"4k3/8/8/4p3/8/8/8/4K3 w - e6 0 17", -1},
-      {"4k3/8/8/8/8/8/P7/4K3 w - - 4294967295 4294967295", 1},
-      {"4k3/8/8/8/8/8/P7/4K3 b - - 270 70000", 1},
-      {"Q3k3/8/8/8/8/8/8/4K3 b - - 0 1", 9},
-      {"4k3/8/8/8/8/8/8/q3K3 w - - 0 1", -9}};
+      {"4k3/8/8/4p3/8/8/8/4K3 w - e6 0 17", -100},
+      {"4k3/8/8/8/8/8/P7/4K3 w - - 4294967295 4294967295", 100},
+      {"4k3/8/8/8/8/8/P7/4K3 b - - 270 70000", 100},
+      {"Q3k3/8/8/8/8/8/8/4K3 b - - 0 1", 900},
+      {"4k3/8/8/8/8/8/8/q3K3 w - - 0 1", -900}};
   for (auto &v : vectors) {
     auto pos = core->load_fen(v.fen);
     auto src = core->snapshot(*pos);
@@ -268,24 +267,21 @@ void golden(const EvaluatorModule &module) {
                                               promotion);
       auto undo = core->make_move(*pos, *move);
       auto p = evaluation_snapshot(*core->snapshot(*pos));
-      double expected = promotion == 'q'   ? 9
-                        : promotion == 'r' ? 5
-                        : promotion == 'n' ? 3
-                                           : 3.25;
+      ChessEvalCentipawns expected = promotion == 'q' ? 900 : promotion == 'r' ? 500 : promotion == 'n' ? 300 : 325;
       test(instance->evaluate(p) == (white ? expected : -expected),
            "promotion score");
     }
   }
   auto pos = core->load_fen("4k3/8/8/8/8/8/P7/4K3 w - - 0 1");
   auto p = evaluation_snapshot(*core->snapshot(*pos));
-  auto other = module.create("{\"pawn_value\":2}");
-  test(other->evaluate(p) == 2 && instance->evaluate(p) == 1,
+  auto other = module.create("{\"pawn_cp\":200}");
+  test(other->evaluate(p) == 200 && instance->evaluate(p) == 100,
        "independent configuration");
   for (int i = 0; i < 100; ++i) {
-    test(other->evaluate(p) == 2 && instance->evaluate(p) == 1,
+    test(other->evaluate(p) == 200 && instance->evaluate(p) == 100,
          "call-order independence");
   }
-  auto same = module.create("{\"queen_value\":9.0,\"pawn_value\":1e0}");
+  auto same = module.create("{\"queen_cp\":900.0,\"pawn_cp\":1e2}");
   test(same->identity().fingerprint == instance->identity().fingerprint,
        "canonical defaults identity");
   test(other->identity().fingerprint != instance->identity().fingerprint,
@@ -297,15 +293,15 @@ void golden(const EvaluatorModule &module) {
   test(selection.generation() == 1 &&
            selection.active().identity().fingerprint == old,
        "transactional failed replacement");
-  selection.replace(module, "{\"pawn_value\":2}");
-  test(selection.generation() == 2 && selection.active().evaluate(p) == 2,
+  selection.replace(module, "{\"pawn_cp\":200}");
+  test(selection.generation() == 2 && selection.active().evaluate(p) == 200,
        "cache invalidation generation");
   selection.replace(module, "{}");
   test(selection.generation() == 3, "module reselection invalidation");
   for (auto json :
-       {"[]", "null", "{", "{\"pawn_value\":-1}", "{\"pawn_value\":\"2\"}",
-        "{\"pawn_value\":true}", "{\"pawn_value\":1e101}",
-        "{\"pawn_value\":1,\"pawn_value\":2}", "{\"pawn_value\":1e400}"})
+       {"{\"pawn_value\":1}", "{\"pawn_cp\":100.5}", "{\"pawn_cp\":16001}", "[]", "null", "{", "{\"pawn_cp\":-1}", "{\"pawn_cp\":\"2\"}",
+        "{\"pawn_cp\":true}", "{\"pawn_cp\":1e101}",
+        "{\"pawn_cp\":1,\"pawn_cp\":200}", "{\"pawn_cp\":1e400}"})
     rejects([&] { module.create(json); });
   std::cout << "golden, independent instances, immutable configuration, "
                "transaction and identity checks passed\n";
@@ -313,17 +309,17 @@ void golden(const EvaluatorModule &module) {
 void raw_contract() {
   ChessEvalApi api{};
   char e[32];
-  test(chess_lab_material_provider(1, 0, &api, 72, e, sizeof e) == 0 &&
+  test(chess_lab_material_provider(2, 0, &api, 72, e, sizeof e) == 0 &&
            e[0] == 0,
        "entry point");
   original = api;
-  test(chess_lab_material_provider(2, 0, &api, 72, e, sizeof e) == 2,
+  test(chess_lab_material_provider(1, 0, &api, 72, e, sizeof e) == 2,
        "ABI major rejection");
-  test(chess_lab_material_provider(1, 0, nullptr, 72, e, sizeof e) == 1,
+  test(chess_lab_material_provider(2, 0, nullptr, 72, e, sizeof e) == 1,
        "null API");
-  test(chess_lab_material_provider(1, 0, &api, 71, e, sizeof e) == 7,
+  test(chess_lab_material_provider(2, 0, &api, 71, e, sizeof e) == 7,
        "short API");
-  test(chess_lab_material_provider(1, 99, &api, 72, e, sizeof e) == 0 &&
+  test(chess_lab_material_provider(2, 99, &api, 72, e, sizeof e) == 0 &&
            api.abi_minor == 0,
        "minor downgrade negotiation");
   uint64_t n = 0;
@@ -350,7 +346,7 @@ void raw_contract() {
        "tiny error buffer terminated");
   test(api.create_evaluator("{}", 2, &h, nullptr, 0) == 0 && h,
        "opt-out diagnostics");
-  double score = 0;
+  ChessEvalCentipawns score = 0;
   ChessEvalPosition p{};
   test(api.evaluate(h, nullptr, &score, e, sizeof e) == 1, "null snapshot");
   test(api.evaluate(nullptr, &p, &score, e, sizeof e) == 1, "null instance");
@@ -383,8 +379,8 @@ void raw_contract() {
   api.destroy_evaluator(h);
   // Independent module-side validation, bypassing host's early checks.
   for (auto config :
-       {"[]", "{\"unknown\":0}", "{\"pawn_value\":false}",
-        "{\"pawn_value\":-1}", "{\"pawn_value\":1,\"pawn_value\":2}"}) {
+       {"[]", "{\"unknown\":0}", "{\"pawn_cp\":false}",
+        "{\"pawn_cp\":-1}", "{\"pawn_cp\":1,\"pawn_cp\":200}"}) {
     h = reinterpret_cast<void *>(1);
     test(api.create_evaluator(config, std::strlen(config), &h, e, sizeof e) ==
                  4 &&
@@ -521,8 +517,8 @@ void json_tests() {
   bad = base;
   bad["required"] = Json::array({"x", "x"});
   rejects([&] { schema(bad); });
-  auto a = EvaluatorModule::bundled("material-v1", sha).create("{}");
-  auto changed = EvaluatorModule::bundled("material-v1", std::string(64, 'b'))
+  auto a = EvaluatorModule::bundled("material-v2", sha).create("{}");
+  auto changed = EvaluatorModule::bundled("material-v2", std::string(64, 'b'))
                      .create("{}");
   test(a->identity().fingerprint != changed->identity().fingerprint,
        "artifact change identity");
@@ -532,7 +528,7 @@ void json_tests() {
        "SHA-256 published abc vector");
   std::remove("m2_hash_vector.tmp");
   rejects([&] { EvaluatorModule::bundled("missing", sha); });
-  rejects([&] { EvaluatorModule::bundled("material-v1", "bad"); });
+  rejects([&] { EvaluatorModule::bundled("material-v2", "bad"); });
   std::cout
       << "restricted schema, JCS and artifact fingerprint checks passed\n";
 }
@@ -547,7 +543,7 @@ int main(int argc, char **argv) {
     raw_contract();
     json_tests();
     hostile();
-    auto module = EvaluatorModule::bundled("material-v1", sha);
+    auto module = EvaluatorModule::bundled("material-v2", sha);
     golden(module);
     // Owning instance survives destruction of module facade.
     std::unique_ptr<Evaluator> survivor;

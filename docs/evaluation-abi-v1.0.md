@@ -1,9 +1,11 @@
+> Historical ABI v1 specification. The accepted S2.0 development candidate uses ABI v2; see [S2.0 scoring contract](s2-centipawn.md).
+
 # Chess Engine Lab — Evaluation ABI v1.0
 
-**Status:** APPROVED — design Decisions 32–40; authoritative M2 ABI specification  
-**Date:** 2026-10-20  
-**Repository path:** `docs/evaluation-abi-v1.0.md`  
-**Public ABI header:** `engine/include/chess_lab/chess_eval_abi_v1.h`  
+**Status:** APPROVED — design Decisions 32–40; authoritative M2 ABI specification
+**Date:** 2026-10-20
+**Repository path:** `docs/evaluation-abi-v1.0.md`
+**Public ABI header:** `engine/include/chess_lab/chess_eval_abi_v1.h`
 **Authority:** supplements `docs/architecture-v1.0.md`; records design Decisions **32–40**.
 
 > **Purpose.** Define a minimal, stable, independently implementable C-compatible boundary between the chess engine and a static position evaluator. The desktop engine must load an independently compiled native library; mobile/WebAssembly builds must select bundled evaluators via an equivalent function table. Evaluation stays independent of chess rules, history, search, and UI.

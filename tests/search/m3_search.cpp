@@ -21,13 +21,13 @@ template <class F> void rejects(F f) {
 }
 std::string digest(64, 'a');
 ChessEvalApi original;
-std::vector<double> values;
+std::vector<ChessEvalCentipawns> values;
 bool tree_values = false;
-double constant = 0;
+ChessEvalCentipawns constant = 0;
 int calls = 0, fail_at = 0, fail_mode = 0;
 ChessEvalStatus CHESS_EVAL_CALL controlled(ChessEvalHandle,
                                            const ChessEvalPosition *p,
-                                           double *out, char *error,
+                                           ChessEvalCentipawns *out, char *error,
                                            uint64_t cap) {
   if (cap)
     error[0] = 0;
@@ -37,9 +37,9 @@ ChessEvalStatus CHESS_EVAL_CALL controlled(ChessEvalHandle,
       return CHESS_EVAL_INTERNAL_ERROR;
     if (fail_mode == 1)
       return -123;
-    *out = fail_mode == 2   ? std::numeric_limits<double>::quiet_NaN()
-           : fail_mode == 3 ? INFINITY
-                            : -INFINITY;
+    *out = fail_mode == 2   ? INT32_MIN
+           : fail_mode == 3 ? INT32_MAX
+                            : CHESS_EVAL_CP_MAX + 1;
     return 0;
   }
   if (tree_values && p->fullmove_number > values.size())
@@ -287,21 +287,21 @@ void verify_pv(const ChessCore &c, const Position &root,
 }
 void scores() {
   using S = SearchScore;
-  check(S::white_mate(UINT64_MAX) >
-            S::finite(std::numeric_limits<double>::max()),
+  check(S::white_mate(mate_distance_limit) >
+            S::finite(CHESS_EVAL_CP_MAX),
         "mate above finite");
-  check(S::black_mate(UINT64_MAX) <
-            S::finite(-std::numeric_limits<double>::max()),
+  check(S::black_mate(mate_distance_limit) <
+            S::finite(-CHESS_EVAL_CP_MAX),
         "mate below finite");
   check(S::white_mate(0) > S::white_mate(1) &&
             S::black_mate(0) < S::black_mate(1),
         "mate ordering");
-  check(S::finite(-0.0) == S::finite(0.0), "signed zero");
-  rejects([] { S::finite(NAN); });
-  rejects([] { S::finite(INFINITY); });
-  rejects([] { S::finite(-INFINITY); });
-  rejects([] { S::white_mate(UINT64_MAX).one_ply_farther(); });
-  rejects([] { S::black_mate(UINT64_MAX).one_ply_farther(); });
+  check(S::finite(0) == S::finite(0), "zero equality");
+  rejects([] { S::finite(INT32_MIN); });
+  rejects([] { S::finite(INT32_MAX); });
+  rejects([] { S::finite(CHESS_EVAL_CP_MAX+1); });
+  rejects([] { S::white_mate(mate_distance_limit).one_ply_farther(); });
+  rejects([] { S::black_mate(mate_distance_limit).one_ply_farther(); });
   check(S::white_mate(0).one_ply_farther() == S::white_mate(1),
         "mate propagation");
   rejects([] { S::finite(1).distance(); });
@@ -322,7 +322,7 @@ void trees() {
       t.nodes.push_back({side, {}});
       values.push_back(0);
       values[id] =
-          std::array<double, 7>{-1e300, -7, -0.0, 0, 3, 7, 1e300}[next() % 7];
+          std::array<ChessEvalCentipawns, 7>{CHESS_EVAL_CP_MIN, -7, 0, 0, 3, 7, CHESS_EVAL_CP_MAX}[next() % 7];
       auto kind = next() % 17;
       if (kind == 0 && id)
         t.nodes[id].status = PositionStatus::checkmate;
@@ -500,7 +500,7 @@ void real_oracle_cases() {
   for (auto fen :
        {"7k/8/5KQ1/8/8/8/8/8 w - - 0 1", "4k3/8/8/8/8/8/P7/4K3 b - - 0 1",
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"})
-    for (double v : {-1e300, 0.0, 1e300}) {
+    for (ChessEvalCentipawns v : {CHESS_EVAL_CP_MIN, 0, CHESS_EVAL_CP_MAX}) {
       constant = v;
       auto p = c->load_fen(fen);
       auto h = GameHistory::starting_at(*c, *p);
@@ -552,10 +552,10 @@ void real_rules() {
         "depth zero mate precedence and distance");
   // Opponent at horizon can claim a draw but must compare against its static
   // continuation: Black keeps -42, selects zero over +42 (and on exact tie).
-  for (double value : {-42.0, 0.0, 42.0}) {
+  for (ChessEvalCentipawns value : {-42, 0, 42}) {
     constant = value;
     auto r = run("4k3/8/8/8/8/8/8/R3K3 w - - 98 1");
-    check(r.score == SearchScore::finite(std::min(value, 0.0)),
+    check(r.score == SearchScore::finite(std::min(value, 0)),
           "horizon intended claim vs static continuation");
     check((r.pv_end == PVEnd::claim_draw_with_intended_move) == (value >= 0),
           "horizon claim tie preference");
@@ -682,7 +682,7 @@ void real_rules() {
           "invalid depth bounded");
   // Real nontrivial positions and Black perspective; depth 2/3 exhaustive
   // reference comparisons with legal PVs, finite scores outside mate sentinels.
-  for (double v : {-1e300, 0.0, 1e300}) {
+  for (ChessEvalCentipawns v : {CHESS_EVAL_CP_MIN, 0, CHESS_EVAL_CP_MAX}) {
     constant = v;
     run("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
         2);
@@ -695,7 +695,7 @@ void real_rules() {
              {Side::white, {2}}};
   auto root = t.initial_position();
   auto hist = GameHistory::starting_at(t, *root);
-  constant = 1e300;
+  constant = CHESS_EVAL_CP_MAX;
   auto r = both(t, *root, hist);
   check(r.score == SearchScore::finite(0) && r.statistics.evaluator_calls == 0,
         "depth zero stalemate");

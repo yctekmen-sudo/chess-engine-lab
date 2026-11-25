@@ -12,7 +12,7 @@ vi.mock("react-chessboard", () => ({
   ),
 }));
 import { Board, MoveHistory } from "../src/Board";
-import { Gateway, scoreLabel, hasCalibration } from "../src/api";
+import { Gateway, scoreLabel, hasCalibration, hasNativeCentipawns } from "../src/api";
 describe("board presentation and explicit promotion", () => {
   it("requires a promotion choice and sends only the selected move", () => {
     const onMove = vi.fn();
@@ -166,4 +166,13 @@ it("calibration status belongs to the final configured identity, not earlier han
     ]),
   ).toBe(false);
   expect(hasCalibration("unknown")).toBe(false);
+});
+
+it("identifies only current ABI v2 native centipawn metadata", () => {
+  const marker = "info string chesslab evaluator score_units centipawns abi 2";
+  const artifact = "info string chesslab evaluator artifact_sha256 hash fingerprint value";
+  expect(hasNativeCentipawns([marker, artifact])).toBe(true);
+  expect(hasNativeCentipawns([marker, artifact, artifact])).toBe(false);
+  expect(hasNativeCentipawns([artifact])).toBe(false);
+  expect(hasNativeCentipawns(null)).toBe(false);
 });

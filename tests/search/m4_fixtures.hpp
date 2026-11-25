@@ -33,14 +33,14 @@ template <class F> void rejects(F f) {
 }
 std::string digest(64, 'a');
 ChessEvalApi original;
-std::vector<double> values;
+std::vector<ChessEvalCentipawns> values;
 bool tree_values = false;
-double constant = 0;
+ChessEvalCentipawns constant = 0;
 int calls = 0, fail_at = 0, fail_mode = 0;
 std::function<void()> eval_hook;
 ChessEvalStatus CHESS_EVAL_CALL controlled(ChessEvalHandle,
                                            const ChessEvalPosition *p,
-                                           double *out, char *error,
+                                           ChessEvalCentipawns *out, char *error,
                                            uint64_t cap) {
   if (cap)
     error[0] = 0;
@@ -51,9 +51,9 @@ ChessEvalStatus CHESS_EVAL_CALL controlled(ChessEvalHandle,
       return CHESS_EVAL_INTERNAL_ERROR;
     if (fail_mode == 1)
       return -123;
-    *out = fail_mode == 2   ? std::numeric_limits<double>::quiet_NaN()
-           : fail_mode == 3 ? INFINITY
-                            : -INFINITY;
+    *out = fail_mode == 2   ? INT32_MIN
+           : fail_mode == 3 ? INT32_MAX
+                            : CHESS_EVAL_CP_MAX + 1;
     return 0;
   }
   if (tree_values && p->fullmove_number > values.size())
