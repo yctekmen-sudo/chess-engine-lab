@@ -22,8 +22,8 @@ def native_env(on=True,tt_off=False):
     return env
 
 class Engine:
-    def __init__(self,exe,env,stderr):
-        self.err=stderr.open('wb'); self.p=subprocess.Popen([str(exe)],cwd=exe.parent,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=self.err,encoding='utf-8',errors='replace',bufsize=1)
+    def __init__(self,exe,env,stderr,module=None):
+        self.err=stderr.open('wb'); self.p=subprocess.Popen([str(exe)]+([str(module)] if module else []),cwd=exe.parent,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=self.err,encoding='utf-8',errors='replace',bufsize=1)
         self.q=queue.Queue(); self.t=threading.Thread(target=self.read,daemon=True);self.t.start()
         try:
             self.send('uci');self.until('uciok');self.send('setoption name Hash value '+('0' if env.get('CELAB_S111D_TT_OFF')=='1' else '16')); self.send('setoption name NumericTT value true');self.send('setoption name MultiPV value 1');self.ready()

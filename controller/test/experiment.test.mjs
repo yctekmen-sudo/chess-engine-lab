@@ -4,9 +4,9 @@ import {mkdtemp,rm,readFile,writeFile,unlink,mkdir,readdir} from 'node:fs/promis
 import {tmpdir,hostname} from 'node:os';
 import {resolve,join,relative} from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {createExperiment,resumeExperiment,experimentStatus,exportExperiment,schedule,validateConfig,readRecord,writeRecord,writerLock} from '../dist/index.js';
-import {nativeEngine as native} from './native-paths.mjs';
+import {nativeEngine as native,sharedLibrary} from './native-paths.mjs';
 const mock=resolve(import.meta.dirname,'mock.mjs');
 const config=(mode='normal',extra={})=>({engines:[{path:native},{path:process.execPath,args:[mock,mode],handshakeMs:1000,stopGraceMs:50}],openings:[{initialFen:'7k/8/5KQ1/8/8/8/8/8 w - - 149 1',moves:[],complete:false}],seed:13,limit:{kind:'depth',depth:1},time:{kind:'untimed'},maxPlies:4,searchCapMs:2000,...extra});
 async function dir(t){const d=await mkdtemp(join(tmpdir(),'m6-experiment-'));t.after(()=>rm(d,{recursive:true,force:true}));return d;}
@@ -28,6 +28,8 @@ test('real native/mock paired match, durable identities, PGN, idempotent resume'
  const prefix='info string chesslab evaluator config ';
  assert(metadata[2].startsWith(prefix));
  assert.deepEqual(JSON.parse(metadata[2].slice(prefix.length)),{pawn_cp:100,knight_cp:300,bishop_cp:325,rook_cp:500,queen_cp:900});
+ const hash=createHash('sha256').update(await readFile(sharedLibrary('material_evaluator'))).digest('hex');
+ assert(metadata[1].includes('artifact_sha256 '+hash+' '),'durable identity is packaged material');
 });
 test('technical forfeit is separate from chess WDL and invalid-game policy',async t=>{
  for(const failurePolicy of ['technical_forfeit','invalid']) {

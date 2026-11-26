@@ -1,5 +1,9 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+**S2.1 + E1-C1 pre-commit candidate (2026-11-25):** v3 standard and COMP1 Windows/WSL evidence passed; material remains default, C1 selectable. PST attribution/extraction and focused revalidation prepared. See [review](s21-e1c1-precommit-review.md). Historical PV/reference approval, committed Full CI and separate publication authorization remain pending.
+
+**S2.1 + E1-C1 production candidate (2026-11-25):** Based on merged PR #56 `f0145804513740993fd9b4543e7d29716327952a`. Material is packaged native and bundled default; C1 is selectable. Consolidation validation and publication pending. See [S2.1 PVS and E1-C1](s2-pvs-e1.md). S2.2 aspiration investigation is deferred and excluded. Older entries retain historical scope.
+
 **S2.0 accepted development candidate (2026-11-25):** PR #55 is merged at `0a23602e30ec0151200f5b874902b5c49d499e27`. The integer-centipawn migration passed standard and COMP1 optimized Windows/WSL development validation and was explicitly accepted. See [S2.0 scoring contract](s2-centipawn.md) and [paired validation results](s2-centipawn-validation.md). The committed-revision 54-gate Full CI, historical-reference review and separate publication/merge approvals remain pending. Older dated entries describe their historical scope.
 
 ## S1 production consolidation — accepted local candidate, 2026-11-24 (America/New_York)

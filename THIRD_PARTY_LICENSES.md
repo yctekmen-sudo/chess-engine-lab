@@ -67,3 +67,10 @@ transitive versions/licenses are recorded by the lockfiles and their installed
 package notices; preserve these when redistributing development dependencies.
 Browser binaries are external test tools under their distribution licenses.
 No original source license is added by M7.
+
+## E1-C1 piece-square table provenance
+
+- Source: Tomasz Michniewski, [Simplified Evaluation Function](https://chessprogramming.org/Simplified_Evaluation_Function), Chess Programming Wiki (originally posted to progszach).
+- Retained data: seven 64-entry numerical tables, unchanged in value and order, isolated in `engine/src/evaluation/material_pst_tables.hpp`. CELab's material weights, phase interpolation and evaluation code are separate original implementation work.
+- The wiki states [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/); [legal code](https://creativecommons.org/licenses/by-sa/3.0/legalcode). The original author's grant has not been independently established, nor has the copyrightability of these functional numerical parameters been determined. No public-domain claim or new license grant over CELab original code is made.
+- Retained for private development with attribution. Before public distribution of source or binaries containing the tables, resolve original-author reuse rights and applicable attribution/ShareAlike obligations; replace and revalidate the tables if needed. This notice does not itself establish permission.

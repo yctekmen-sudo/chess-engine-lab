@@ -10,3 +10,7 @@
 /gui/dist/
 /gui/test-results/
 /gui/playwright-report/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]

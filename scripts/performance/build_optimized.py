@@ -51,7 +51,8 @@ def build_stage(root,out,pair,tools,env,stage,parallel,profile=None):
     if stage=='pgo':require(not re.search(r'warning:.*(?:profile.*(?:out of date|mismatch|invalid|malformed))',(out/(name+'-build.log')).read_text(errors='replace'),re.I),'stale profile warning')
     exe=bd/('chess_lab_uci.exe' if windows else 'chess_lab_uci');require(exe.is_file(),'engine executable missing')
     binaries=[x for x in bd.rglob('*') if x.is_file() and (x==exe or (x.suffix.lower() in ('.dll','.so','.dylib') and 'CMakeFiles' not in x.parts))]
-    require(any('material' in x.name for x in binaries),'material evaluator missing')
+    suffix='.dll' if windows else '.so'; prefix='' if windows else 'lib'
+    require(all((bd/(prefix+n+suffix)).is_file() for n in ('material_evaluator','material_pst_evaluator')),'packaged evaluator missing')
     write(out/(name+'-binaries.json'),[dict(path=x.relative_to(bd).as_posix(),sha256=digest(x),bytes=x.stat().st_size) for x in binaries])
     return root,exe,env
 

@@ -1,5 +1,6 @@
 #include "json.hpp"
 #include "material.hpp"
+#include "material_pst.hpp"
 #include "snapshot.hpp"
 #include <array>
 #include <chess_lab/evaluation.hpp>
@@ -148,8 +149,11 @@ EvaluatorModule EvaluatorModule::provider(ChessEvalGetApiFn entry,
 }
 EvaluatorModule EvaluatorModule::bundled(const std::string &name,
                                          const std::string &wasm) {
-  require(name == "material-v2", "unknown bundled evaluator provider");
-  return provider(chess_lab_material_provider, wasm, "bundled:material-v2");
+  if (name == "default" || name == "material-v2")
+    return provider(chess_lab_material_provider, wasm, "bundled:material-v2");
+  if (name == "material-pst-v1")
+    return provider(chess_lab_e1_provider, wasm, "bundled:material-pst-v1");
+  throw EvaluationError("unknown bundled evaluator provider");
 }
 EvaluatorModule EvaluatorModule::native(const std::string &path) {
 #ifdef __EMSCRIPTEN__
