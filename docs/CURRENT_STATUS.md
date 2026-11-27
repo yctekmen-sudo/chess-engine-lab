@@ -1,5 +1,7 @@
 # Chess Engine Lab — Current Status and Next Actions
 
+**E2 research checkpoint (2026-11-27):** PR #57 merged at `30dae10bc3c761704876422aeda65a1463592fa6`. E2.3/E2.3b playing-strength experiments validated (448 games); C1 defeats all learned candidates. Material remains the default; C1 is the strength reference. No learned engine changes accepted. See [E2 research checkpoint](e2-research-summary.md). Optional [playing-strength tooling](playing-strength.md) is a tooling-only integration candidate; local validation and separate publication gates apply. Next engine investigation: S3.1 LMR.
+
 **S2.1 + E1-C1 pre-commit candidate (2026-11-25):** v3 standard and COMP1 Windows/WSL evidence passed; material remains default, C1 selectable. PST attribution/extraction and focused revalidation prepared. See [review](s21-e1c1-precommit-review.md). Historical PV/reference approval, committed Full CI and separate publication authorization remain pending.
 
 **S2.1 + E1-C1 production candidate (2026-11-25):** Based on merged PR #56 `f0145804513740993fd9b4543e7d29716327952a`. Material is packaged native and bundled default; C1 is selectable. Consolidation validation and publication pending. See [S2.1 PVS and E1-C1](s2-pvs-e1.md). S2.2 aspiration investigation is deferred and excluded. Older entries retain historical scope.

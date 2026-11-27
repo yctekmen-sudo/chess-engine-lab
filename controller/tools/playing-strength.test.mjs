@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {summarize,validateInput} from './playing-strength.mjs';
+import {resolve} from 'node:path';
+const games=Array.from({length:3},(_,i)=>[0,1].map(white=>({id:`${i}-${white}`,pair:String(i),white,black:1-white}))).flat();
+const chess=(g,result)=>({game:g.id,outcome:{kind:'chess',result}});
+const cap=g=>({game:g.id,outcome:{kind:'invalid',reason:'explicit maxPlies work limit'}});
+test('color reversal, bounds and incomplete pairs',()=>{const r=summarize(games,[chess(games[0],'1-0'),chess(games[1],'0-1'),chess(games[2],'1/2-1/2'),cap(games[3]),{game:games[4].id,outcome:{kind:'invalid',reason:'bad move'}}]);assert.deepEqual([r.wins,r.draws,r.losses,r.unresolved,r.failures,r.pending],[2,1,0,1,1,1]);assert.deepEqual(r.scoreBounds,[2.5/6,5.5/6]);assert.equal(r.completeResolvedPairs,1);assert.equal(r.eloEstimate,null);assert.equal(r.interval,null);});
+test('pair-aware Elo and uncertainty',()=>{const r=summarize(games,[chess(games[0],'1-0'),chess(games[1],'0-1'),chess(games[2],'0-1'),chess(games[3],'1-0'),chess(games[4],'1/2-1/2'),chess(games[5],'1/2-1/2')]);assert.equal(r.resolvedScore,.5);assert.equal(r.eloEstimate,0);assert.equal(r.completeResolvedPairs,3);assert.ok(r.interval);assert.deepEqual(r.interval.score,[0,1]);});
+test('sweep has no finite Elo or false zero-width interval',()=>{const r=summarize(games,games.map(g=>chess(g,g.white===0?'1-0':'0-1')));assert.equal(r.resolvedScore,1);assert.equal(r.eloEstimate,null);assert.equal(r.interval,null);});
+test('invalid records cannot score',()=>{const r=summarize(games,[{game:games[0].id,outcome:{kind:'technical_forfeit',loser:'b'}},{game:games[1].id,outcome:{kind:'adjudication_required'}}]);assert.equal(r.failures,1);assert.equal(r.unresolved,1);assert.deepEqual(r.scoreBounds,[0,1]);});
+test('foreign, duplicate or unpaired records rejected',()=>{assert.throws(()=>summarize(games,[chess({id:'foreign'},'1-0')]));assert.throws(()=>summarize(games,[chess(games[0],'1-0'),chess(games[0],'1-0')]));assert.throws(()=>summarize(games.slice(1),[]));});
+const a=id=>({id,sourceRevision:'fixture',engine:{path:resolve('engine')}});const good=()=>({reference:a('ref'),challengers:[a('candidate')],match:{limit:{kind:'movetime',ms:100}}});
+test('config isolation and validation',()=>{assert.doesNotThrow(()=>validateInput(good()));for(const patch of [{challengers:[a('ref')]},{challengers:[a('../escape')]},{match:{limit:{kind:'clock'}}},{match:{limit:{kind:'depth',depth:3},engineLimits:[]}},{match:{limit:{kind:'depth',depth:3},failurePolicy:'technical_forfeit'}}])assert.throws(()=>validateInput({...good(),...patch}));});
